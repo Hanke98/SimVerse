@@ -260,7 +260,7 @@ namespace dyno
 	}
 
 	template<typename TDataType>
-	void MujocoXMLLoader<TDataType>::parseDefaultElement(tinyxml2::XMLElement* element, int depth = 0, std::shared_ptr<XMLClass> parent = nullptr)
+	void MujocoXMLLoader<TDataType>::parseDefaultElement(tinyxml2::XMLElement* element, int depth , std::shared_ptr<XMLClass> parent)
 	{
 		if (element == nullptr)
 			return;
@@ -413,7 +413,7 @@ namespace dyno
 	}
 
 	template<typename TDataType>
-	void MujocoXMLLoader<TDataType>::parseBodyElement(tinyxml2::XMLElement* element, int depth = 0, std::shared_ptr<XMLBody> parent = nullptr) 
+	void MujocoXMLLoader<TDataType>::parseBodyElement(tinyxml2::XMLElement* element, int depth , std::shared_ptr<XMLBody> parent ) 
 	{
 		if (element == nullptr)
 			return;

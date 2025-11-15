@@ -247,6 +247,7 @@ namespace dyno
 	template<typename TDataType>
 	void TJConstraintSolver<TDataType>::constrain()
 	{
+		std::cout << "in TJConstraintSolver::constrain() " << getName() << std::endl;
 		uint bodyNum = this->inCenter()->size();
 
 		auto topo = this->inDiscreteElements()->constDataPtr();

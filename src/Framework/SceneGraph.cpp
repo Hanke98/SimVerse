@@ -195,6 +195,8 @@ namespace dyno
 	void SceneGraph::takeOneFrame()
 	{
 		std::cout << "****************    Frame " << mFrameNumber << " Started    ****************" << std::endl;
+		char x= 0;
+		std::cin >> x;
 		
 		CTimer timer;
 		timer.start();

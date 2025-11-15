@@ -7,6 +7,7 @@ namespace dyno
 	template<typename TDataType>
 	void ContactsUnion<TDataType>::compute()
 	{
+		std::cout << "in Contacts Union compute() of " << getName() << std::endl;
 		auto inDataA = this->inContactsA()->getDataPtr();
 		auto inDataB = this->inContactsB()->getDataPtr();
 

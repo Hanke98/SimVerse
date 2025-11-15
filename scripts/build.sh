@@ -16,7 +16,10 @@ cmake -B build -S . -G "Ninja Multi-Config" \
 -DPERIDYNO_QT_GUI=OFF \
 -DPERIDYNO_PLUGIN_MUJOCO=OFF \
 -DPERIDYNO_USE_SYSTEM_GLFW=$PERIDYNO_USE_SYSTEM_GLFW \
--DCMAKE_PREFIX_PATH=$PERIDYNO_CMAKE_PREFIX_PATH \
---fresh
+-DCMAKE_PREFIX_PATH=$PERIDYNO_CMAKE_PREFIX_PATH
+# --fresh
 
-cmake --build build --config Release --target all -j16
+# cmake --build build --config Release --target all -j16
+cmake --build build --config Release --target TestInertial -j16
+# cmake --build build --config Debug --target all -j16
+# cmake --build build --config RelWithDebInfo --target all -j16

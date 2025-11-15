@@ -69,6 +69,7 @@ namespace dyno
 		this->animationPipeline()->pushModule(iterSolver);
 
 		this->inTriangleSet()->tagOptional(true);
+
 	}
 
 	template<typename TDataType>

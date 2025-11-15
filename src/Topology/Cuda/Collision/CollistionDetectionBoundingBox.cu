@@ -646,6 +646,7 @@ namespace dyno
 	template<typename TDataType>
 	void CollistionDetectionBoundingBox<TDataType>::compute()
 	{
+  	std::cout << "in CollistionDetectionBoundingBox::compute() " << getName() << std::endl;	
 		int sum = 0;
 
 		auto upperBound = this->varUpperBound()->getData();

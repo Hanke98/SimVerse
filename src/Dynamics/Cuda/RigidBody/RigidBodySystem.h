@@ -50,6 +50,7 @@ namespace dyno
 		typedef typename ::dyno::PointJoint<Real> PointJoint;
 
 		RigidBodySystem();
+		RigidBodySystem(std::string name);
 		~RigidBodySystem() override;
 
 		std::shared_ptr<PdActor> addBox(
@@ -162,6 +163,9 @@ namespace dyno
 		std::string getNodeType() override { return "Rigid Bodies"; }
 
 	protected:
+
+		void init();
+
 		void resetStates() override;
 
 		void postUpdateStates() override;

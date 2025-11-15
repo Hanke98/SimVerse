@@ -24,10 +24,13 @@ std::shared_ptr<SceneGraph> creatBricks() {
 
   scn->setGravity(Vec3f(0, -9.8, 0));
 
-  auto createRrigid = [&](Vec3f _offset, int idx) {
+  auto createRrigid = [&](int idx) {
     std::string name = "mb_" + std::to_string(idx);
     auto rigid = scn->addNode(std::make_shared<RigidBodySystem<DataType3f>>(name));
+    return rigid;
+  };
 
+  auto addRigidArm = [&](std::shared_ptr<RigidBodySystem<DataType3f>> rigid, Vec3f _offset) {
     rigid->setDt(1 / 100.0f);
 
     rigid->varGravityEnabled()->setValue(true);
@@ -72,6 +75,7 @@ std::shared_ptr<SceneGraph> creatBricks() {
     return rigid;
   };
 
+
   auto attachRender = [&](std::shared_ptr<RigidBodySystem<DataType3f>> rigid) {
     // for rendering
     auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
@@ -89,11 +93,21 @@ std::shared_ptr<SceneGraph> creatBricks() {
   Vec3f base(0.0f, 0.0f, 0.0f);
 
   std::vector<std::shared_ptr<RigidBodySystem<DataType3f>>> rigids;
-  for (int i = 0; i < 5; i++) {
-    auto rigid = createRrigid(base + offset * i, i);
+  int cnt = 5;
+  for (int i = 0; i < cnt; i++) {
+    auto rigid = createRrigid(i);
+    addRigidArm(rigid, base + offset * i);
     attachRender(rigid);
     rigids.push_back(rigid);
   }
+
+  auto cnt2 = 5;
+  auto _rigid = createRrigid(cnt);
+  for (int i = cnt; i < cnt + cnt2; ++i)
+  {
+    addRigidArm(_rigid, base + offset * i);
+  }
+  attachRender(_rigid);
 
   return scn;
 }

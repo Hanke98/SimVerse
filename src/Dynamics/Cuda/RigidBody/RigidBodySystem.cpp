@@ -37,7 +37,7 @@ namespace dyno
 		this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
 		this->stateAttribute()->connect(elementQuery->inAttribute());
 		this->animationPipeline()->pushModule(elementQuery);
-  std::string elementquery_name = "elementQuery_" + getName(); 
+    std::string elementquery_name = "elementQuery_" + getName(); 
     elementQuery->setName(elementquery_name);
 		//elementQuery->varSelfCollision()->setValue(false);
 

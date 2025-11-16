@@ -1,5 +1,6 @@
-#include <QtApp.h>
+// #include <QtApp.h>
 
+#include <GlfwApp.h>
 #include <SceneGraph.h>
 
 #include <RigidBody/ArticulatedBody.h>
@@ -157,7 +158,8 @@ std::shared_ptr<SceneGraph> creatCar()
 
 int main()
 {
-	QtApp app;
+	// QtApp app;
+	GlfwApp app;
 	app.setSceneGraph(creatCar());
 	app.initialize(1280, 768);
 

@@ -14,7 +14,9 @@
 #include <Mapping/ContactsToPointSet.h>
 #include <Mapping/DiscreteElementsToTriangleSet.h>
 
+#include "BasicShapes/PlaneModel.h"
 #include "Collision/NeighborElementQuery.h"
+#include "RigidBody/BatchRigidBodySystem.h"
 
 using namespace std;
 using namespace dyno;
@@ -112,9 +114,27 @@ std::shared_ptr<SceneGraph> creatBricks() {
   return scn;
 }
 
+
+std::shared_ptr<SceneGraph> demoBatchRigidSystem() {
+  std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
+  scn->setGravity(Vec3f(0, -9.8, 0));
+
+  int num_copies = 10;
+  auto batch_rigid = scn->addNode(std::make_shared<BatchRigidBodySystem<DataType3f>>());
+
+  batch_rigid->setDt(1 / 100.0f);
+  batch_rigid->varGravityEnabled()->setValue(true);
+  batch_rigid->varFrictionEnabled()->setValue(false);
+  batch_rigid->addRigidBodies("", num_copies);
+
+
+  return scn;
+}
+
 int main() {
   UbiApp app;
-  app.setSceneGraph(creatBricks());
+  app.setSceneGraph(demoBatchRigidSystem());
+  // app.setSceneGraph(creatBricks());
   app.initialize(1280, 768);
   app.mainLoop();
 

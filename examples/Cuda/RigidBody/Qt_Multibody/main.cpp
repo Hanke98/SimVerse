@@ -100,10 +100,10 @@ std::shared_ptr<RigidBodySystem<DataType3f>> createBoxes(std::shared_ptr<SceneGr
 	mapper->outTriangleSet()->connect(sRender->inTriangleSet());
 	rigid->graphicsPipeline()->pushModule(sRender);
 
-	auto wireRender = std::make_shared<GLWireframeVisualModule>();
-	wireRender->setColor(Color(0, 0, 0));
-	mapper->outTriangleSet()->connect(wireRender->inEdgeSet());
-	rigid->graphicsPipeline()->pushModule(wireRender);
+	// auto wireRender = std::make_shared<GLWireframeVisualModule>();
+	// wireRender->setColor(Color(0, 0, 0));
+	// mapper->outTriangleSet()->connect(wireRender->inEdgeSet());
+	// rigid->graphicsPipeline()->pushModule(wireRender);
 
 	return rigid;
 }
@@ -129,7 +129,8 @@ std::shared_ptr<SceneGraph> createSceneGraph()
 
 int main()
 {
-	UbiApp app(GUIType::GUI_QT);
+	// UbiApp app(GUIType::GUI_QT);
+	UbiApp app(GUIType::GUI_GLFW);
 	app.setSceneGraph(createSceneGraph());
 	app.initialize(1280, 768);
 	app.mainLoop();

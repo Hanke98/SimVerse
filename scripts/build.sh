@@ -20,6 +20,4 @@ cmake -B build -S . -G "Ninja Multi-Config" \
 # --fresh
 
 # cmake --build build --config Release --target all -j16
-cmake --build build --config Release --target TestInertial -j16
-# cmake --build build --config Debug --target all -j16
-# cmake --build build --config RelWithDebInfo --target all -j16
+cmake --build build --config Debug --target TestInertial -j16

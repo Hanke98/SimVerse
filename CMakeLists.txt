@@ -1,5 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.10)                                                            #指定CMake的最低版本为3.10。若版本过低，请自行升级CMake
 
+message(STATUS "CMAKE_PREFIX_PATH: " ${CMAKE_PREFIX_PATH})
 include(cmake/modules.cmake)
 
 set(PERIDYNO_GPU_BACKEND "CUDA" CACHE STRING "GPU Backend")

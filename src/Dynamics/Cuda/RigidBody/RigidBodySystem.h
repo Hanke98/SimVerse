@@ -162,6 +162,11 @@ namespace dyno
 
 		std::string getNodeType() override { return "Rigid Bodies"; }
 
+		std::vector<HingeJoint>& getHostHingeJoints() { return mHostJointsHinge; }
+		std::vector<FixedJoint>& getHostFixedJoints() { return mHostJointsFixed; }
+		std::vector<PointJoint>& getHostPointJoints() { return mHostJointsPoint; }
+		std::vector<SliderJoint>& getHostSliderJoints() { return mHostJointsSlider; }
+
 	protected:
 
 		void init();

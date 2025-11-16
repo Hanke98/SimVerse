@@ -109,6 +109,9 @@ namespace dyno
 		DArray<Coord> mImpulseC;
 		DArray<Coord> mImpulseExt;
 
+		DArray<Coord> externalForce;
+		DArray<Coord> externalTorque;
+
 		DArray<Real> mEta;
 		DArray<Real> mLambda;
 

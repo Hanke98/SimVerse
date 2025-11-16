@@ -227,6 +227,12 @@ namespace dyno
 
 		DEF_ARRAY_STATE(Matrix, InitialInertia, DeviceType::GPU, "Initial inertia matrix");
 
+		DEF_ARRAY_STATE(Coord, ExternalForce, DeviceType::GPU, "External force applied to rigid bodies");
+		
+		DEF_ARRAY_STATE(Coord, ExternalTorque, DeviceType::GPU, "External torque applied to rigid bodies");
+
+		DEF_VAR(Real, AngularDamping, 0.0, "");
+
 	private:
 		void setupShape2RigidBodyMapping();
 

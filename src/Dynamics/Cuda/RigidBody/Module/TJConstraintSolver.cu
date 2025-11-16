@@ -285,6 +285,16 @@ namespace dyno
 					);
 				}
 
+				// setUpExternalForce(
+				// 	mImpulseExt,
+				// 	this->inExternalForce()->getData(),
+				// 	this->inExternalTorque()->getData(),
+				// 	this->inMass()->getData(),
+				// 	this->inInertia()->getData(),
+				// 	this->inAngularVelocity()->getData(),
+				// 	this->inRotationMatrix()->getData(),
+				// 	dh
+				// );
 
 				updateVelocity(
 					this->inAttribute()->getData(),
@@ -354,6 +364,16 @@ namespace dyno
 				);
 			}
 
+			// setUpExternalForce(
+			// 	mImpulseExt,
+			// 	this->inExternalForce()->getData(),
+			// 	this->inExternalTorque()->getData(),
+			// 	this->inMass()->getData(),
+			// 	this->inInertia()->getData(),
+			// 	this->inAngularVelocity()->getData(),
+			// 	this->inRotationMatrix()->getData(),
+			// 	dt
+			// );
 
 			updateVelocity(
 				this->inAttribute()->getData(),

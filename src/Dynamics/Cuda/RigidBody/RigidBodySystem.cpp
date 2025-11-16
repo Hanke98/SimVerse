@@ -57,6 +57,7 @@ namespace dyno {
     this->varSlop()->connect(iterSolver->varSlop());
     this->stateMass()->connect(iterSolver->inMass());
 
+
     this->stateFrictionCoefficients()->connect(iterSolver->inFrictionCoefficients());
     this->stateAttribute()->connect(iterSolver->inAttribute());
     this->stateCenter()->connect(iterSolver->inCenter());

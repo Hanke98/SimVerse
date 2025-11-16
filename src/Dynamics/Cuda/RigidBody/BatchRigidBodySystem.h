@@ -14,8 +14,8 @@ namespace dyno {
 
   template<typename TDataType>
   // class BatchRigidBodySystem : virtual public MultibodySystem<TDataType> {
-  // class BatchRigidBodySystem : virtual public RigidBodySystem<TDataType> {
-  class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
+  class BatchRigidBodySystem : virtual public RigidBodySystem<TDataType> {
+    // class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
 public:
     struct BatchRigidBodySystemControlParam
     {

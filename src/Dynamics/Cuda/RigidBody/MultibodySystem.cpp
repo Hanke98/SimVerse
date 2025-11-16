@@ -45,8 +45,6 @@ namespace dyno
 		this->animationPipeline()->pushModule(merge);
 
 		auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
-		std::string iterName = "Multibody_TJSoftSolver";
-		iterSolver->setName(iterName);
 	
 		this->stateTimeStep()->connect(iterSolver->inTimeStep());
 		this->varFrictionEnabled()->connect(iterSolver->varFrictionEnabled());

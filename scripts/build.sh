@@ -1,4 +1,16 @@
 #!/bin/bash
+
+# Default optimization option
+run_arg="rel"
+
+# Check if an argument is provided
+if [ "$#" -eq 1 ]; then
+  run_arg=$1
+elif [ "$#" -gt 1 ]; then
+  echo "Usage: $0 [option]"
+  exit 1
+fi
+
 if [ -z "$PERIDYNO_C_COMPILER" ]; then
   PERIDYNO_C_COMPILER=gcc
 fi
@@ -19,5 +31,19 @@ cmake -B build -S . -G "Ninja Multi-Config" \
 -DCMAKE_PREFIX_PATH=$PERIDYNO_CMAKE_PREFIX_PATH
 # --fresh
 
-# cmake --build build --config Release --target all -j16
-cmake --build build --config Debug --target TestInertial -j16
+target=TestInertial
+case $run_arg in
+rel)
+  cmake --build build --config Release -j32 --target $target
+  ;;
+reldeb)
+  cmake --build build --config RelWithDebInfo -j32 --target $target
+  ;;
+debug)
+  cmake --build build --config Debug -j32 --target $target
+  ;;
+*)
+  echo "Unknown option: $1"
+  exit 1
+  ;;
+esac

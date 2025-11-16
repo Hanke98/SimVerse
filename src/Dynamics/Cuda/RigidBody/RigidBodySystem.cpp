@@ -49,8 +49,6 @@ namespace dyno {
     this->animationPipeline()->pushModule(merge);
 
     auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
-    std::string solver_name = "TJSolver_rigid";
-    iterSolver->setName(solver_name);
     this->stateTimeStep()->connect(iterSolver->inTimeStep());
     this->varFrictionEnabled()->connect(iterSolver->varFrictionEnabled());
     this->varGravityEnabled()->connect(iterSolver->varGravityEnabled());

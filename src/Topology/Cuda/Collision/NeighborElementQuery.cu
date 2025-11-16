@@ -497,7 +497,6 @@ namespace dyno
 	template<typename TDataType>
 	void NeighborElementQuery<TDataType>::compute()
 	{
-	  std::cout << "in NeighborElementQuery::compute() " << this->getName() << std::endl;
 		auto inTopo = this->inDiscreteElements()->getDataPtr();
 
 		if (this->outContacts()->isEmpty())

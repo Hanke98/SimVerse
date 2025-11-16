@@ -6,8 +6,8 @@
 namespace dyno {
   template<typename TDataType>
   BatchRigidBodySystem<TDataType>::BatchRigidBodySystem()
-    // : RigidBodySystem<TDataType>()
-    : ArticulatedBody<TDataType>()
+    : RigidBodySystem<TDataType>()
+  // : ArticulatedBody<TDataType>()
   {
   }
 
@@ -38,8 +38,6 @@ namespace dyno {
         auto boxAt1 = rigid->addBox(box1, boxInfo1);
         mb.body_indices.push_back(boxAt1->idx);
 
-        printf("[add rigid bodies] box1: id = %d\n", boxAt1->idx);
-
         BoxInfo box2;
         box2.halfLength = Vec3f(4, 1, 1);
 
@@ -50,7 +48,6 @@ namespace dyno {
         boxInfo2.collisionMask = CT_Disabled;
         auto boxAt2 = rigid->addBox(box2, boxInfo2, 100.0);
         mb.body_indices.push_back(boxAt2->idx);
-        printf("[add rigid bodies] box2: id = %d\n", boxAt2->idx);
 
         BoxInfo box3;
         box3.halfLength = Vec3f(1, 3, 1);
@@ -61,7 +58,6 @@ namespace dyno {
         boxInfo3.collisionMask = CT_Disabled;
         auto boxAt3 = rigid->addBox(box3, boxInfo3, 100.0);
         mb.body_indices.push_back(boxAt3->idx);
-        printf("[add rigid bodies] box3: id = %d\n", boxAt3->idx);
 
         auto& joint1 = rigid->createHingeJoint(boxAt1, boxAt2);
         auto& hingeJoints = rigid->getHostHingeJoints();

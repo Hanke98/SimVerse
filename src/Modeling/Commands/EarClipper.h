@@ -49,7 +49,7 @@ namespace dyno
 	public:
 		EarClipper();
 
-		EarClipper(std::vector<DataType3f::Coord> vts, std::vector<TopologyModule::Triangle>& outTriangles) { polyClip(vts,outTriangles); };
+		// EarClipper(std::vector<DataType3f::Coord> vts, std::vector<TopologyModule::Triangle>& outTriangles) { polyClip(vts,outTriangles); };
 
 		~EarClipper() { };
 

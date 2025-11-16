@@ -4420,6 +4420,65 @@ namespace dyno
 			dt);
 	}
 
+	template<typename Coord>
+	__global__ void SF_setUpExternalForce(
+		DArray<Coord> impulse_ext,
+		DArray<Coord> externalForce,
+		DArray<Coord> externalTorque,
+		DArray<Real> mass,
+		DArray<Mat3f> inertia,
+		DArray<Vec3f> AngularVelocity,
+		DArray<Mat3f> rotMat,
+		Real dt
+	) {
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= impulse_ext.size() / 2)
+			return;
+
+	  	Vec3f force_world = rotMat[tId] * externalForce[tId];   // f_world = R * f_local
+	  	Vec3f torque_world = rotMat[tId] * externalTorque[tId]; // tau_world = R * tau_local
+
+		impulse_ext[2 * tId] += force_world / mass[tId] * dt;
+	  	impulse_ext[2 * tId + 1] += inertia[tId].inverse() * torque_world * dt;
+	  	// printf("torque impulse [%d] = %f %f %f \n", tId, impulse_ext[2 * tId + 1].x, impulse_ext[2 * tId + 1].y, impulse_ext[2 * tId + 1].z);
+	  	// printf("torque impulse [%d] = %f %f %f \n", tId, impulse_ext[2 * tId + 1].x, impulse_ext[2 * tId + 1].y, impulse_ext[2 * tId + 1].z);
+
+	  	// impulse_ext[2 * tId] += externalForce[tId] / mass[tId] * dt;
+	  	// impulse_ext[2 * tId + 1] += inertia[tId].inverse() * externalTorque[tId] * dt;
+	  	//  	impulse_ext[2 * tId + 1] += inertia[tId].inverse() * torque_world *
+	  	//  	Vec3f LinearVelocityStar;
+		//
+	 //  	Vec3f AngularVelocityStar;
+		// AngularVelocityStar = AngularVelocity[tId] + inertia[tId].inverse() * (
+		// 						externalTorque[tId] - AngularVelocity[tId].cross(inertia[tId] * AngularVelocity[tId])) * dt;
+		// Vec3f angularVelocityMid = (AngularVelocity[tId] + AngularVelocityStar) / 2;
+	 //  	impulse_ext[2 * tId + 1] += (inertia[tId].inverse() * (externalTorque[tId] - angularVelocityMid.cross(
+		//                                                           inertia[tId] * angularVelocityMid))) * dt;
+		// impulse_ext[2 * tId + 1] += inertia[tId].inverse()*(externalTorque[tId] - AngularVelocity[tId].cross(inertia[tId]*AngularVelocity[tId]))* dt;
+	}
+
+	void setUpExternalForce(
+		DArray<Vec3f> impulse_ext,
+		DArray<Vec3f> externalForce,
+		DArray<Vec3f> externalTorque,
+		DArray<float> mass,
+		DArray<Mat3f> inertia,
+		DArray<Vec3f> AngularVelocity,
+		DArray<Mat3f> rotMat,
+		float dt
+	) {
+		cuExecute(externalForce.size(),
+			SF_setUpExternalForce,
+			impulse_ext,
+			externalForce,
+			externalTorque,
+			mass,
+			inertia,
+			AngularVelocity,
+			rotMat,
+			dt);
+	}
+
 	template<typename Coord, typename Real>
 	__global__ void SF_calculateDiagnals(
 		DArray<Real> D,

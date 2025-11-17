@@ -19,7 +19,7 @@ int main() {
     Vec3f offset(1.0f, 0.0f, 0.0f);    // 机械臂基座偏移
     Vec3f targetPos(0.2, 1.0, 0.3); // 目标位置示例
     std::vector<std::vector<float>> moterVelocities;
-    std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> moterVelocities1{0.0f, 10.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     moterVelocities.push_back(moterVelocities1);
     int rigidID1 = simulator.addRigidSystem(offset, targetPos, 50.0f);
     std::cout << "创建机械臂系统，ID: " << rigidID1 << std::endl;

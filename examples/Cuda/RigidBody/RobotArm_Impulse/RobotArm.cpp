@@ -45,7 +45,7 @@ namespace dyno
         this->clearRigidBodySystem();
 		this->clearRobot();
 
-		std::string filename = "/home/wjv/SimVerse_01/SimVerse/asset/franka_description/robots/franka_panda.urdf";
+		std::string filename = "asset/franka_description/robots/franka_panda.urdf";
 		if (this->varFilePath()->getValue() != filename)
 		{
 			this->varFilePath()->setValue(FilePath(filename));

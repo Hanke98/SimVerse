@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include "tinyxml2.h"
+#include <tinyxml/tinyxml2.h>
 #include "Vector.h"
 #include "Matrix.h"
 

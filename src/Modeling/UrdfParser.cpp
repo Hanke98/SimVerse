@@ -1,4 +1,4 @@
-#include "UrdfParser.txt"
+#include "UrdfParser.h"
 #include <iostream>
 #include <sstream>
 

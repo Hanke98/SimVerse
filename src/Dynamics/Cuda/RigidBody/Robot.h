@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 #include <map>
-#include "UrdfParser.txt"
+#include "UrdfParser.h"
 #include "OBase.h"
 #include "Module.h"
 #include "ArticulatedBody.h"

@@ -49,3 +49,5 @@ imgui.ini
 compile_commands.json
 log*
 .env
+
+asset

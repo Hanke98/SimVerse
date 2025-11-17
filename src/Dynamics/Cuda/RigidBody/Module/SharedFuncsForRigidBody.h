@@ -320,6 +320,17 @@ namespace dyno
 		float dt
 	);
 
+	void setUpExternalForce(
+		DArray<Vec3f> externalImpulse,  
+		DArray<Vec3f> externalForce, 
+		DArray<Vec3f> externalTorque,
+		DArray<float> mass,
+		DArray<Mat3f> inertia,
+		DArray<Vec3f> AngularVelocity,
+		DArray<Mat3f> rotMat,
+		float dt                            
+	);
+
 
 	Real checkOutError(
 		DArray<Vec3f> J,

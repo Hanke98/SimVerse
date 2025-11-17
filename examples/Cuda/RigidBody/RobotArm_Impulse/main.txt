@@ -1,0 +1,67 @@
+#include "DataTypes.h"
+#include "RobotArm.h"
+#include <GLFW/glfw3.h>
+#include <iostream>
+
+using namespace dyno;
+
+int main() {
+    // 创建机械臂仿真器实例
+    RobotArmSimulator<DataType3f> simulator;
+    
+    // 1. 创建场景
+    simulator.createScene();
+    std::cout << "场景创建完成" << std::endl;
+    
+    // 2. 添加机械臂系统
+    Vec3f offset(1.0f, 0.0f, 0.0f);    // 机械臂基座偏移
+    Vec3f targetPos(0.2, 1.0, 0.3); // 目标位置示例
+    std::vector<std::vector<float>> moterVelocities;
+    // std::vector<float> moterVelocities1{-24.1509f, 14.0f, -87.0000f, 49.0441f, 6.0000f, -12.0000f, 1.9525f};
+    std::vector<float> moterVelocities1{0.0f, -87.0f, 0.0f, 0.0f, 87.0000f, 0.0f, 0.0f};
+    moterVelocities.push_back(moterVelocities1);
+    // std::vector<float> moterVelocities1{0.0f, 60.0f, 0.0f, 0.0f, 200.0f, 0.0f, 0.0f};
+    // moterVelocities.push_back(moterVelocities1);
+    int rigidID1 = simulator.addRigidSystem(offset, targetPos, 1.0f);
+    std::cout << "创建机械臂系统，ID: " << rigidID1 << std::endl;
+    std::vector<float> moterVelocities2(7, 0.0f);
+    moterVelocities.push_back(moterVelocities2);
+    int rigidID2 = simulator.addRigidSystem(offset, targetPos, 1.0f);
+    // std::vector<std::vector<float>> moterVelocities = {moterVelocities1, moterVelocities2};
+    std::cout << "创建机械臂系统，ID: " << rigidID2 << std::endl;
+
+    // 3. 初始化仿真环境（窗口大小1280x768）
+    simulator.setupSceneGraph();
+    std::cout << "初始化窗口" << std::endl;
+    simulator.initialize(1280, 768, 2.5);
+    std::cout << "仿真环境初始化完成" << std::endl;
+    
+    // 4. 主仿真循环
+    std::cout << "开始仿真循环（按ESC退出）" << std::endl;
+    int i = 0;
+    while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
+
+        simulator.stepSimulation(moterVelocities, true);
+        // 处理窗口事件
+        glfwPollEvents();
+        
+        // std::this_thread::sleep_for(std::chrono::milliseconds(50000));
+        Vec3f fingerPos = simulator.fingerPosition(0);
+        std::cout << "Finger Position of RigidID 0: " << fingerPos.x << ", " << fingerPos.y << ", " << fingerPos.z << std::endl;
+        // std::cout << "Finger Position of RigidID 0: (" << fingerPos.x << ", " << fingerPos.y << ", " << fingerPos.z << ")" << std::endl;
+        // if (i % 50 == 0) {
+        //     simulator.reset(0, targetPos);
+        // }
+        //
+        //
+        // if (i == 300) {
+        //     simulator.reset(1, targetPos);
+        // }
+
+        i++;
+    }
+    
+    // 5. 仿真结束（析构函数会自动调用terminateSimulation）
+    std::cout << "仿真结束" << std::endl;
+    return 0;
+}

@@ -1,6 +1,7 @@
 #include "MultibodySystem.h"
 
 #include "Module/TJSoftConstraintSolver.h"
+#include "Module/TJConstraintSolver.h"
 #include "Module/ContactsUnion.h"
 
 #include "Collision/NeighborElementQuery.h"
@@ -45,6 +46,7 @@ namespace dyno
 		this->animationPipeline()->pushModule(merge);
 
 		auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
+		// auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
 	
 		this->stateTimeStep()->connect(iterSolver->inTimeStep());
 		this->varFrictionEnabled()->connect(iterSolver->varFrictionEnabled());
@@ -62,6 +64,9 @@ namespace dyno
 		this->stateInitialInertia()->connect(iterSolver->inInitialInertia());
 		this->stateAttribute()->connect(iterSolver->inAttribute());
 		this->stateFrictionCoefficients()->connect(iterSolver->inFrictionCoefficients());
+
+		this->stateExternalForce()->connect(iterSolver->inExternalForce());
+		this->stateExternalTorque()->connect(iterSolver->inExternalTorque());
 
 		this->stateTopology()->connect(iterSolver->inDiscreteElements());
 
@@ -120,6 +125,9 @@ namespace dyno
 			this->stateAttribute()->resize(sizeOfRigidBodies);
 			this->stateFrictionCoefficients()->resize(sizeOfRigidBodies);
 
+			this->stateExternalForce()->resize(sizeOfRigidBodies);
+			this->stateExternalTorque()->resize(sizeOfRigidBodies);
+
 			auto& stateMass = this->stateMass()->getData();
 			auto& stateCenter = this->stateCenter()->getData();
 			auto& stateVelocity = this->stateVelocity()->getData();
@@ -131,6 +139,9 @@ namespace dyno
 			auto& stateCollisionMask = this->stateCollisionMask()->getData();
 			auto& stateAttribute = this->stateAttribute()->getData();
 			auto& stateFrictionCoefficients = this->stateFrictionCoefficients()->getData();
+
+			auto& stateExternalForce = this->stateExternalForce()->getData();
+			auto& stateExternalTorque = this->stateExternalTorque()->getData();
 
 			uint offset = 0;
 			for (uint i = 0; i < vehicles.size(); i++)
@@ -151,6 +162,10 @@ namespace dyno
 					stateCollisionMask.assign(vehicle->stateCollisionMask()->constData(), vehicle->stateCollisionMask()->size(), offset, 0);
 					stateAttribute.assign(vehicle->stateAttribute()->constData(), vehicle->stateAttribute()->size(), offset, 0);
 					stateFrictionCoefficients.assign(vehicle->stateFrictionCoefficients()->constData(), vehicle->stateFrictionCoefficients()->size(), offset, 0);
+
+					stateExternalForce.assign(vehicle->stateExternalForce()->constData(), vehicle->stateExternalForce()->size(), offset, 0);
+					stateExternalTorque.assign(vehicle->stateExternalTorque()->constData(), vehicle->stateExternalTorque()->size(), offset, 0);
+
 					offset += num;
 				}
 
@@ -214,6 +229,9 @@ namespace dyno
 				auto& stateAttribute = vehicle->stateAttribute()->getData();
 				auto& stateFrictionCoefficients = vehicle->stateFrictionCoefficients()->getData();
 
+				auto& stateExternalForce = vehicle->stateExternalForce()->getData();
+				auto& stateExternalTorque = vehicle->stateExternalTorque()->getData();
+
 
 				stateMass.assign(this->stateMass()->constData(), sizeOfInput, 0, offset);
 				stateCenter.assign(this->stateCenter()->constData(), sizeOfInput, 0, offset);
@@ -226,6 +244,9 @@ namespace dyno
 				stateCollisionMask.assign(this->stateCollisionMask()->constData(), sizeOfInput, 0, offset);
 				stateAttribute.assign(this->stateAttribute()->constData(), sizeOfInput, 0, offset);
 				stateFrictionCoefficients.assign(this->stateFrictionCoefficients()->constData(), sizeOfInput, 0, offset);
+
+				stateExternalForce.assign(this->stateExternalForce()->constData(), sizeOfInput, 0, offset);
+				stateExternalTorque.assign(this->stateExternalTorque()->constData(), sizeOfInput, 0, offset);
 
 				auto topo = vehicle->stateTopology()->getDataPtr();
 

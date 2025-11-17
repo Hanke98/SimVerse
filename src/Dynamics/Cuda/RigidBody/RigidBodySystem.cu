@@ -296,6 +296,8 @@ namespace dyno
 		DArray<Attribute> atts,
 		DArray<RigidBodyInfo> states,
 		DArray<Real> fricCoeffs,
+		DArray<Coord> externalForce,
+		DArray<Coord> externalTorque,
 		ElementOffset offset)
 	{
 		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
@@ -311,6 +313,9 @@ namespace dyno
 		inertia[tId] = states[tId].inertia;
 		mask[tId] = states[tId].collisionMask;
 		fricCoeffs[tId] = states[tId].friction;
+
+		externalForce[tId] = states[tId].externalForce;
+		externalTorque[tId] = states[tId].externalTorque;
 
 		Attribute att_i;
 		att_i.setObjectId(states[tId].bodyId);
@@ -460,6 +465,12 @@ namespace dyno
 		this->stateCollisionMask()->resize(sizeOfRigidBodies);
 		this->stateAttribute()->resize(sizeOfRigidBodies);
 		this->stateFrictionCoefficients()->resize(sizeOfRigidBodies);
+		printf("here is okay!!!!!!!!!!!!!!!\n");
+		this->stateExternalForce()->resize(sizeOfRigidBodies);
+		this->stateExternalTorque()->resize(sizeOfRigidBodies);
+		printf("size of external force %d \n", this->stateExternalForce()->size());
+		printf("size of center %d \n", this->stateCenter()->size());
+		printf("size of center %d \n", sizeOfRigidBodies);
 
 		cuExecute(sizeOfRigidBodies,
 			RB_SetupInitialStates,
@@ -474,6 +485,8 @@ namespace dyno
 			this->stateAttribute()->getData(),
 			mDeviceRigidBodyStates,
 			this->stateFrictionCoefficients()->getData(),
+			this->stateExternalForce()->getData(),
+			this->stateExternalTorque()->getData(),
 			eleOffset);
 
 		this->stateInitialInertia()->resize(sizeOfRigidBodies);

@@ -96,6 +96,10 @@ namespace dyno
 
 		DEF_ARRAY_IN(Real, FrictionCoefficients, DeviceType::GPU, "FrictionCoefficients of rigid bodies");
 
+		DEF_ARRAY_IN(Coord, ExternalForce, DeviceType::GPU, "External force applied to rigid bodies");
+
+		DEF_ARRAY_IN(Coord, ExternalTorque, DeviceType::GPU, "External torque applied to rigid bodies");
+
 	protected:
 		void constrain() override;
 
@@ -108,6 +112,9 @@ namespace dyno
 
 		DArray<Coord> mImpulseC;
 		DArray<Coord> mImpulseExt;
+
+		DArray<Coord> externalForce;
+		DArray<Coord> externalTorque;
 
 		DArray<Real> mEta;
 		DArray<Real> mLambda;

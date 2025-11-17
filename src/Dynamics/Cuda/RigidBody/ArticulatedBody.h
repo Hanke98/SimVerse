@@ -66,6 +66,8 @@ namespace dyno
 
 		void clearVechicle();
 
+		void clearRobot();
+
 		void transform();
 
 		void varChanged();

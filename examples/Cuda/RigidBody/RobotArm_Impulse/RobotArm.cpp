@@ -139,7 +139,7 @@ namespace dyno
 
         auto &joint2 = this->createHingeJoint(actors[Link_main[1]], actors[Link_main[2]]);
         joint2.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
-        joint2.setAxis(Vec3f(-1.0f, 0.0f, 0.0f));
+        joint2.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
         joint2.setRange(-1.7628, 1.7628);
         // joint2.setRange(-1.7628, -1.7628);
         // joint2.setMoter(0.0);
@@ -164,42 +164,30 @@ namespace dyno
         joint5.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f + 0.384f, 0.0f) + instances[i].translation());
         // joint5.setAxis(Vec3f(0.0f, 1.0f, 0.0f ));
         // joint5.setRange(-2.8973, 2.8973);
-        // joint5.setRange(0.0, 0.0);
-        // joint5.setMoter(0.0);
-
-        // auto &joint5 = this->createFixedJoint(actors[Link_main[4]], actors[Link_main[5]]);
-        // joint5.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f + 0.384f, 0.0f) + instances[i].translation());
 
         auto &joint6 = this->createFixedJoint(actors[Link_main[5]], actors[Link_main[6]]);
         joint6.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
         // joint6.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
         // // joint6.setRange(-0.0175, 3.7525);
-        // // joint6.setRange(-3.7525, 0.0175);
-        // joint6.setRange(-2.9416, -2.9416);
-        // joint6.setMoter(0.0);
 
         auto &joint7 = this->createFixedJoint(actors[Link_main[6]], actors[Link_main[7]]);
         joint7.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f, 0.088f) + instances[i].translation());
-        // joint7.setAxis(Vec3f(0.0f, 1.0f, 0.0f ));
-        // // joint7.setRange(-2.8973, 2.8973);
-        // joint7.setRange(-0.7854, -0.7854);
-        // joint7.setMoter(0.0);
+        // joint7.setAxis(Vec3f(0.0f, -1.0f, 0.0f ));
+        // joint7.setRange(-2.8973, 2.8973);
 
         auto &handjoint = this->createFixedJoint(actors[Link_main[7]], actors[Link_main[8]]);
         handjoint.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f - 0.107f, 0.088f) + instances[i].translation());
 
         // auto &leftfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[9]]);
         // leftfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
-        // leftfingerjoint.setAxis(Vec3f(0.7071f, 0.0f, 0.7071f));
-        // leftfingerjoint.setRange(0.0, 0.0);
+        // leftfingerjoint.setAxis(Vec3f(-0.7071f, 0.0f, 0.7071f));
 
         auto &leftfingerjoint = this->createFixedJoint(actors[Link_main[8]], actors[Link_main[9]]);
         leftfingerjoint.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.088f) + instances[i].translation());
 
         // auto &rightfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[10]]);
         // rightfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
-        // rightfingerjoint.setAxis(Vec3f(-0.7071f, 0.0f, -0.7071f));
-        // rightfingerjoint.setRange(0.0, 0.0);
+        // rightfingerjoint.setAxis(Vec3f(0.7071f, 0.0f, -0.7071f));
 
         auto &rightfingerjoint = this->createFixedJoint(actors[Link_main[8]], actors[Link_main[10]]);
         rightfingerjoint.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.088f) + instances[i].translation());

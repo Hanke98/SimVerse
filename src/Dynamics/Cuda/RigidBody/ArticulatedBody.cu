@@ -16,6 +16,8 @@
 #include "GltfFunc.h"
 #include "helpers/tinyobj_helper.h"
 
+#include "UrdfFunc.h"
+
 namespace dyno
 {
 	template<typename TDataType>
@@ -146,6 +148,18 @@ namespace dyno
 		{
 			loadTextureMeshFromObj(texMesh, name);
 		}
+		else if (ext == ".urdf")
+		{
+			auto gltfpath = filepath.path();
+			gltfpath.replace_extension(".gltf");
+			auto gltfname = gltfpath.string();
+			bool success = urdfToGltf(name, gltfname);
+			if (success) {
+				loadGLTFTextureMesh(texMesh, gltfname);
+			} else {
+				std::cerr << "Failed to convert URDF to GLTF" << std::endl;
+			}
+		}
 	}
 
 	template<typename TDataType>
@@ -222,6 +236,13 @@ namespace dyno
 
 	template<typename TDataType>
 	void ArticulatedBody<TDataType>::clearVechicle()
+	{
+		mBindingPair.clear();
+		mActors.clear();
+	}
+
+	template<typename TDataType>
+	void ArticulatedBody<TDataType>::clearRobot()
 	{
 		mBindingPair.clear();
 		mActors.clear();

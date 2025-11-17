@@ -382,8 +382,7 @@ namespace dyno
     void RobotArmSimulator<TDataType>::applyImpulse(std::vector<std::vector<float>>& moterImpulses) {
 
         for (int i = 0; i < rigidSystems.size(); ++i) {
-            float rigidbodys = rigidSystems[i].system->stateExternalTorque()->size();
-            // std::cout << "number of rigidbodys: " << rigidbodys << std::endl;
+            int rigidbodys = rigidSystems[i].system->stateExternalForce()->size();
             std::vector<Vec3f> systemForces(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
 
             systemForces[1] = Vec3f(
@@ -407,10 +406,6 @@ namespace dyno
                 0.0f);
 
             rigidSystems[i].system->stateExternalTorque()->assign(systemForces);
-
-            // rigidSystems[i].system->stateExternalTorque()->assign(systemForces);
-            // auto externalTorques = rigidSystems[i].system->stateExternalTorque()->getDataPtr();
-            // std::cout << "value of external torques: " << externalTorques->begin()[2] << std::endl;
         }
     }
 
@@ -422,7 +417,7 @@ namespace dyno
             // 处理事件
             glfwPollEvents();
 
-            // applyImpulse(deltaMoterVelocities);
+            applyImpulse(deltaMoterVelocities);
 
             if (activeScene) {
 

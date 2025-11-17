@@ -266,8 +266,8 @@ bool urdfToGltf(const std::string &urdfPath, const std::string &outputPath)
 
             std::string meshPath = filename;
             if (meshPath.find("package://") == 0) meshPath = meshPath.substr(10);
-            // meshPath = getAssetPath() + meshPath;
-            meshPath = "/home/wjv/SimVerse_01/SimVerse/asset/" + meshPath;
+            meshPath = getAssetPath() + meshPath;
+            // meshPath = "/home/wjv/SimVerse_01/SimVerse/asset/" + meshPath;
             if (meshPath.size() > 4 && meshPath.substr(meshPath.size()-4) == ".dae")
                 meshPath = meshPath.substr(0, meshPath.size()-4) + ".obj";
 

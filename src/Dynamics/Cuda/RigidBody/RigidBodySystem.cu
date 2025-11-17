@@ -465,9 +465,12 @@ namespace dyno
 		this->stateCollisionMask()->resize(sizeOfRigidBodies);
 		this->stateAttribute()->resize(sizeOfRigidBodies);
 		this->stateFrictionCoefficients()->resize(sizeOfRigidBodies);
-
+		printf("here is okay!!!!!!!!!!!!!!!\n");
 		this->stateExternalForce()->resize(sizeOfRigidBodies);
 		this->stateExternalTorque()->resize(sizeOfRigidBodies);
+		printf("size of external force %d \n", this->stateExternalForce()->size());
+		printf("size of center %d \n", this->stateCenter()->size());
+		printf("size of center %d \n", sizeOfRigidBodies);
 
 		cuExecute(sizeOfRigidBodies,
 			RB_SetupInitialStates,

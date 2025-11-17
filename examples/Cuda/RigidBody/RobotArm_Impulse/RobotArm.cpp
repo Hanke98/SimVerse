@@ -238,7 +238,7 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::createScene() {
         scn = std::make_shared<SceneGraph>();
-        // scn->setGravity(Vec3f(0.0f, 0.0f, 0.0f));
+        scn->setGravity(Vec3f(0.0f, 0.0f, 0.0f));
         rigidSystems.clear();
         nextRigidID = 0;
     }
@@ -279,6 +279,7 @@ namespace dyno
         // data.robot->varTargetCenter()->setValue(targetPosition);
 
         data.system = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
+        data.system->varGravityEnabled()->setValue(false);
 
         data.robot->connect(data.system->importVehicles());
         auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
@@ -421,7 +422,7 @@ namespace dyno
             // 处理事件
             glfwPollEvents();
 
-            applyImpulse(deltaMoterVelocities);
+            // applyImpulse(deltaMoterVelocities);
 
             if (activeScene) {
 

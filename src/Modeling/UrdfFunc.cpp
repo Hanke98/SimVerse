@@ -271,7 +271,7 @@ bool urdfToGltf(const std::string &urdfPath, const std::string &outputPath)
             if (meshPath.size() > 4 && meshPath.substr(meshPath.size()-4) == ".dae")
                 meshPath = meshPath.substr(0, meshPath.size()-4) + ".obj";
 
-            std::cout << "meshPath: " << meshPath << std::endl;
+            // std::cout << "meshPath: " << meshPath << std::endl;
 
             tinyobj::attrib_t attrib;
             std::vector<tinyobj::shape_t> shapes;
@@ -348,9 +348,9 @@ bool urdfToGltf(const std::string &urdfPath, const std::string &outputPath)
 
             Mat16 fixM;
             makeMatrixFromTRS_rowMajor(fixT, fixQ, fixM);
-            std::cout << "Matrix: " << fixM[0] << " "<< fixM[1]  << " " << fixM[2] << "\n" <<
-                fixM[4] << " "<< fixM[5]  << " " << fixM[6] << "\n" <<
-                    fixM[8] << " "<< fixM[9]  << " " << fixM[10] << "\n" << std::endl;
+            // std::cout << "Matrix: " << fixM[0] << " "<< fixM[1]  << " " << fixM[2] << "\n" <<
+            //     fixM[4] << " "<< fixM[5]  << " " << fixM[6] << "\n" <<
+            //         fixM[8] << " "<< fixM[9]  << " " << fixM[10] << "\n" << std::endl;
 
             // 3) 最终的 meshLocal：先做 URDF 的 origin，再做 Y-up -> Z-up 旋转
                // 列向量约定：p_world = linkWorld * originM * fixM * p_mesh

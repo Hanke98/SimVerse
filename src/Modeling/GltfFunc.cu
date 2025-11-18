@@ -591,7 +591,7 @@ namespace dyno
 
 		if (iter == primitive.attributes.end())
 		{
-			std::cout << attributeName << " : not found !!! \n";
+			// std::cout << attributeName << " : not found !!! \n";
 			return;
 		}
 
@@ -646,7 +646,7 @@ namespace dyno
 
 		if (iter == primitive.attributes.end())
 		{
-			std::cout << attributeName << " : not found !!! \n";
+			// std::cout << attributeName << " : not found !!! \n";
 			return;
 		}
 
@@ -809,7 +809,7 @@ namespace dyno
 
 		if (iter == primitive.attributes.end())
 		{
-			std::cout << attributeName << " : not found !!! \n";
+			// std::cout << attributeName << " : not found !!! \n";
 			return;
 		}
 

@@ -89,7 +89,7 @@ int main() {
         // 1. 测试URDF解析器
         std::cout << "Testing UrdfParser..." << std::endl;
         UrdfParser parser;  // 修正：UrdfParser不是模板类，去掉模板参数
-        std::string urdfPath = getAssetPath() + "robots/franka_panda.urdf"; // 替换为实际URDF路径
+        std::string urdfPath = getAssetPath() + "../asset/franka_description/robots/franka_panda.urdf"; // 替换为实际URDF路径
         
         // 准备解析所需的容器
         std::vector<UrdfLink> links;

@@ -78,7 +78,7 @@ namespace dyno
                 tinyxml2::XMLElement* originElem = visualElem->FirstChildElement("origin");
                 if (originElem)
                 {
-                    link.origin = parseOrigin(originElem);
+                    link.meshTransform = parseOrigin(originElem);
                 }
 
                 // 解析几何信息
@@ -89,6 +89,27 @@ namespace dyno
                     if (meshElem && meshElem->Attribute("filename"))
                     {
                         link.visualMeshPath = processMeshPath(meshElem->Attribute("filename"));
+                    }
+                }
+            }
+            tinyxml2::XMLElement* collisionElem = linkElem->FirstChildElement("collision");
+            if (collisionElem)
+            {
+                // 解析原点变换
+                // tinyxml2::XMLElement* originElem = visualElem->FirstChildElement("origin");
+                // if (originElem)
+                // {
+                //     link.origin = parseOrigin(originElem);
+                // }
+
+                // 解析几何信息
+                tinyxml2::XMLElement* geometryElem = collisionElem->FirstChildElement("geometry");
+                if (geometryElem)
+                {
+                    tinyxml2::XMLElement* meshElem = geometryElem->FirstChildElement("mesh");
+                    if (meshElem && meshElem->Attribute("filename"))
+                    {
+                        link.collisionMeshPath = processMeshPath(meshElem->Attribute("filename"));
                     }
                 }
             }
@@ -170,7 +191,7 @@ namespace dyno
 
     Transform3f UrdfParser::parseOrigin(tinyxml2::XMLElement* originElem)
     {
-        Transform3f transform;
+        // Transform3f transform;
         
         // 解析xyz平移
         Vec3f xyz(0, 0, 0);
@@ -187,11 +208,16 @@ namespace dyno
             std::stringstream ss(originElem->Attribute("rpy"));
             ss >> rpy[0] >> rpy[1] >> rpy[2];
         }
-        
+
+        Quat<Real> quat(rpy[2], rpy[1], rpy[0]);
+        SquareMatrix<Real, 3> rotationMatrixLocal = quat.toMatrix3x3();
+        Vec3f scale(1, 1, 1);
+
+        Transform3f transform(xyz, rotationMatrixLocal, scale);
         // transform.setTranslation(xyz);
-        // transform.setRotation(Quat1f(rpy[0], Vec3f(1, 0, 0)) * 
-        //                      Quat1f(rpy[1], Vec3f(0, 1, 0)) * 
-        //                      Quat1f(rpy[2], Vec3f(0, 0, 1)));
+        // transform.setRotation(Quat1f(rpy[0], Vec3f(1, 0, 0)) *
+        // Quat1f(rpy[1], Vec3f(0, 1, 0)) *
+        // Quat1f(rpy[2], Vec3f(0, 0, 1)));
                              
         return transform;
     }

@@ -88,7 +88,7 @@ int main() {
     try {
         // 1. 测试URDF解析器
         std::cout << "Testing UrdfParser..." << std::endl;
-        UrdfParser parser;  // 修正：UrdfParser不是模板类，去掉模板参数
+        UrdfParser parser;
         std::string urdfPath = getAssetPath() + "../asset/franka_description/robots/franka_panda.urdf"; // 替换为实际URDF路径
         
         // 准备解析所需的容器
@@ -108,7 +108,10 @@ int main() {
         std::cout << "  Joints: " << joints.size() << std::endl;
 
         for (const auto& link : links) {
-            std::cout << "    Link: " << link.name << ", Visual Mesh: " << link.visualMeshPath << std::endl;
+            std::cout << "    Link: " << link.name << ", Visual Mesh: "
+                << link.visualMeshPath << ", Collision Mesh: " << link.collisionMeshPath
+                // << "\n" << "    Local rotation matrix: " << link.meshTransform.rotation()
+                << std::endl;
         }
 
         for (const auto& joint : joints) {

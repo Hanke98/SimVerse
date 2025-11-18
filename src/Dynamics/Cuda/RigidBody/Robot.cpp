@@ -38,20 +38,25 @@ namespace dyno
 		this->clearRigidBodySystem();
 		this->clearRobot();
 
-		std::string filename = getAssetPath() + "franka_description/robots/franka_panda.urdf";
+		std::string filename = getAssetPath() + "/../asset/franka_description/robots/franka_panda.urdf";
 		if (this->varFilePath()->getValue() != filename)
 		{
 			this->varFilePath()->setValue(FilePath(filename));
 		} else {
             std::cout << "Robot: Error when load file path " << std::endl;
         }
+
+        if (this->varFilePath()->getValue() != filename)
+        {
+            this->varFilePath()->setValue(FilePath(filename));
+        }
+        auto instances = this->varVehiclesTransform()->getValue();
+        uint armNum = instances.size();
+
         // std::vector<Transform3f> transforms(2);
         // transforms[0] = Transform3f(Vec3f(0.0f, 0.0f, 0.0f), Mat3f(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f), Vec3f(0.0f, 0.0f, 0.0f));
         // transforms[1] = Transform3f(Vec3f(1.0f, 0.0f, 0.0f), Mat3f(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f), Vec3f(0.0f, 0.0f, 0.0f));
         // this->varVehiclesTransform()->setValue(transforms);
-        auto instances = this->varVehiclesTransform()->getValue();
-		uint armNum = instances.size();
-     
         for (size_t i = 0; i < armNum; i++) {
             RigidBodyInfo rigidbody;
             rigidbody.bodyId = i;
@@ -76,11 +81,11 @@ namespace dyno
             // std::vector <int> finger_main = {55, 57};
             // std::vector <int> hand_main = {53};
             std::vector <std::vector <int>> Link_Id = {Link0_Id, Link1_Id, Link2_Id, Link3_Id, Link4_Id, Link5_Id, Link6_Id, Link7_Id, Hand_Id, Left_Finger_Id, Right_Finger_Id};
-            // for (int it = 0; it < texMesh->shapes().size(); it++) { 
-            // for (auto it : Link0_Id ) { 
-            // for (auto it : finger_main  ) { 
+            // for (int it = 0; it < texMesh->shapes().size(); it++) {
+            // for (auto it : Link0_Id ) {
+            // for (auto it : finger_main  ) {
             int j = 0;
-            // for (auto it : Link_main ) { 
+            // for (auto it : Link_main ) {
             for (auto link_id : Link_Id) {
                 for (auto it : link_id) {
                     auto up = texMesh->shapes()[it]->boundingBox.v1;
@@ -95,7 +100,7 @@ namespace dyno
                             rigidbody.motionType = BodyType::Static;
                         }
                     }
-                    
+
                     auto actor = this->createRigidBody(rigidbody);
                     actors[it] = actor;
 
@@ -103,7 +108,7 @@ namespace dyno
                     box.rot = Quat1f(0, Vec3f(0, 0, 1));
                     box.halfLength = (up - down) / 2;
 
-                    this->bindBox(actor, box);	
+                    this->bindBox(actor, box);
 
                     this->bindShape(actor, Pair<uint, uint>(it, i));
                 }
@@ -121,77 +126,59 @@ namespace dyno
                 linkIndex++;
             }
 
-            auto &joint1 = this->createHingeJoint(actors[Link_main[0]], actors[Link_main[1]]); 
+            auto &joint1 = this->createHingeJoint(actors[Link_main[0]], actors[Link_main[1]]);
             joint1.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
             joint1.setAxis(Vec3f(0.0f, 1.0f, 0.0f));
             joint1.setRange(-2.8973, 2.8973);
-            // joint1.setRange(1.000, 1.000);
-            joint1.setMoter(0.0);
 
             auto &joint2 = this->createHingeJoint(actors[Link_main[1]], actors[Link_main[2]]);
             joint2.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
-            joint2.setAxis(Vec3f(0.0f, 0.0f, 1.0f));
+            joint2.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
             joint2.setRange(-1.7628, 1.7628);
-            // joint2.setRange(-1.000, -1.000);
-            joint2.setMoter(0.0);
 
             auto &joint3 = this->createHingeJoint(actors[Link_main[2]], actors[Link_main[3]]);
             joint3.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f, 0.0f) + instances[i].translation());
             joint3.setAxis(Vec3f(0.0f, 1.0f, 0.0f));
             joint3.setRange(-2.8973, 2.8973);
-            // joint3.setRange(1.000, 1.000);
-            joint3.setMoter(0.0);
 
             auto &joint4 = this->createHingeJoint(actors[Link_main[3]], actors[Link_main[4]]);
-            joint4.setAnchorPoint(Vec3f(0.0825f, 0.333f + 0.316f, 0.0f) + instances[i].translation());  
-            joint4.setAxis(Vec3f(0.0f, 0.0f, 1.0f ));
-            joint4.setRange(-3.0718, -0.0698);
-            // joint4.setRange(-3.0, 0.087);
-            // joint4.setRange(-0.3475, -0.3475);
-            joint4.setMoter(0.0);
+            joint4.setAnchorPoint(Vec3f(0.0825f, 0.333f + 0.316f, 0.0f) + instances[i].translation());
+            joint4.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
+            // joint4.setRange(-3.0718, -0.0698);
+            joint4.setRange(-3.0, 0.087);
 
             auto &joint5 = this->createHingeJoint(actors[Link_main[4]], actors[Link_main[5]]);
             joint5.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f + 0.384f, 0.0f) + instances[i].translation());
             joint5.setAxis(Vec3f(0.0f, 1.0f, 0.0f ));
             joint5.setRange(-2.8973, 2.8973);
-            // joint5.setRange(0.1879, 0.1879);
-            joint5.setMoter(0.0);
 
             auto &joint6 = this->createHingeJoint(actors[Link_main[5]], actors[Link_main[6]]);
             joint6.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
-            joint6.setAxis(Vec3f(0.0f, 0.0f, 1.0f ));
+            joint6.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
             joint6.setRange(-0.0175, 3.7525);
-            // joint6.setRange(0.6876, 0.6876);
-            joint6.setMoter(0.0);
 
             auto &joint7 = this->createHingeJoint(actors[Link_main[6]], actors[Link_main[7]]);
             joint7.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
-            joint7.setAxis(Vec3f(0.0f, 1.0f, 0.0f ));
+            joint7.setAxis(Vec3f(0.0f, -1.0f, 0.0f ));
             joint7.setRange(-2.8973, 2.8973);
-            // joint7.setRange(-0.2547, -0.2547);
-            joint7.setMoter(0.0);
 
             auto &handjoint = this->createFixedJoint(actors[Link_main[7]], actors[Link_main[8]]);
             handjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f, 0.0f) + instances[i].translation());
 
             auto &leftfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[9]]);
             leftfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
-            leftfingerjoint.setAxis(Vec3f(0.7071f, 0.0f, 0.7071f));
+            leftfingerjoint.setAxis(Vec3f(-0.7071f, 0.0f, 0.7071f));
             leftfingerjoint.setRange(0, 0.04);
-            // leftfingerjoint.setRange(0.0, 0.0);
-            // leftfingerjoint.setMoter(0.1);
 
             auto &rightfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[10]]);
             rightfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
-            rightfingerjoint.setAxis(Vec3f(-0.7071f, 0.0f, -0.7071f));
+            rightfingerjoint.setAxis(Vec3f(0.7071f, 0.0f, -0.7071f));
             rightfingerjoint.setRange(0, 0.04);
-            // rightfingerjoint.setRange(0.0, 0.0);
-            // rightfingerjoint.setMoter(0.1);
         }
 
-		//**************************************************//
-		ArticulatedBody<TDataType>::resetStates();
-	}
+        //**************************************************//
+        ArticulatedBody<TDataType>::resetStates();
+    }
     
     template<typename TDataType>
     bool Robot<TDataType>::loadFromUrdf(const std::string& filePath)

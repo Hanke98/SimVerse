@@ -203,7 +203,7 @@ int main() {
 	app.initialize(1280, 768);
 	app.renderWindow()->getCamera()->setUnitScale(1.0f);
 	app.mainLoop();
-    std::cout << "Here!" << std::endl;
+
     // std::cout << "\nAll tests passed!" << std::endl;
     // Framework::instance()->shutdown();
     return 0;

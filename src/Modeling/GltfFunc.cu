@@ -556,7 +556,7 @@ namespace dyno
 
 		if (iter == primitive.attributes.end())
 		{
-			std::cout << attributeName << " : not found !!! \n";
+			// std::cout << attributeName << " : not found !!! \n";
 			return;
 		}
 
@@ -564,7 +564,7 @@ namespace dyno
 		auto max = model.accessors[iter->second].maxValues;
 		if (min.size() != 3)
 		{
-			std::cout << attributeName << " : not Vec3f !!! \n";
+			// std::cout << attributeName << " : not Vec3f !!! \n";
 			return;
 		}
 

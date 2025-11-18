@@ -79,6 +79,21 @@ namespace dyno {
 		Vector<T, 3> data_[3]; //default: zero matrix
 	};
 
+	template <typename T>
+	std::ostream& operator<<(std::ostream& os, const SquareMatrix<T, 3>& mat)
+	{
+		os << "[\n";
+		for (int i = 0; i < 3; i++) {
+			os << "  ";
+			for (int j = 0; j < 3; j++) {
+				os << mat(i, j) << " ";
+			}
+			os << "\n";
+		}
+		os << "]";
+		return os;
+	}
+
 	//make * operator commutative
 	template <typename S, typename T>
 	DYN_FUNC  const SquareMatrix<T, 3> operator* (S scale, const SquareMatrix<T, 3> &mat)

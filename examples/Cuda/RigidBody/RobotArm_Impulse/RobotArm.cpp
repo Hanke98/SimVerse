@@ -211,6 +211,8 @@ namespace dyno
 
 		//**************************************************//
 		ArticulatedBody<TDataType>::resetStates();
+
+	    std::cout << "after resetStates in RobotArmSimulator" << std::endl;
 	}
 
     template<typename TDataType>
@@ -266,19 +268,40 @@ namespace dyno
 
         // data.robot->varTargetCenter()->setValue(targetPosition);
 
-        data.system = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
-        data.system->varGravityEnabled()->setValue(false);
+        // data.system = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
+        // data.system->varGravityEnabled()->setValue(false);
 
-        data.robot->connect(data.system->importVehicles());
+        // data.robot->connect(data.system->importVehicles());
+        // auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
+        // plane->varLengthX()->setValue(50);
+        // plane->varLengthZ()->setValue(50);
+        // plane->varSegmentX()->setValue(10);
+        // plane->varSegmentZ()->setValue(10);
+        //
+        // plane->stateTriangleSet()->connect(data.system->inTriangleSet());
+
+        return data;
+    }
+
+    template<typename TDataType>
+    int RobotArmSimulator<TDataType>::addMultiBoydSystem() {
+
+        mbSystem = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
+        mbSystem->varGravityEnabled()->setValue(false);
+
+        for (int i = 0; i < rigidSystems.size(); ++i) {
+            rigidSystems[i].robot->connect(mbSystem->importVehicles());
+        }
+
         auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
         plane->varLengthX()->setValue(50);
         plane->varLengthZ()->setValue(50);
         plane->varSegmentX()->setValue(10);
         plane->varSegmentZ()->setValue(10);
 
-        plane->stateTriangleSet()->connect(data.system->inTriangleSet());
+        plane->stateTriangleSet()->connect(mbSystem->inTriangleSet());
 
-        return data;
+        return 0;
     }
 
     template<typename TDataType>
@@ -369,32 +392,36 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::applyImpulse(std::vector<std::vector<float>>& moterImpulses) {
 
-        for (int i = 0; i < rigidSystems.size(); ++i) {
-            int rigidbodys = rigidSystems[i].system->stateExternalForce()->size();
-            std::vector<Vec3f> systemForces(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
+        int rigidbodys = mbSystem->stateExternalForce()->size();
+        std::vector<Vec3f> systemForces(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
 
-            systemForces[1] = Vec3f(
+        int n = rigidSystems.size();
+        rigidbodys /= n;
+        int st = 0;
+        for (int i = 0; i < rigidSystems.size(); ++i) {
+            systemForces[1 + st] = Vec3f(
                 -moterImpulses[i][1],
                 0.0f,
                 0.0f);
 
-            systemForces[2] = Vec3f(
+            systemForces[2 + st] = Vec3f(
                 moterImpulses[i][1],
                 0.0f,
                 0.0f);
 
-            systemForces[4] = Vec3f(
+            systemForces[4 + st] = Vec3f(
                 0.0f,
                 -moterImpulses[i][4],
                 0.0f);
 
-            systemForces[5] = Vec3f(
+            systemForces[5 + st] = Vec3f(
                 0.0f,
                 moterImpulses[i][4],
                 0.0f);
 
-            rigidSystems[i].system->stateExternalTorque()->assign(systemForces);
+            st += rigidbodys;
         }
+        mbSystem->stateExternalTorque()->assign(systemForces);
     }
 
     template<typename TDataType>

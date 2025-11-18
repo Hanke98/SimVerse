@@ -13,9 +13,8 @@
 namespace dyno {
 
   template<typename TDataType>
-  // class BatchRigidBodySystem : virtual public MultibodySystem<TDataType> {
+  // class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
   class BatchRigidBodySystem : virtual public RigidBodySystem<TDataType> {
-    // class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
 public:
     struct BatchRigidBodySystemControlParam
     {
@@ -31,7 +30,7 @@ public:
     BatchRigidBodySystem();
     ~BatchRigidBodySystem() override;
 
-    void addRigidBodies(std::string urdf_fn, int num_copies);
+    void addRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
 
     void reset(BatchRigidBodySystemControlParam& param);
 

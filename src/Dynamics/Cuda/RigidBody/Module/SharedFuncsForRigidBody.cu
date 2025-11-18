@@ -1,4 +1,5 @@
 #include "SharedFuncsForRigidBody.h"
+#include "Profiler.h"
 
 namespace dyno
 {
@@ -4231,6 +4232,7 @@ namespace dyno
 		float dt
 	)
 	{
+		PROFILE_FUNCTION();
 		cuExecute(constraints.size(),
 			SF_JacobiIteration,
 			lambda,

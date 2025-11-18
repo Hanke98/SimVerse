@@ -33,6 +33,7 @@ namespace dyno {
         // 场景创建相关接口
         void createScene();
         int addRigidSystem(const Vec3f& offset, Vec3f& targetPosition, float denstiy); // 返回新创建的rigidID
+        int addMultiBoydSystem(); 
         // void createHingeJoint(int rigidID, float anchorX, float anchorY, float anchorZ, float axisX, float axisY, float axisZ);
         // void createSliderJoint(int rigidID, float axisX, float axisY, float axisZ, float minRange, float maxRange);
         void reset(int rigidIDs, Vec3f& targetPosition); // -1表示重置所有
@@ -79,6 +80,7 @@ namespace dyno {
         std::unordered_map<int, RigidSystemData> rigidSystems;
         int nextRigidID = 0;
         
+        std::shared_ptr<MultibodySystem<DataType3f>> mbSystem;
         UbiApp app;
         bool isInitialized = false;
         

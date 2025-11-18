@@ -63,7 +63,7 @@ namespace dyno
 
 		DEF_VAR(uint, SubStepping, 10, "");
 
-		DEF_VAR(uint, IterationNumberForVelocitySolver, 30, "");
+		DEF_VAR(uint, IterationNumberForVelocitySolver, 300, "");
 
 		DEF_VAR(Real, LinearDamping, 0.2, "");
 

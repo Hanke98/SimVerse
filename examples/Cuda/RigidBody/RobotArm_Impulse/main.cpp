@@ -6,6 +6,7 @@
 using namespace dyno;
 
 int main() {
+    getchar();
     Real kp = 100;
     Real kv = 40;
     // 创建机械臂仿真器实例
@@ -19,11 +20,13 @@ int main() {
     Vec3f offset(1.0f, 0.0f, 0.0f);    // 机械臂基座偏移
     Vec3f targetPos(0.2, 1.0, 0.3); // 目标位置示例
     std::vector<std::vector<float>> moterVelocities;
-    std::vector<float> moterVelocities1{0.0f, 10.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    moterVelocities.push_back(moterVelocities1);
-    int rigidID1 = simulator.addRigidSystem(offset, targetPos, 50.0f);
-    std::cout << "创建机械臂系统，ID: " << rigidID1 << std::endl;
-
+    std::vector<float> moterVelocities1{0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const int N = 10;
+    for (int i = 0; i < N; ++i) {
+        moterVelocities.push_back(moterVelocities1);
+        simulator.addRigidSystem(offset, targetPos, 50.0f);
+    }
+    simulator.addMultiBoydSystem();
 
     // 3. 初始化仿真环境（窗口大小1280x768）
     simulator.setupSceneGraph();

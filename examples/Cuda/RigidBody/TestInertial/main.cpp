@@ -21,7 +21,8 @@
 using namespace std;
 using namespace dyno;
 
-std::shared_ptr<SceneGraph> creatBricks() {
+std::shared_ptr<SceneGraph> creatBricks()
+{
   std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
 
   scn->setGravity(Vec3f(0, -9.8, 0));
@@ -40,7 +41,6 @@ std::shared_ptr<SceneGraph> creatBricks() {
 
     BoxInfo box1;
     box1.halfLength = Vec3f(1, 1, 1);
-
     RigidBodyInfo boxInfo1;
     boxInfo1.position = Vec3f(-1.0, 10.0, 0.0) + _offset;
     boxInfo1.friction = 0.0;
@@ -50,9 +50,7 @@ std::shared_ptr<SceneGraph> creatBricks() {
 
     BoxInfo box2;
     box2.halfLength = Vec3f(4, 1, 1);
-
     RigidBodyInfo boxInfo2;
-
     boxInfo2.position = Vec3f(4.0, 10.0, 0.0) + _offset;
     boxInfo2.friction = 0.0;
     boxInfo2.collisionMask = CT_Disabled;
@@ -60,23 +58,21 @@ std::shared_ptr<SceneGraph> creatBricks() {
 
     BoxInfo box3;
     box3.halfLength = Vec3f(1, 3, 1);
-
     RigidBodyInfo boxInfo3;
     boxInfo3.position = Vec3f(7.0, 12.0, 2.0) + _offset;
     boxInfo3.friction = 0.0;
     boxInfo3.collisionMask = CT_Disabled;
     auto boxAt3 = rigid->addBox(box3, boxInfo3, 100.0);
 
-    auto &joint1 = rigid->createHingeJoint(boxAt1, boxAt2);
+    auto& joint1 = rigid->createHingeJoint(boxAt1, boxAt2);
     joint1.setAnchorPoint(Vec3f(0.0, 10, 0.0) + _offset);
     joint1.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
 
-    auto &joint2 = rigid->createHingeJoint(boxAt2, boxAt3);
+    auto& joint2 = rigid->createHingeJoint(boxAt2, boxAt3);
     joint2.setAnchorPoint(Vec3f(7.0, 10.0, 1.0) + _offset);
     joint2.setAxis(Vec3f(0.0f, 0.0f, 1.0f));
     return rigid;
   };
-
 
   auto attachRender = [&](std::shared_ptr<RigidBodySystem<DataType3f>> rigid) {
     // for rendering
@@ -96,7 +92,8 @@ std::shared_ptr<SceneGraph> creatBricks() {
 
   std::vector<std::shared_ptr<RigidBodySystem<DataType3f>>> rigids;
   int cnt = 5;
-  for (int i = 0; i < cnt; i++) {
+  for (int i = 0; i < cnt; i++)
+  {
     auto rigid = createRrigid(i);
     addRigidArm(rigid, base + offset * i);
     attachRender(rigid);
@@ -114,8 +111,8 @@ std::shared_ptr<SceneGraph> creatBricks() {
   return scn;
 }
 
-
-std::shared_ptr<SceneGraph> demoBatchRigidSystem() {
+std::shared_ptr<SceneGraph> demoBatchRigidSystem()
+{
   std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
   scn->setGravity(Vec3f(0, -9.8, 0));
 
@@ -125,13 +122,15 @@ std::shared_ptr<SceneGraph> demoBatchRigidSystem() {
   batch_rigid->setDt(1 / 100.0f);
   batch_rigid->varGravityEnabled()->setValue(true);
   batch_rigid->varFrictionEnabled()->setValue(false);
-  batch_rigid->addRigidBodies("", num_copies);
-
+  Vec3f base{ -20.0f, -0.0f, -20.0f };
+  Vec3f offset{ 0.0f, 0.0f, 20.0f };
+  batch_rigid->addRigidBodies("", base, offset, 30, 25, 30);
 
   return scn;
 }
 
-int main() {
+int main()
+{
   UbiApp app;
   app.setSceneGraph(demoBatchRigidSystem());
   // app.setSceneGraph(creatBricks());

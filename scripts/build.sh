@@ -31,7 +31,8 @@ cmake -B build -S . -G "Ninja Multi-Config" \
 -DCMAKE_PREFIX_PATH=$PERIDYNO_CMAKE_PREFIX_PATH
 # --fresh
 
-target=RobotArm_Impulse
+# target=RobotArm_Impulse
+target=TestInertial
 case $run_arg in
 rel)
   cmake --build build --config Release -j32 --target $target

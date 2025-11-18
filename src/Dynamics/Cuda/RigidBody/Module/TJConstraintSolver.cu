@@ -1,5 +1,6 @@
 #include "TJConstraintSolver.h"
 #include "SharedFuncsForRigidBody.h"
+#include "Profiler.h"
 
 namespace dyno
 {
@@ -247,6 +248,7 @@ namespace dyno
 	template<typename TDataType>
 	void TJConstraintSolver<TDataType>::constrain()
 	{
+		PROFILE_SCOPE("TJConstraintSolver::constrain");
 		uint bodyNum = this->inCenter()->size();
 
 		auto topo = this->inDiscreteElements()->constDataPtr();
@@ -261,6 +263,7 @@ namespace dyno
 
 		if (!this->inContacts()->isEmpty() || topo->totalJointSize() > 0)
 		{
+			this->inContacts()->clear();
 			if (mContactsInLocalFrame.size() != this->inContacts()->size()) {
 				mContactsInLocalFrame.resize(this->inContacts()->size());
 			}
@@ -308,6 +311,9 @@ namespace dyno
 
 				mImpulseC.reset();
 				initializeJacobian(dh);
+
+			{
+				PROFILE_SCOPE("JacobiIterationLoop");
 				for (int j = 0; j < this->varIterationNumberForVelocitySolver()->getValue(); j++)
 				{
 					JacobiIteration(
@@ -328,6 +334,8 @@ namespace dyno
 						dh
 					);
 				}
+			}
+
 
 				updateVelocity(
 					this->inAttribute()->getData(),

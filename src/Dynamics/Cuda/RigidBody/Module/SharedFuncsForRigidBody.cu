@@ -69,7 +69,7 @@ namespace dyno
 
 		if (attribute[tId].isDynamic())
 		{
-			velocity[tId] += impulse[2 * tId];
+			velocity[tId] += impulse[2 * tId]; // impulse is just velocity change
 			angular_velocity[tId] += impulse[2 * tId + 1];
 			//Damping
 			/*velocity[tId] *= 1.0f / (1.0f + dt * linearDamping);
@@ -2760,7 +2760,6 @@ namespace dyno
 			else
 				constraints[baseIndex + 6].isValid = false;
 		}
-
 		else
 		{
 			constraints[baseIndex + 5].isValid = false;
@@ -3219,7 +3218,7 @@ namespace dyno
 	/**
 	* take one Jacobi Iteration
 	* @param lambda			
-	* @param impulse				
+	* @param impulse : used as velocity change			
 	* @param J			
 	* @param B		
 	* @param eta			
@@ -3232,12 +3231,13 @@ namespace dyno
 	* @param mu
 	* @param g
 	* @param dt
-	* This function take one Jacobi Iteration to calculate constrain impulse
+	* This function take one Jacobi Iteration to calculate constrain impulse 
+	* ljf: With 1-order Baumgarte stabilization
 	*/
 	template<typename Real, typename Coord, typename Constraint, typename Matrix3, typename Matrix2>
 	__global__ void SF_JacobiIteration(
 		DArray<Real> lambda,
-		DArray<Coord> impulse,
+		DArray<Coord> impulse, // is just velocity change
 		DArray<Coord> J,
 		DArray<Coord> B,
 		DArray<Real> eta,
@@ -3333,10 +3333,12 @@ namespace dyno
 
 		if (constraints[tId].type == ConstraintType::CN_ANCHOR_EQUAL_1 || constraints[tId].type == ConstraintType::CN_BAN_ROT_1)
 		{
-			Coord tmp(eta[tId], eta[tId + 1], eta[tId + 2]);
+			Coord tmp(eta[tId], eta[tId + 1], eta[tId + 2]); // ljf: \eta = - \beta/dt * error 
 			if (idx2 != INVALID)
 			{
-				for (int i = 0; i < 3; i++)
+				// ljf: loop over x,y,z (CN_ANCHOR_EQUAL_1, CN_ANCHOR_EQUAL_2, CN_ANCHOR_EQUAL_3, CN_BAN_ROT_1, CN_BAN_ROT_2, CN_BAN_ROT_3)
+				// the constraints are stored consecutively
+				for (int i = 0; i < 3; i++) 
 				{
 					tmp[i] -= J[4 * (tId + i)].dot(impulse[idx1 * 2]) + J[4 * (tId + i) + 2].dot(impulse[idx2 * 2]);
 					tmp[i] -= J[4 * (tId + i) + 1].dot(impulse[idx1 * 2 + 1]) + J[4 * (tId + i) + 3].dot(impulse[idx2 * 2 + 1]);
@@ -3351,15 +3353,17 @@ namespace dyno
 				}
 			}
 
+			// ljf: tmp = -JV -\eta
+		  // \lambda = (M^{-1}J^T)^{-1} * tmp
 			Coord delta_lambda = omega * (K_3[tId] * tmp);
 
 			for (int i = 0; i < 3; i++)
 			{
-				atomicAdd(&impulse[idx1 * 2][0], B[4 * (tId + i)][0] * delta_lambda[i]);
+				atomicAdd(&impulse[idx1 * 2][0], B[4 * (tId + i)][0] * delta_lambda[i]); // ljf: accumulate linear velocity change 
 				atomicAdd(&impulse[idx1 * 2][1], B[4 * (tId + i)][1] * delta_lambda[i]);
 				atomicAdd(&impulse[idx1 * 2][2], B[4 * (tId + i)][2] * delta_lambda[i]);
 
-				atomicAdd(&impulse[idx1 * 2 + 1][0], B[4 * (tId + i) + 1][0] * delta_lambda[i]);
+				atomicAdd(&impulse[idx1 * 2 + 1][0], B[4 * (tId + i) + 1][0] * delta_lambda[i]); // ljf: accumulate angular velocity change
 				atomicAdd(&impulse[idx1 * 2 + 1][1], B[4 * (tId + i) + 1][1] * delta_lambda[i]);
 				atomicAdd(&impulse[idx1 * 2 + 1][2], B[4 * (tId + i) + 1][2] * delta_lambda[i]);
 

@@ -465,7 +465,6 @@ namespace dyno
 		this->stateCollisionMask()->resize(sizeOfRigidBodies);
 		this->stateAttribute()->resize(sizeOfRigidBodies);
 		this->stateFrictionCoefficients()->resize(sizeOfRigidBodies);
-
 		this->stateExternalForce()->resize(sizeOfRigidBodies);
 		this->stateExternalTorque()->resize(sizeOfRigidBodies);
 

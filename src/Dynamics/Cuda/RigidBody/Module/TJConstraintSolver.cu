@@ -31,6 +31,7 @@ namespace dyno
 		int hingeJoint_size = topo->hingeJoints().size();
 		int fixedJoint_size = topo->fixedJoints().size();
 		int pointJoint_size = topo->pointJoints().size();
+	  printf("contact_size=%d, bs=%d, sj=%d, hj=%d, fj=%d, pj=%d\n", contact_size, ballAndSocketJoint_size, sliderJoint_size, hingeJoint_size, fixedJoint_size, pointJoint_size);
 
 		if (this->varFrictionEnabled()->getData())
 		{
@@ -70,6 +71,7 @@ namespace dyno
 		{
 			return;
 		}
+		printf("Total constraint size=%d\n", constraint_size);
 
 		mVelocityConstraints.resize(constraint_size);
 
@@ -259,6 +261,7 @@ namespace dyno
 		mImpulseExt.reset();
 
 		Real dt = this->inTimeStep()->getData();
+	  printf("in TJConstraintSolver::constrain(), dt=%f\n", dt);
 
 
 		if (!this->inContacts()->isEmpty() || topo->totalJointSize() > 0)
@@ -276,6 +279,7 @@ namespace dyno
 			);
 
 			Real dh = dt / this->varSubStepping()->getValue();
+			printf("substepping dt=%f, substeps=%d\n", dh, this->varSubStepping()->getValue());
 
 			for (int i = 0; i < this->varSubStepping()->getValue(); i++)
 			{

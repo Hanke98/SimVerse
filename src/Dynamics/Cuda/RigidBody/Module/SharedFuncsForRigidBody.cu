@@ -1108,6 +1108,7 @@ namespace dyno
 			constraints);
 	}
 
+
 	/**
 	* calculate eta vector for PJS Baumgarte stabilization
 	*
@@ -1123,7 +1124,7 @@ namespace dyno
 	* @param dt					time step
 	* This function calculate the diagonal Matrix of JB
 	*/
-	template<typename Coord, typename Constraint, typename Real, typename Quat>
+	template<typename Coord, typename Constraint, typename Real, typename Quat, bool UpdateErrorOnly=false>
 	__global__ void SF_calculateEtaVectorForPJSBaumgarte(
 		DArray<Real> eta,
 		DArray<Coord> J,
@@ -1326,7 +1327,8 @@ namespace dyno
 			error = errorVec[2];
 		}
 
-		eta[tId] -= beta * invDt * error;
+		if constexpr(!UpdateErrorOnly)
+			eta[tId] -= beta * invDt * error;
 		errors[tId] = error;
 	}
 
@@ -1592,6 +1594,40 @@ namespace dyno
 
 		eta[tId] -= ERP[tId] * invDt * error;
 	}
+
+	void calculateErrorVector(
+		DArray<float> eta,
+		DArray<Vec3f> J,
+		DArray<Vec3f> velocity,
+		DArray<Vec3f> angular_velocity,
+		DArray<Vec3f> pos,
+		DArray<Quat1f> rotation_q,
+		DArray<TConstraintPair<float>> constraints,
+		DArray<float> errors,
+		float slop,
+		float beta,
+		uint substepping,
+		float dt
+		){
+	int blockDim = 64;
+	int gridDim = (constraints.size() + blockDim - 1) / blockDim;
+			SF_calculateEtaVectorForPJSBaumgarte<Vec3f, TConstraintPair<float>, float, Quat1f, true>
+			<<<gridDim, blockDim>>>(
+			eta,
+			J,
+			velocity,
+			angular_velocity,
+			pos,
+			rotation_q,
+			constraints,
+			errors,
+			slop,
+			beta,
+			substepping,
+			dt);
+	cudaDeviceSynchronize();
+	}
+
 
 	void calculateEtaVectorForPJSBaumgarte(
 		DArray<float> eta,

@@ -31,7 +31,6 @@ namespace dyno
 		int hingeJoint_size = topo->hingeJoints().size();
 		int fixedJoint_size = topo->fixedJoints().size();
 		int pointJoint_size = topo->pointJoints().size();
-	  printf("contact_size=%d, bs=%d, sj=%d, hj=%d, fj=%d, pj=%d\n", contact_size, ballAndSocketJoint_size, sliderJoint_size, hingeJoint_size, fixedJoint_size, pointJoint_size);
 
 		if (this->varFrictionEnabled()->getData())
 		{
@@ -71,7 +70,6 @@ namespace dyno
 		{
 			return;
 		}
-		printf("Total constraint size=%d\n", constraint_size);
 
 		mVelocityConstraints.resize(constraint_size);
 
@@ -279,7 +277,6 @@ namespace dyno
 			);
 
 			Real dh = dt / this->varSubStepping()->getValue();
-			printf("substepping dt=%f, substeps=%d\n", dh, this->varSubStepping()->getValue());
 
 			for (int i = 0; i < this->varSubStepping()->getValue(); i++)
 			{
@@ -318,6 +315,12 @@ namespace dyno
 
 			{
 				PROFILE_SCOPE("JacobiIterationLoop");
+				// auto error0 = checkOutError(
+				// 	mJ,
+				// 	mImpulseC,
+				// 	mVelocityConstraints,
+				// 	mEta
+				// );
 				for (int j = 0; j < this->varIterationNumberForVelocitySolver()->getValue(); j++)
 				{
 					JacobiIteration(
@@ -337,6 +340,35 @@ namespace dyno
 						this->varGravityValue()->getData(),
 						dh
 					);
+					cudaDeviceSynchronize();
+
+					// Real norm = checkOutError(
+					// 	mJ,
+					// 	mImpulseC,
+					// 	mVelocityConstraints,
+					// 	mEta
+					// );
+					// printf("Iteration %d, error0: %f error norm = %f\n", j, error0, norm);
+					// if (norm < error0 * 1e-3)
+					// {
+					// 	printf("Converged at iteration %d with error norm %f\n", j, norm);
+					// 	break;
+					// }
+
+					// calculateErrorVector(
+					// 	mEta,
+					// 	mJ,
+					// 	this->inVelocity()->getData(),
+					// 	this->inAngularVelocity()->getData(),
+					// 	this->inCenter()->getData(),
+					// 	this->inQuaternion()->getData(),
+					// 	mVelocityConstraints,
+					// 	mErrors,
+					// 	this->varSlop()->getValue(),
+					// 	this->varBaumgarteBias()->getValue(),
+					// 	this->varSubStepping()->getValue(),
+					// 	dt
+					// );
 				}
 			}
 

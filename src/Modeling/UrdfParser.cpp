@@ -321,18 +321,12 @@ namespace dyno
     {
         // 初始化 root link 世界变换为单位变换
         // Transform3f T_world_root;
-        // T_world_root.rotation();       // 根据你的矩阵类写
-        // T_world_root.translation() = Vec3f(0, 0, 0);
-        // T_world_root.scale()       = Vec3f(1, 1, 1);
 
         Real angle = -Real(M_PI) * Real(0.5);   // -90 度
         Quat<Real> q_zUpToYUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
-        // Quat<Real> q_zUpToYUp(0.5, 0.5, 0.5, 0.5);
-        SquareMatrix<Real, 3> R_zUpToYUp = q_zUpToYUp.toMatrix3x3();
+        // SquareMatrix<Real, 3> R_zUpToYUp = q_zUpToYUp.toMatrix3x3();
 
-        // SquareMatrix<Real, 3> R_zToY {0, 1, 0, 0, 0, 1, 1, 0, 0};
-
-        // std::cout << "yUptozUP rotation matrix: " << R_yUpToZUp << std::endl;
+        SquareMatrix<Real, 3> R_zUpToYUp {0, 1, 0, 0, 0, 1, 1, 0, 0};
 
         Vec3f t(0, 0, 0);
         Vec3f s(1, 1, 1);

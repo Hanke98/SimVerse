@@ -118,18 +118,18 @@ int main() {
         for (const auto& joint : parser.joints) {
             Vec3f axisWorld = joint.originWorld.rotation() * joint.axis;
 
-            std::cout << "    Joint: " << joint.name 
-                      << ", Type: " << joint.type 
-                      << ", Parent: " << joint.parentLink 
-                      << ", Child: " << joint.childLink 
-                      << ", Axis: [" << joint.axis.x << ", " << joint.axis.y << ", " << joint.axis.z << "]"
-                      << ", AxisWorld: " << axisWorld
-                      << ", Limits: [" << joint.limits.lower << ", " << joint.limits.upper << "]"
-                      << ", Damping: " << joint.damping
-                      << ", Local Rotation Matrix:" << joint.originLocal.rotation()
-                      << ", World Rotation Matrix:" << joint.originWorld.rotation() << "\n"
-                      << ", World Translation Vector:" << joint.originWorld.translation()
-                      << std::endl;
+            // std::cout << "    Joint: " << joint.name
+            //           << ", Type: " << joint.type
+            //           << ", Parent: " << joint.parentLink
+            //           << ", Child: " << joint.childLink
+            //           << ", Axis: [" << joint.axis.x << ", " << joint.axis.y << ", " << joint.axis.z << "]"
+            //           << ", AxisWorld: " << axisWorld
+            //           << ", Limits: [" << joint.limits.lower << ", " << joint.limits.upper << "]"
+            //           << ", Damping: " << joint.damping
+            //           << ", Local Rotation Matrix:" << joint.originLocal.rotation()
+            //           << ", World Rotation Matrix:" << joint.originWorld.rotation() << "\n"
+            //           << ", World Translation Vector:" << joint.originWorld.translation()
+            //           << std::endl;
         }
 
 

@@ -1,4 +1,3 @@
-#include "UrdfParser.h"
 #include "UrdfFunc.h"
 #include "ImageLoader.h"
 #include "GltfFunc.h"
@@ -12,10 +11,11 @@ namespace dyno
 {
 
 bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
-                         const FilePath& urdfFullPath)
+                         const FilePath& urdfFullPath,
+                         UrdfParser& parser)
 {
     // Parse the URDF and extract the mesh
-    UrdfParser parser;
+    // UrdfParser parser;
     auto urdfPath  = urdfFullPath;
     auto urdfRoot  = urdfPath.path().parent_path();
 

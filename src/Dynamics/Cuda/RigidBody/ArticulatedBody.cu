@@ -16,8 +16,6 @@
 #include "GltfFunc.h"
 #include "helpers/tinyobj_helper.h"
 
-#include "UrdfFunc.h"
-
 namespace dyno
 {
 	template<typename TDataType>
@@ -150,7 +148,7 @@ namespace dyno
 		}
 		else if (ext == ".urdf")
 		{
-			loadURDFTextureMesh(texMesh, name);
+			loadURDFTextureMesh(texMesh, name, urdfParser);
 		}
 	}
 

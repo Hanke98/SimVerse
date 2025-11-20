@@ -47,6 +47,7 @@ namespace dyno
         std::string parentLink;
         std::string childLink;
         Vec3f axis;               // 关节轴
+        Vec3f axisWorld;
         Transform3f originLocal;  // 原点变换
         Transform3f originWorld;
         UrdfJointLimits limits;   // 关节限制
@@ -68,13 +69,13 @@ namespace dyno
 
     private:
         // 解析变换信息
-        Transform3f parseOrigin(tinyxml2::XMLElement* originElem);
+        static Transform3f parseOrigin(tinyxml2::XMLElement* originElem);
         
         // 解析关节类型
-        UrdfJointType parseJointType(const std::string& typeStr);
+        static UrdfJointType parseJointType(const std::string& typeStr);
         
         // 解析关节限制
-        UrdfJointLimits parseJointLimits(tinyxml2::XMLElement* limitElem);
+        static UrdfJointLimits parseJointLimits(tinyxml2::XMLElement* limitElem);
         
         // 解析向量
         Vec3f parseVector(tinyxml2::XMLElement* elem, const std::string& attrName);

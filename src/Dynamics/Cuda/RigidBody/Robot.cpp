@@ -42,97 +42,98 @@ namespace dyno
 		if (this->varFilePath()->getValue() != filename)
 		{
 			this->varFilePath()->setValue(FilePath(filename));
+
 		} else {
             std::cout << "Robot: Error when load file path " << std::endl;
         }
 
+        // loadFromUrdf(filename);
         auto instances = this->varVehiclesTransform()->getValue();
         uint armNum = instances.size();
 
-        // std::vector<Transform3f> transforms(2);
-        // transforms[0] = Transform3f(Vec3f(0.0f, 0.0f, 0.0f), Mat3f(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f), Vec3f(0.0f, 0.0f, 0.0f));
-        // transforms[1] = Transform3f(Vec3f(1.0f, 0.0f, 0.0f), Mat3f(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f), Vec3f(0.0f, 0.0f, 0.0f));
-        // this->varVehiclesTransform()->setValue(transforms);
         for (size_t i = 0; i < armNum; i++) {
             RigidBodyInfo rigidbody;
             rigidbody.bodyId = i;
 
             auto texMesh = this->stateTextureMesh()->constDataPtr();
             std::map<int, std::shared_ptr<PdActor>> actors;
+            std::unordered_map<std::string, int> linkNameToActorIndex;
 
-            std::vector <int> Link0_Id = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};// without 0
-            // 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
-            // std::vector <int> Link0_Id = {8};
-            // std::vector <int> Link1_Id = {12};
-            // std::vector <int> Link2_Id = {13};
-            // std::vector <int> Link3_Id = {14, 15, 16, 17};
-            // // std::vector <int> Link3_Id = {14};
-            // std::vector <int> Link4_Id = {18, 19, 20, 21};
-            // // std::vector <int> Link4_Id = {19};
-            // std::vector <int> Link5_Id = {22, 23, 24};
-            // // std::vector <int> Link5_Id = {24, 41};
-            // std::vector <int> Link6_Id = {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41}; // without 32
-            // // std::vector <int> Link6_Id = {25};
-            // std::vector <int> Link7_Id = {42, 43, 44, 45, 46, 47, 48, 49};
-            // // std::vector <int> Link7_Id = {49};
-            // std::vector <int> Hand_Id = {50, 51, 52, 53, 54};
-            // // std::vector <int> Hand_Id = {53};
-            // std::vector <int> Left_Finger_Id = {55, 56};
-            // // std::vector <int> Left_Finger_Id = {55};
-            // std::vector <int> Right_Finger_Id = {57, 58};
-            // std::vector <int> Right_Finger_Id = {57};
-            // std::vector <int> Link_main = {8, 12, 13, 14, 19, 24, 25, 49, 53, 55, 57};
+            this->urdfParser.links.size();
+            std::unordered_map<std::string, std::shared_ptr<PdActor>> linkNameToActor;
 
-            // std::vector <std::vector <int>> Link_Id = {Link0_Id, Link1_Id, Link2_Id, Link3_Id, Link4_Id, Link5_Id, Link6_Id, Link7_Id, Hand_Id, Left_Finger_Id, Right_Finger_Id};
-            std::vector <std::vector <int>> Link_Id = {Link0_Id};
-            int j = 0;
 
-            std::cout << texMesh->shapes().size() << std::endl;
 
-            for (auto link_id : Link_Id) {
-                for (auto it : link_id) {
-                    auto up = texMesh->shapes()[it]->boundingBox.v1;
-                    auto down = texMesh->shapes()[it]->boundingBox.v0;
+            auto shapes = texMesh->shapes();
+            // auto shapeid = texMesh->shapeIds();
 
-                    rigidbody.position = Quat1f(instances[i].rotation()).rotate(texMesh->shapes()[it]->boundingTransform.translation()) + instances[i].translation();
-                    rigidbody.angle = Quat1f(instances[i].rotation());
-                    rigidbody.motionType = BodyType::Dynamic;
+            for (int it = 0; it < shapes.size(); ++it) {
+                auto up = texMesh->shapes()[it]->boundingBox.v1;
+                auto down = texMesh->shapes()[it]->boundingBox.v0;
 
-                    // if (it == Link_main[j]) {
-                    //     if (it == Link_main[0]) {
-                    //         rigidbody.motionType = BodyType::Static;
-                    //     }
-                    // }
-
-                    auto actor = this->createRigidBody(rigidbody);
-                    actors[it] = actor;
-
-                    BoxInfo box;
-
-                    box.halfLength = (up - down) / 2;
-
-                    this->bindBox(actor, box);
-
-                    this->bindShape(actor, Pair<uint, uint>(it, i));
+                rigidbody.position = Quat1f(instances[i].rotation()).rotate(texMesh->shapes()[it]->boundingTransform.translation()) + instances[i].translation();
+                rigidbody.angle = Quat1f(instances[i].rotation());
+                rigidbody.motionType = BodyType::Dynamic;
+                if (it == 1) {
+                    rigidbody.angularVelocity = Vec3f(0, 1, 0);
+                } else {
+                    rigidbody.linearVelocity = Vec3f(1, 0, 0);
                 }
-                j++;
-            }
-            int linkIndex = 0;
-            for (auto link_id : Link_Id) {
 
-                for (auto it : link_id) {
-                    // if (it != Link_main[linkIndex]) {
-                        // auto& fix = this->createFixedJoint(actors[it], actors[Link_main[linkIndex]]);
-                        // fix.setAnchorPoint(actors[Link_main[linkIndex]]->center);
-                    // }
-                }
-                linkIndex++;
+                auto actor = this->createRigidBody(rigidbody);
+                actors[it] = actor;
+
+                BoxInfo box;
+
+                box.halfLength = (up - down) / 2;
+
+                this->bindBox(actor, box);
+
+                this->bindShape(actor, Pair<uint, uint>(it, i));
             }
 
-            // auto &joint1 = this->createHingeJoint(actors[Link_main[0]], actors[Link_main[1]]);
-            // joint1.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
-            // joint1.setAxis(Vec3f(0.0f, 1.0f, 0.0f));
-            // joint1.setRange(-2.8973, 2.8973);
+            // for (size_t linkId = 0; linkId < this->urdfParser.links.size(); ++linkId)
+            // {
+            //     const auto& link = this->urdfParser.links[linkId];
+            //     auto actorIt = actors.find(linkId);  // 根据索引从 actors 中找到对应的 actor
+            //
+            //     if (actorIt != actors.end())
+            //     {
+            //         linkNameToActor[link.name] = actorIt->second;  // 将 linkName 映射到 actor
+            //     }
+            //     else
+            //     {
+            //         std::cerr << "Error: Actor not found for link: " << link.name << std::endl;
+            //     }
+            // }
+
+            // for (const auto& actorPair : actors) {
+            //     std::cout << "Actor index: " << actorPair.first << " | Actor: " << actorPair.second->idx << std::endl;
+            // }
+
+            for (int j = 0; j < this->urdfParser.joints.size(); ++j) {
+                if (this->urdfParser.joints[j].type == 0) {
+                    auto &joint = this->createHingeJoint(actors[j], actors[j+1]);
+                    joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
+                    joint.setAxis(this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis);
+                    joint.setRange(this->urdfParser.joints[j].limits.lower, this->urdfParser.joints[j].limits.upper);
+                }
+                if (this->urdfParser.joints[j].type == 1) {
+                    auto &joint = this->createSliderJoint(actors[j], actors[j+1]);
+                    joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
+                    joint.setAxis(this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis);
+                    joint.setRange(this->urdfParser.joints[j].limits.lower, this->urdfParser.joints[j].limits.upper);
+                }
+                if (this->urdfParser.joints[j].type == 2) {
+                    auto &joint = this->createFixedJoint(actors[j], actors[j+1]);
+                    joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
+                }
+                std::cout << j << " joint axis: " <<this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis << std::endl;
+                std::cout << j << " joint origin: " << this->urdfParser.joints[j].originWorld.translation() << std::endl;
+                std::cout << j << " lower limits and upper limits: " << this->urdfParser.joints[j].limits.lower
+                << ", " << this->urdfParser.joints[j].limits.upper<< std::endl;
+            }
+
             //
             // auto &joint2 = this->createHingeJoint(actors[Link_main[1]], actors[Link_main[2]]);
             // joint2.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
@@ -163,10 +164,10 @@ namespace dyno
             // auto &joint7 = this->createHingeJoint(actors[Link_main[6]], actors[Link_main[7]]);
             // joint7.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
             // joint7.setAxis(Vec3f(0.0f, -1.0f, 0.0f ));
-            // joint7.setRange(-2.8973, 2.8973);
+            // joint7.setRange(-2.8973, 2.8973);  !!!!!!
             //
             // auto &handjoint = this->createFixedJoint(actors[Link_main[7]], actors[Link_main[8]]);
-            // handjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f, 0.0f) + instances[i].translation());
+            // handjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f, 0.0f) + instances[i].translation()); !!!
             //
             // auto &leftfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[9]]);
             // leftfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());

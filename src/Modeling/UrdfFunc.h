@@ -5,11 +5,12 @@
 
 #include "Topology/TextureMesh.h"
 #include <Field/FilePath.h>
+#include "UrdfParser.h"
 // #inclued "Material.h"
 
 
 namespace dyno {
-    bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh, const FilePath& urdfFullPath);
+    bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh, const FilePath& urdfFullPath, UrdfParser& parser);
     // bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh, const std::string& filepath, bool useToCenter = true);
     // bool loadTextureMeshFromObj_new(const FilePath& meshPath,
     //                         std::vector<dyno::Vec3f>& outVertices,

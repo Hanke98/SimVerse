@@ -78,29 +78,21 @@ namespace dyno
             {
                 // 解析原点变换
                 tinyxml2::XMLElement* originElem = visualElem->FirstChildElement("origin");
+
+                Real angle = Real(M_PI) * Real(0.5);   // +90 度
+                Quat<Real> q_yUpToZUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
+                SquareMatrix<Real, 3> R_yUpToZUp = q_yUpToZUp.toMatrix3x3();
+
+                Vec3f t(0, 0, 0);
+                Vec3f s(1, 1, 1);
+                Transform3f yUpToZUp(t, R_yUpToZUp, s);
+
                 if (originElem)
                 {
                     link.meshTransform = parseOrigin(originElem);
-                    // mesh(Y-up) -> link(Z-up) 的转换：绕 X 轴 +90°
-                    Real angle = -Real(M_PI) * Real(0.5);   // +90 度
-                    Quat<Real> q_yUpToZUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
-                    SquareMatrix<Real, 3> R_yUpToZUp = q_yUpToZUp.toMatrix3x3();
-
-                    Vec3f t(0, 0, 0);
-                    Vec3f s(1, 1, 1);
-                    Transform3f yUpToZUp(t, R_yUpToZUp, s);
-
                     // meshTransform  = origin * (yUpToZUp * p_meshYup)
                     link.meshTransform = composeTransform(link.meshTransform, yUpToZUp);
                 } else {
-                    Real angle = Real(M_PI) * Real(0.5);   // +90 度
-                    Quat<Real> q_yUpToZUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
-                    SquareMatrix<Real, 3> R_yUpToZUp = q_yUpToZUp.toMatrix3x3();
-
-                    Vec3f t(0, 0, 0);
-                    Vec3f s(1, 1, 1);
-                    Transform3f yUpToZUp(t, R_yUpToZUp, s);
-
                     // meshTransform = origin * (yUpToZUp)
                     link.meshTransform = yUpToZUp;
                 }

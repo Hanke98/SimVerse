@@ -27,6 +27,10 @@ namespace dyno
 
     bool UrdfParser::parse(const std::string& filePath)
     {
+        links.clear();
+        joints.clear();
+        robotName.clear();
+
         tinyxml2::XMLDocument doc;
         tinyxml2::XMLError error = doc.LoadFile(filePath.c_str());
         if (error != tinyxml2::XML_SUCCESS)

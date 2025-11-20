@@ -60,12 +60,6 @@ namespace dyno
         UrdfParser() = default;
         ~UrdfParser() = default;
 
-        // 解析URDF文件
-        // bool parse(const std::string& filePath,
-        //           std::vector<UrdfLink>& links,
-        //           std::vector<UrdfJoint>& joints,
-        //           std::string& robotName);
-
         bool parse(const std::string& filePath);
 
         std::vector<UrdfLink> links;

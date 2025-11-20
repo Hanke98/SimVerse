@@ -4272,7 +4272,7 @@ namespace dyno
 		float dt
 	)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_SCOPE("SingleJacobiIteration");
 		cuExecute(constraints.size(),
 			SF_JacobiIteration,
 			lambda,
@@ -4645,6 +4645,75 @@ namespace dyno
 		errorHost.clear();
 		return sqrt(tmp);
 	}
+
+	template<typename Coord, typename Real, typename Constraint>
+	__global__ void SF_checkOutPositionError(
+		DArray<Coord> pos,
+		DArray<Constraint> constraints,
+		DArray<Real> error
+	)
+	{
+		int tId = threadIdx.x + blockIdx.x * blockDim.x;
+		if (tId >= constraints.size())
+			return;
+
+		int idx1 = constraints[tId].bodyId1;
+		int idx2 = constraints[tId].bodyId2;
+
+	  auto type = constraints[tId].type;
+		if (type == ConstraintType::CN_ANCHOR_EQUAL_1)
+		{
+			Coord r1 = constraints[tId].normal1;
+			Coord r2 = constraints[tId].normal2;
+			Coord pos1 = constraints[tId].pos1;
+
+			Coord errorVec;
+			if (idx2 != INVALID)
+				errorVec = pos[idx2] + r2 - pos[idx1] - r1;
+			else
+				errorVec = pos1 - pos[idx1] - r1;
+
+			for (int i = 0; i < 3 ; i++)
+			{
+				error[tId + i] = errorVec[i] * errorVec[i];
+			}
+		}
+		else if (type != ConstraintType::CN_ANCHOR_EQUAL_2 && type != ConstraintType::CN_ANCHOR_EQUAL_3)
+		{
+			error[tId] = 0.0f;
+		}
+
+	}
+
+
+	Real checkOutPositionError(
+		DArray<Vec3f> pos,
+		DArray<TConstraintPair<float>> constraints
+	)
+  {
+  DArray<float> error;
+  error.resize(constraints.size());
+  error.reset();
+  cuExecute(constraints.size(),
+			SF_checkOutPositionError,
+			pos,
+			constraints,
+			error);
+
+		CArray<float> errorHost;
+		errorHost.assign(error);
+		Real tmp = 0.0f;
+		int num = errorHost.size();
+		for (int i = 0; i < num; i++)
+		{
+			tmp += errorHost[i];;
+		}
+		error.clear();
+		errorHost.clear();
+		return sqrt(tmp);
+	}
+
+
 
 	bool saveVectorToFile(
 		const std::vector<float>& vec,

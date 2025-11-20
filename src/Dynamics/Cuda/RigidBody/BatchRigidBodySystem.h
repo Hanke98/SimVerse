@@ -10,32 +10,55 @@
 
 #include <iostream>
 #include <vector>
-namespace dyno {
-
+namespace dyno
+{
   template<typename TDataType>
-  // class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
   class BatchRigidBodySystem : virtual public RigidBodySystem<TDataType> {
 public:
-    struct BatchRigidBodySystemControlParam
-    {
-      std::vector<int> reset_mb_ids;
-    };
+    typedef typename TDataType::Real Real; 
+    typedef typename TDataType::Coord Coord;
+    typedef typename TDataType::Matrix Matrix;
+    typedef typename dyno::Quat<Real> TQuat;
 
     struct MulitBodyChainIndices
     {
       std::vector<int> body_indices;
       std::vector<int> hinge_joint_indices;
+      std::vector<int> ball_joint_indices;
+      std::vector<int> slider_joint_indices;
+      std::vector<int> fixed_joint_indices;
+    };
+
+    struct NonCtrlMultiBodyStatesInfo
+    {
+      int idx;
+      int type;
+    };
+
+    struct BatchRigidBodySystemControlParam
+    {
+      std::vector<int> reset_mb_ids;
+      std::vector<NonCtrlMultiBodyStatesInfo> non_ctrl_mb_states;
     };
 
     BatchRigidBodySystem();
     ~BatchRigidBodySystem() override;
 
-    void addRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
+		DEF_VAR(FilePath, UrdfFilePath, "", "");
 
-    void reset(BatchRigidBodySystemControlParam& param);
+	  void createOneMultiBody(Coord base, Coord offset);
+
+	  void createBatchMultiBodies(Coord base, Coord offset, int num_x, int num_y, int num_z);
+
+    void resetOneMultiBodies(int mb_id);
+
+    void resetBatchMultiBodies(BatchRigidBodySystemControlParam& param);
+
+    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
 
 protected:
-    std::vector<MulitBodyChainIndices> multi_body_chains;
+    std::vector<MulitBodyChainIndices> ctrl_mb_chains; // main multi-body chains with control
+    std::vector<MulitBodyChainIndices> non_ctrl_mb_chains; // other multi-body chains in the env.
   };
 
 } // namespace dyno

@@ -1,6 +1,7 @@
 // CartPoleSimulator.h
 #pragma once
 
+#include "RigidBody/BatchRigidBodySystem.h"
 #include "Vector/Vector3D.h"
 #include <UbiApp.h>
 #include <SceneGraph.h>
@@ -20,6 +21,7 @@ namespace dyno {
     
         DECLARE_TCLASS(RobotArmSimulator, TDataType)
     public:
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemControlParam CtrlParam;
 
         typedef typename TDataType::Real Real;
 		typedef typename TDataType::Coord Coord;
@@ -30,12 +32,13 @@ namespace dyno {
         RobotArmSimulator();
         ~RobotArmSimulator();
         
+        void initBatchSolver();
+        void resetStates(CtrlParam& param);
+        void resetStates() override;
         // 场景创建相关接口
         void createScene();
         int addRigidSystem(const Vec3f& offset, Vec3f& targetPosition, float denstiy); // 返回新创建的rigidID
         int addMultiBoydSystem(); 
-        // void createHingeJoint(int rigidID, float anchorX, float anchorY, float anchorZ, float axisX, float axisY, float axisZ);
-        // void createSliderJoint(int rigidID, float axisX, float axisY, float axisZ, float minRange, float maxRange);
         void reset(int rigidIDs, Vec3f& targetPosition); // -1表示重置所有
         
         // 仿真控制接口
@@ -53,7 +56,7 @@ namespace dyno {
         int getRigidSystemCount() const { return rigidSystems.size(); }
 
         // void resetState(int rigidID);
-        void resetStates() override;
+        void resetStatesBak();
 
         Mat3f parallelAxisTheoremWorld(const Mat3f& I_world_about_ref, Real mass, const Vec3f& com_world, const Vec3f& pointO_world);
         float computeHingeEffectiveInertiaWorld(int rigidID, const HingeJoint<Real>& joint, const Vec3f& jointPositionWorld);
@@ -71,6 +74,8 @@ namespace dyno {
         // DEF_VAR(Coord, FingerCenter, 0, "Finger center");
         DEF_VAR(Real, Density, 1000.0f, "Density of the rigid body");
     private:
+
+        std::shared_ptr<BatchRigidBodySystem<TDataType>> batchSolver;
         struct RigidSystemData {
             std::shared_ptr<MultibodySystem<DataType3f>> system;
             std::shared_ptr<RobotArmSimulator<DataType3f>> robot;

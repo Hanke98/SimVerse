@@ -354,6 +354,11 @@ namespace dyno
 		DArray<float> eta
 	);
 
+	Real checkOutPositionError(
+		DArray<Vec3f> pos,
+		DArray<TConstraintPair<float>> constraints
+	);
+
 	void calculateDiagnals(
 		DArray<float> d,
 		DArray<Vec3f> J,

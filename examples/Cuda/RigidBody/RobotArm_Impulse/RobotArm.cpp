@@ -12,11 +12,10 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include "../../../../src/Rendering/GUI/GlfwGUI/GlfwRenderWindow.h"
+#include "RigidBody/Vehicle.h"
 #include <SceneGraphFactory.h> 
 
 #include <BasicShapes/PlaneModel.h>
-
-
 
 
 namespace dyno
@@ -27,17 +26,24 @@ namespace dyno
     RobotArmSimulator<TDataType>::RobotArmSimulator() :
 		ArticulatedBody<TDataType>()
     {
-		auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
-		this->stateTopology()->connect(mapper->inDiscreteElements());
-		this->graphicsPipeline()->pushModule(mapper);
-
-		auto sRender = std::make_shared<GLSurfaceVisualModule>();
-		sRender->setColor(Color(1, 1, 0));
-		sRender->setAlpha(0.2);
-		mapper->outTriangleSet()->connect(sRender->inTriangleSet());
-		this->graphicsPipeline()->pushModule(sRender);
 	}
 
+    template<typename TDataType>
+    RobotArmSimulator<TDataType>::~RobotArmSimulator() {
+        terminateSimulation();
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::initBatchSolver(){
+        batchSolver = std::make_shared<BatchRigidBodySystem<TDataType>>();
+        batchSolver->setDt(1 / 100.0f);
+        batchSolver->varGravityEnabled()->setValue(true);
+        batchSolver->varFrictionEnabled()->setValue(false);
+        Vec3f base{ -0.0f, -0.0f, -0.0f };
+        Vec3f offset{ 0.0f, 0.0f, 20.0f };
+        batchSolver->addExampleRigidBodies("", base, offset, 1, 1, 1);
+        scn->addNode(batchSolver);
+    }
 
     template<typename TDataType>
 	void RobotArmSimulator<TDataType>::resetStates()
@@ -216,8 +222,8 @@ namespace dyno
 	}
 
     template<typename TDataType>
-    RobotArmSimulator<TDataType>::~RobotArmSimulator() {
-        terminateSimulation();
+    void RobotArmSimulator<TDataType>::resetStates(CtrlParam& param) {
+        
     }
 
     template<typename TDataType>
@@ -242,6 +248,7 @@ namespace dyno
 
         data.robot = scn->addNode(std::make_shared<RobotArmSimulator<DataType3f>>());
         // data.robot = scn->addNode(std::make_shared<ArticulatedBody<DataType3f>>());
+
 
         // 计算当前实例的基础位置
         Vec3f basePos = Vec3f(index * offset.x - 0.45f, offset.y + 1.05f, index * offset.z);
@@ -293,6 +300,16 @@ namespace dyno
             rigidSystems[i].robot->connect(mbSystem->importVehicles());
         }
 
+	    auto bike = scn->addNode(std::make_shared<UAV<DataType3f>>());
+
+	    std::vector<Transform3f> vehicleTransforms;
+	    vehicleTransforms.push_back(Transform3f(Vec3f(1, 0, 0), Quat1f(1.57, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    vehicleTransforms.push_back(Transform3f(Vec3f(10, 20, 0), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    vehicleTransforms.push_back(Transform3f(Vec3f(10, 20, 20), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    bike->varVehiclesTransform()->setValue(vehicleTransforms);
+
+	    bike->connect(mbSystem->importVehicles());
+
         auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
         plane->varLengthX()->setValue(50);
         plane->varLengthZ()->setValue(50);
@@ -311,7 +328,7 @@ namespace dyno
         }
         m_offset = offset;
         int rigidID = generateRigidID();
-        // std::cout << "Add Rigid System with ID: " << rigidID << std::endl;
+        std::cout << "Add Rigid System with ID: " << rigidID << std::endl;
         rigidSystems[rigidID] = createSingleRigidSystem(rigidID, m_offset, targetPosition, density);
         // computeJointInitia(rigidID);
         std::vector<float> moterVelocities_tmp(7, 0.0f);
@@ -432,7 +449,7 @@ namespace dyno
             // 处理事件
             glfwPollEvents();
 
-            applyImpulse(deltaMoterVelocities);
+            // applyImpulse(deltaMoterVelocities);
 
             if (activeScene) {
 

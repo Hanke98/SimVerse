@@ -312,65 +312,43 @@ namespace dyno
 
 				mImpulseC.reset();
 				initializeJacobian(dh);
+				auto error = checkOutPositionError(
+					this->inCenter()->getData(),
+					mVelocityConstraints
+				);
+				printf(" Substep %d, Position Error = %f\n", i, error);
 
-			{
-				PROFILE_SCOPE("JacobiIterationLoop");
-				// auto error0 = checkOutError(
-				// 	mJ,
-				// 	mImpulseC,
-				// 	mVelocityConstraints,
-				// 	mEta
-				// );
-				for (int j = 0; j < this->varIterationNumberForVelocitySolver()->getValue(); j++)
 				{
-					JacobiIteration(
-						mLambda,
-						mImpulseC,
-						mJ,
-						mB,
-						mEta,
-						mVelocityConstraints,
-						mContactNumber,
-						mK_1,
-						mK_2,
-						mK_3,
-						this->inMass()->getData(),
-						this->inFrictionCoefficients()->getData(),
-						this->varFrictionCoefficient()->getData(),
-						this->varGravityValue()->getData(),
-						dh
-					);
-					cudaDeviceSynchronize();
-
-					// Real norm = checkOutError(
+					PROFILE_SCOPE("JacobiIterationLoop");
+					// auto error0 = checkOutError(
 					// 	mJ,
 					// 	mImpulseC,
 					// 	mVelocityConstraints,
 					// 	mEta
 					// );
-					// printf("Iteration %d, error0: %f error norm = %f\n", j, error0, norm);
-					// if (norm < error0 * 1e-3)
-					// {
-					// 	printf("Converged at iteration %d with error norm %f\n", j, norm);
-					// 	break;
-					// }
+					for (int j = 0; j < this->varIterationNumberForVelocitySolver()->getValue(); j++)
+					{
+						JacobiIteration(
+							mLambda,
+							mImpulseC,
+							mJ,
+							mB,
+							mEta,
+							mVelocityConstraints,
+							mContactNumber,
+							mK_1,
+							mK_2,
+							mK_3,
+							this->inMass()->getData(),
+							this->inFrictionCoefficients()->getData(),
+							this->varFrictionCoefficient()->getData(),
+							this->varGravityValue()->getData(),
+							dh
+						);
 
-					// calculateErrorVector(
-					// 	mEta,
-					// 	mJ,
-					// 	this->inVelocity()->getData(),
-					// 	this->inAngularVelocity()->getData(),
-					// 	this->inCenter()->getData(),
-					// 	this->inQuaternion()->getData(),
-					// 	mVelocityConstraints,
-					// 	mErrors,
-					// 	this->varSlop()->getValue(),
-					// 	this->varBaumgarteBias()->getValue(),
-					// 	this->varSubStepping()->getValue(),
-					// 	dt
-					// );
+					}
+
 				}
-			}
 
 
 				updateVelocity(
@@ -394,6 +372,7 @@ namespace dyno
 					this->inInitialInertia()->getData(),
 					dh
 				);
+
 			}
 		}
 

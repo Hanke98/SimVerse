@@ -14,10 +14,8 @@ namespace dyno
 bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                          const FilePath& urdfFullPath)
 {
-    // 解析 URDF
+    // Parse the URDF and extract the mesh
     UrdfParser parser;
-
-    // URDF 所在目录，用来拼 mesh 的相对路径
     auto urdfPath  = urdfFullPath;
     auto urdfRoot  = urdfPath.path().parent_path();
 
@@ -29,10 +27,8 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
 
     auto& links = parser.links;
 
-    // 清空 texMesh 里旧的数据
     texMesh->clear();
 
-    // 准备全局 CPU 端容器（最后一次性 assign 到 DArray）
     std::vector<Vec3f> vertices;
     std::vector<Vec3f> normals;
     std::vector<Vec2f> texCoords;
@@ -40,23 +36,21 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
 
     auto& reShapes = texMesh->shapes();
     auto& reMats   = texMesh->materials();
-
     reShapes.clear();
     reMats.clear();
 
     uint globalShapeId = 0;
 
-    // 遍历每一个 link，只处理 visualMeshPath
+    // Iterate through each link and handle the visual mesh
     for (const auto& link : links) {
         if (link.visualMeshPath.empty())
             continue;
 
-        // 拼出这个 link 的 obj 完整路径
+        // Construct the complete path to the mesh
         auto meshFull = FilePath(getAssetPath() + "/../asset/" + link.visualMeshPath);
         std::string meshFile   = meshFull.string();
         std::string meshFolder = meshFull.path().parent_path().string();
 
-        // 用 tinyobj 加载这个 obj
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t>    shapes;
         std::vector<tinyobj::material_t> materials;
@@ -85,7 +79,6 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             continue;
         }
 
-        // 记录当前全局顶点 / 法线 / UV 的起始 offset
         size_t vOffset = vertices.size();
         size_t nOffset = normals.size();
         size_t tOffset = texCoords.size();
@@ -93,7 +86,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         bool hasNormals   = !attrib.normals.empty();
         bool hasTexcoords = !attrib.texcoords.empty();
 
-        // 把这个 obj 的 attrib 数据追加到全局容器
+        // Append the data from the obj file
         for (size_t i = 0; i < attrib.vertices.size(); i += 3)
         {
             vertices.push_back(Vec3f(
@@ -121,27 +114,21 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                     attrib.texcoords[i + 1]
                 ));
             }
-        }
-
-        if (!hasTexcoords)
-        {
-            // 确保 texCoords 至少有与 vertices 一样多的元素
+        } else {
             if (texCoords.size() < vertices.size())
             {
                 texCoords.resize(vertices.size());
             }
 
-            // 为这一段 [vOffset, vertices.size()) 的顶点设置默认 UV
             for (size_t vi = vOffset; vi < vertices.size(); ++vi)
             {
                 texCoords[vi] = Vec2f(0.0f, 0.0f);
             }
         }
 
-        // 形状 ID 要覆盖到新的全部顶点长度
         shapeIds.resize(vertices.size());
 
-        // 先把 tinyobj 的材质转成引擎的 Material，追加到 reMats
+        // convert materials of tinyobj to engine, and add them into reMats
         uint matOffset = static_cast<uint>(reMats.size());
         reMats.resize(reMats.size() + materials.size());
 
@@ -183,30 +170,37 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             }
         }
 
-        // 4.6 为这个 obj 里的每一个 tinyobj::shape_t 创建一个 Shape
+        // Merge all shapes into a single shape
+        std::shared_ptr<Shape> mergedShape = std::make_shared<Shape>();
+        std::vector<TopologyModule::Triangle> vertexIndex;
+        std::vector<TopologyModule::Triangle> normalIndex;
+        std::vector<TopologyModule::Triangle> texCoordIndex;
+
+        Transform3f T_world_mesh = composeTransform(link.T_world, link.meshTransform);
+
+        Vec3f lo( REAL_MAX);
+        Vec3f hi(-REAL_MAX);
+
         for (const auto& tshape : shapes)
         {
             const auto& mesh = tshape.mesh;
 
-            auto shape = std::make_shared<Shape>();
+            // auto shape = std::make_shared<Shape>();
 
-            std::vector<TopologyModule::Triangle> vertexIndex;
-            std::vector<TopologyModule::Triangle> normalIndex;
-            std::vector<TopologyModule::Triangle> texCoordIndex;
+            // std::vector<TopologyModule::Triangle> vertexIndex;
+            // std::vector<TopologyModule::Triangle> normalIndex;
+            // std::vector<TopologyModule::Triangle> texCoordIndex;
 
             // 绑定材质（tinyobj 每个 shape 可以有 material_ids）
-            if (!mesh.material_ids.empty() && mesh.material_ids[0] >= 0)
-            {
-                int localMatId  = mesh.material_ids[0];
-
-                int globalMatId = static_cast<int>(matOffset) + localMatId;
-
-                if (globalMatId >= 0 && globalMatId < static_cast<int>(reMats.size()))
-                    shape->material = reMats[globalMatId];
-            }
-
-            Vec3f lo( REAL_MAX);
-            Vec3f hi(-REAL_MAX);
+            // if (!mesh.material_ids.empty() && mesh.material_ids[0] >= 0)
+            // {
+            //     int localMatId  = mesh.material_ids[0];
+            //
+            //     int globalMatId = static_cast<int>(matOffset) + localMatId;
+            //
+            //     if (globalMatId >= 0 && globalMatId < static_cast<int>(reMats.size()))
+            //         shape->material = reMats[globalMatId];
+            // }
 
             // tinyobj 里 indices 是三角形列表（每个 index 里有 v / n / t 下标）
             for (size_t i = 0; i < mesh.indices.size(); i += 3)
@@ -242,7 +236,20 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                     texCoordIndex.push_back(tri);
                 }
 
-                // 更新包围盒
+                // Vec3f transformedV0 = T_world_mesh * vertices[v0];
+                // Vec3f transformedV1 = T_world_mesh * vertices[v1];
+                // Vec3f transformedV2 = T_world_mesh * vertices[v2];
+                //
+                // // Update the bounding box with transformed vertices
+                // lo = lo.minimum(transformedV0);
+                // lo = lo.minimum(transformedV1);
+                // lo = lo.minimum(transformedV2);
+                //
+                // hi = hi.maximum(transformedV0);
+                // hi = hi.maximum(transformedV1);
+                // hi = hi.maximum(transformedV2);
+
+                // // 更新包围盒
                 lo = lo.minimum(vertices[v0]);
                 lo = lo.minimum(vertices[v1]);
                 lo = lo.minimum(vertices[v2]);
@@ -256,25 +263,23 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 shapeIds[v1] = globalShapeId;
                 shapeIds[v2] = globalShapeId;
             }
-
-            shape->vertexIndex.assign(vertexIndex);
-            shape->normalIndex.assign(normalIndex);
-            shape->texCoordIndex.assign(texCoordIndex);
-
-            // 包围盒与中心
-            auto shapeCenter = (lo + hi) * Real(0.5);
-            shape->boundingBox       = TAlignedBox3D<Real>(lo, hi);
-            shape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
-
-            reShapes.push_back(shape);
-            globalShapeId++;
         }
+        mergedShape->vertexIndex.assign(vertexIndex);
+        mergedShape->normalIndex.assign(normalIndex);
+        mergedShape->texCoordIndex.assign(texCoordIndex);
 
+        // 包围盒与中心
+        auto shapeCenter = (lo + hi) * Real(0.5);
+        mergedShape->boundingBox       = TAlignedBox3D<Real>(lo, hi);
+        mergedShape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
+
+        reShapes.push_back(mergedShape);
+        globalShapeId++;
 
         // 应用 URDF 的 <visual><origin> 变换到属于这个 link 的顶点
         // 也就是把 [vOffset, vertices.size()) 这一段的顶点乘以 T_world*link.meshTransform
         // p_world = T_world * link.meshTransform * p_mesh
-        Transform3f T_world_mesh = composeTransform(link.T_world, link.meshTransform);
+
         auto R = T_world_mesh.rotation();
         for (size_t i = vOffset; i < vertices.size(); ++i)
         {
@@ -306,7 +311,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     {
         DArray<int> counter;
         counter.resize(texMesh->vertices().size());
-
+        // 5+v: Perform point counter operation to assign shape ids
         Shape_PointCounter(counter,
             texMesh->shapeIds(),
             i);
@@ -362,7 +367,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
 
         for (size_t i = 0; i < shapeNum; i++)
         {
-            reShapes[i]->boundingTransform.translation() = reShapes[i]->boundingTransform.translation() ;//+ this->varLocation()->getValue()
+            // reShapes[i]->boundingTransform.translation() = reShapes[i]->boundingTransform.translation() ;//+ this->varLocation()->getValue()
         }
     }
     else

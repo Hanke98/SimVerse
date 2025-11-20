@@ -60,7 +60,7 @@ namespace dyno
             auto texMesh = this->stateTextureMesh()->constDataPtr();
             std::map<int, std::shared_ptr<PdActor>> actors;
 
-            std::vector <int> Link0_Id = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};// without 0
+            std::vector <int> Link0_Id = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};// without 0
             // 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
             // std::vector <int> Link0_Id = {8};
             std::vector <int> Link1_Id = {12};
@@ -81,11 +81,13 @@ namespace dyno
             // std::vector <int> Left_Finger_Id = {55};
             std::vector <int> Right_Finger_Id = {57, 58};
             // std::vector <int> Right_Finger_Id = {57};
-            std::vector <int> Link_main = {8, 12, 13, 14, 19, 24, 25, 49, 53, 55, 57};
+            // std::vector <int> Link_main = {8, 12, 13, 14, 19, 24, 25, 49, 53, 55, 57};
 
-            std::vector <std::vector <int>> Link_Id = {Link0_Id, Link1_Id, Link2_Id, Link3_Id, Link4_Id, Link5_Id, Link6_Id, Link7_Id, Hand_Id, Left_Finger_Id, Right_Finger_Id};
-
+            // std::vector <std::vector <int>> Link_Id = {Link0_Id, Link1_Id, Link2_Id, Link3_Id, Link4_Id, Link5_Id, Link6_Id, Link7_Id, Hand_Id, Left_Finger_Id, Right_Finger_Id};
+            std::vector <std::vector <int>> Link_Id = {Link0_Id};
             int j = 0;
+
+            std::cout << texMesh->shapes().size() << std::endl;
 
             for (auto link_id : Link_Id) {
                 for (auto it : link_id) {
@@ -96,11 +98,11 @@ namespace dyno
                     rigidbody.angle = Quat1f(instances[i].rotation());
                     rigidbody.motionType = BodyType::Dynamic;
 
-                    if (it == Link_main[j]) {
-                        if (it == Link_main[0]) {
-                            rigidbody.motionType = BodyType::Static;
-                        }
-                    }
+                    // if (it == Link_main[j]) {
+                    //     if (it == Link_main[0]) {
+                    //         rigidbody.motionType = BodyType::Static;
+                    //     }
+                    // }
 
                     auto actor = this->createRigidBody(rigidbody);
                     actors[it] = actor;
@@ -119,62 +121,62 @@ namespace dyno
             for (auto link_id : Link_Id) {
 
                 for (auto it : link_id) {
-                    if (it != Link_main[linkIndex]) {
-                        auto& fix = this->createFixedJoint(actors[it], actors[Link_main[linkIndex]]);
-                        fix.setAnchorPoint(actors[Link_main[linkIndex]]->center);
-                    }
+                    // if (it != Link_main[linkIndex]) {
+                        // auto& fix = this->createFixedJoint(actors[it], actors[Link_main[linkIndex]]);
+                        // fix.setAnchorPoint(actors[Link_main[linkIndex]]->center);
+                    // }
                 }
                 linkIndex++;
             }
 
-            auto &joint1 = this->createHingeJoint(actors[Link_main[0]], actors[Link_main[1]]);
-            joint1.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
-            joint1.setAxis(Vec3f(0.0f, 1.0f, 0.0f));
-            joint1.setRange(-2.8973, 2.8973);
-
-            auto &joint2 = this->createHingeJoint(actors[Link_main[1]], actors[Link_main[2]]);
-            joint2.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
-            joint2.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
-            joint2.setRange(-1.7628, 1.7628);
-
-            auto &joint3 = this->createHingeJoint(actors[Link_main[2]], actors[Link_main[3]]);
-            joint3.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f, 0.0f) + instances[i].translation());
-            joint3.setAxis(Vec3f(0.0f, 1.0f, 0.0f));
-            joint3.setRange(-2.8973, 2.8973);
-
-            auto &joint4 = this->createHingeJoint(actors[Link_main[3]], actors[Link_main[4]]);
-            joint4.setAnchorPoint(Vec3f(0.0825f, 0.333f + 0.316f, 0.0f) + instances[i].translation());
-            joint4.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
-            // joint4.setRange(-3.0718, -0.0698);
-            joint4.setRange(-3.0, 0.087);
-
-            auto &joint5 = this->createHingeJoint(actors[Link_main[4]], actors[Link_main[5]]);
-            joint5.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f + 0.384f, 0.0f) + instances[i].translation());
-            joint5.setAxis(Vec3f(0.0f, 1.0f, 0.0f ));
-            joint5.setRange(-2.8973, 2.8973);
-
-            auto &joint6 = this->createHingeJoint(actors[Link_main[5]], actors[Link_main[6]]);
-            joint6.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
-            joint6.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
-            joint6.setRange(-0.0175, 3.7525);
-
-            auto &joint7 = this->createHingeJoint(actors[Link_main[6]], actors[Link_main[7]]);
-            joint7.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
-            joint7.setAxis(Vec3f(0.0f, -1.0f, 0.0f ));
-            joint7.setRange(-2.8973, 2.8973);
-
-            auto &handjoint = this->createFixedJoint(actors[Link_main[7]], actors[Link_main[8]]);
-            handjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f, 0.0f) + instances[i].translation());
-
-            auto &leftfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[9]]);
-            leftfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
-            leftfingerjoint.setAxis(Vec3f(-0.7071f, 0.0f, 0.7071f));
-            leftfingerjoint.setRange(0, 0.04);
-
-            auto &rightfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[10]]);
-            rightfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
-            rightfingerjoint.setAxis(Vec3f(0.7071f, 0.0f, -0.7071f));
-            rightfingerjoint.setRange(0, 0.04);
+            // auto &joint1 = this->createHingeJoint(actors[Link_main[0]], actors[Link_main[1]]);
+            // joint1.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
+            // joint1.setAxis(Vec3f(0.0f, 1.0f, 0.0f));
+            // joint1.setRange(-2.8973, 2.8973);
+            //
+            // auto &joint2 = this->createHingeJoint(actors[Link_main[1]], actors[Link_main[2]]);
+            // joint2.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
+            // joint2.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
+            // joint2.setRange(-1.7628, 1.7628);
+            //
+            // auto &joint3 = this->createHingeJoint(actors[Link_main[2]], actors[Link_main[3]]);
+            // joint3.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f, 0.0f) + instances[i].translation());
+            // joint3.setAxis(Vec3f(0.0f, 1.0f, 0.0f));
+            // joint3.setRange(-2.8973, 2.8973);
+            //
+            // auto &joint4 = this->createHingeJoint(actors[Link_main[3]], actors[Link_main[4]]);
+            // joint4.setAnchorPoint(Vec3f(0.0825f, 0.333f + 0.316f, 0.0f) + instances[i].translation());
+            // joint4.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
+            // // joint4.setRange(-3.0718, -0.0698);
+            // joint4.setRange(-3.0, 0.087);
+            //
+            // auto &joint5 = this->createHingeJoint(actors[Link_main[4]], actors[Link_main[5]]);
+            // joint5.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f + 0.384f, 0.0f) + instances[i].translation());
+            // joint5.setAxis(Vec3f(0.0f, 1.0f, 0.0f ));
+            // joint5.setRange(-2.8973, 2.8973);
+            //
+            // auto &joint6 = this->createHingeJoint(actors[Link_main[5]], actors[Link_main[6]]);
+            // joint6.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
+            // joint6.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
+            // joint6.setRange(-0.0175, 3.7525);
+            //
+            // auto &joint7 = this->createHingeJoint(actors[Link_main[6]], actors[Link_main[7]]);
+            // joint7.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
+            // joint7.setAxis(Vec3f(0.0f, -1.0f, 0.0f ));
+            // joint7.setRange(-2.8973, 2.8973);
+            //
+            // auto &handjoint = this->createFixedJoint(actors[Link_main[7]], actors[Link_main[8]]);
+            // handjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f, 0.0f) + instances[i].translation());
+            //
+            // auto &leftfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[9]]);
+            // leftfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
+            // leftfingerjoint.setAxis(Vec3f(-0.7071f, 0.0f, 0.7071f));
+            // leftfingerjoint.setRange(0, 0.04);
+            //
+            // auto &rightfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[10]]);
+            // rightfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
+            // rightfingerjoint.setAxis(Vec3f(0.7071f, 0.0f, -0.7071f));
+            // rightfingerjoint.setRange(0, 0.04);
         }
 
         //**************************************************//

@@ -17,7 +17,6 @@
 #include "helpers/tinyobj_helper.h"
 
 #include "UrdfFunc.h"
-#include "UrdfFUNC.h"
 
 namespace dyno
 {

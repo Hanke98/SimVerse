@@ -92,38 +92,46 @@ int main() {
         std::string urdfPath = getAssetPath() + "../asset/franka_description/robots/franka_panda.urdf"; // 替换为实际URDF路径
         
         // 准备解析所需的容器
-        std::vector<UrdfLink> links;
-        std::vector<UrdfJoint> joints;
-        std::string robotName;
+        // std::vector<UrdfLink> links;
+        // std::vector<UrdfJoint> joints;
+        // std::string robotName;
         
         // 调用parse函数（需要4个参数）
-        bool parseSuccess = parser.parse(urdfPath, links, joints, robotName);
+        // bool parseSuccess = parser.parse(urdfPath, links, joints, robotName);
+        bool parseSuccess = parser.parse(urdfPath);
         if (!parseSuccess) {
             throw std::runtime_error("Failed to parse URDF file: " + urdfPath);
         }
 
         std::cout << "URDF parsed successfully! Robot info:" << std::endl;
-        std::cout << "  Name: " << robotName << std::endl;
-        std::cout << "  Links: " << links.size() << std::endl;
-        std::cout << "  Joints: " << joints.size() << std::endl;
+        std::cout << "  Name: " << parser.robotName << std::endl;
+        std::cout << "  Links: " << parser.links.size() << std::endl;
+        std::cout << "  Joints: " << parser.joints.size() << std::endl;
 
-        for (const auto& link : links) {
+        for (const auto& link : parser.links) {
             std::cout << "    Link: " << link.name << ", Visual Mesh: "
                 << link.visualMeshPath << ", Collision Mesh: " << link.collisionMeshPath
                 // << "\n" << "    Local rotation matrix: " << link.meshTransform.rotation()
                 << std::endl;
         }
 
-        for (const auto& joint : joints) {
+        for (const auto& joint : parser.joints) {
+            Vec3f axisWorld = joint.originWorld.rotation() * joint.axis;
+
             std::cout << "    Joint: " << joint.name 
                       << ", Type: " << joint.type 
                       << ", Parent: " << joint.parentLink 
                       << ", Child: " << joint.childLink 
                       << ", Axis: [" << joint.axis.x << ", " << joint.axis.y << ", " << joint.axis.z << "]"
+                      << ", AxisWorld: " << axisWorld
                       << ", Limits: [" << joint.limits.lower << ", " << joint.limits.upper << "]"
                       << ", Damping: " << joint.damping
+                      << ", Local Rotation Matrix:" << joint.originLocal.rotation()
+                      << ", World Rotation Matrix:" << joint.originWorld.rotation() << "\n"
+                      << ", World Translation Vector:" << joint.originWorld.translation()
                       << std::endl;
         }
+
 
         // 2. 测试Robot类
         std::cout << "\nTesting Robot class..." << std::endl;

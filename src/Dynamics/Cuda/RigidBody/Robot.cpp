@@ -38,7 +38,7 @@ namespace dyno
 		this->clearRigidBodySystem();
 		this->clearRobot();
 
-		std::string filename = getAssetPath() + "/../asset/franka_description/robots/franka_panda.urdf";
+		std::string filename = getAssetPath() + "../asset/franka_description/robots/franka_panda.urdf";
 		if (this->varFilePath()->getValue() != filename)
 		{
 			this->varFilePath()->setValue(FilePath(filename));
@@ -46,10 +46,6 @@ namespace dyno
             std::cout << "Robot: Error when load file path " << std::endl;
         }
 
-        if (this->varFilePath()->getValue() != filename)
-        {
-            this->varFilePath()->setValue(FilePath(filename));
-        }
         auto instances = this->varVehiclesTransform()->getValue();
         uint armNum = instances.size();
 
@@ -64,28 +60,33 @@ namespace dyno
             auto texMesh = this->stateTextureMesh()->constDataPtr();
             std::map<int, std::shared_ptr<PdActor>> actors;
 
+            std::vector <int> Link0_Id = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};// without 0
+            // 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+            // std::vector <int> Link0_Id = {8};
             std::vector <int> Link1_Id = {12};
-            std::vector <int> Link0_Id = {0, 1, 2, 3, 4, 5, 6, 7, 8,9, 10, 11};
             std::vector <int> Link2_Id = {13};
             std::vector <int> Link3_Id = {14, 15, 16, 17};
+            // std::vector <int> Link3_Id = {14};
             std::vector <int> Link4_Id = {18, 19, 20, 21};
+            // std::vector <int> Link4_Id = {19};
             std::vector <int> Link5_Id = {22, 23, 24};
-            // std::vector <int> Link6_Id = {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41};
-            // std::vector <int> Link6_Id = {25, 26, 27, 28, 29, 30, 31, 33, 34, 35, 36, 37, 38, 39, 40, 41}; // without 32
-            std::vector <int> Link6_Id = {25, 26, 27, 28, 29, 30, 31, 33, 34, 35, 36, 37, 38, 39, 40, 41};
+            // std::vector <int> Link5_Id = {24, 41};
+            std::vector <int> Link6_Id = {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41}; // without 32
+            // std::vector <int> Link6_Id = {25};
             std::vector <int> Link7_Id = {42, 43, 44, 45, 46, 47, 48, 49};
+            // std::vector <int> Link7_Id = {49};
             std::vector <int> Hand_Id = {50, 51, 52, 53, 54};
+            // std::vector <int> Hand_Id = {53};
             std::vector <int> Left_Finger_Id = {55, 56};
+            // std::vector <int> Left_Finger_Id = {55};
             std::vector <int> Right_Finger_Id = {57, 58};
-            std::vector <int> Link_main = {8, 12, 13, 14,19, 24, 25, 49, 53, 55, 57};
-            // std::vector <int> finger_main = {55, 57};
-            // std::vector <int> hand_main = {53};
+            // std::vector <int> Right_Finger_Id = {57};
+            std::vector <int> Link_main = {8, 12, 13, 14, 19, 24, 25, 49, 53, 55, 57};
+
             std::vector <std::vector <int>> Link_Id = {Link0_Id, Link1_Id, Link2_Id, Link3_Id, Link4_Id, Link5_Id, Link6_Id, Link7_Id, Hand_Id, Left_Finger_Id, Right_Finger_Id};
-            // for (int it = 0; it < texMesh->shapes().size(); it++) {
-            // for (auto it : Link0_Id ) {
-            // for (auto it : finger_main  ) {
+
             int j = 0;
-            // for (auto it : Link_main ) {
+
             for (auto link_id : Link_Id) {
                 for (auto it : link_id) {
                     auto up = texMesh->shapes()[it]->boundingBox.v1;
@@ -105,7 +106,7 @@ namespace dyno
                     actors[it] = actor;
 
                     BoxInfo box;
-                    box.rot = Quat1f(0, Vec3f(0, 0, 1));
+
                     box.halfLength = (up - down) / 2;
 
                     this->bindBox(actor, box);
@@ -184,11 +185,16 @@ namespace dyno
     bool Robot<TDataType>::loadFromUrdf(const std::string& filePath)
     {
         UrdfParser parser;
-        if (!parser.parse(filePath, m_links, m_joints, m_robotName))
+        // if (!parser.parse(filePath, m_links, m_joints, m_robotName))
+        if (!parser.parse(filePath))
         {
             std::cerr << "Failed to parse URDF file: " << filePath << std::endl;
             return false;
         }
+
+        m_links = parser.links;
+        m_joints = parser.joints;
+        m_robotName = parser.robotName;
 
         // 构建名称到索引的映射
         m_linkNameToIndex.clear();

@@ -1,4 +1,3 @@
-
 #include "GltfFunc.h"
 #include "Topology/JointInfo.h"
 #include "ImageLoader.h"

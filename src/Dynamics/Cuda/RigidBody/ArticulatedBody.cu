@@ -17,6 +17,7 @@
 #include "helpers/tinyobj_helper.h"
 
 #include "UrdfFunc.h"
+#include "UrdfFUNC.h"
 
 namespace dyno
 {
@@ -150,15 +151,16 @@ namespace dyno
 		}
 		else if (ext == ".urdf")
 		{
-			auto gltfpath = filepath.path();
-			gltfpath.replace_extension(".gltf");
-			auto gltfname = gltfpath.string();
-			bool success = urdfToGltf(name, gltfname);
-			if (success) {
-				loadGLTFTextureMesh(texMesh, gltfname);
-			} else {
-				std::cerr << "Failed to convert URDF to GLTF" << std::endl;
-			}
+			loadURDFTextureMesh(texMesh, name);
+			// auto gltfpath = filepath.path();
+			// gltfpath.replace_extension(".gltf");
+			// auto gltfname = gltfpath.string();
+			// bool success = urdfToGltf(name, gltfname);
+			// if (success) {
+			// 	loadGLTFTextureMesh(texMesh, gltfname);
+			// } else {
+			// 	std::cerr << "Failed to convert URDF to GLTF" << std::endl;
+			// }
 		}
 	}
 

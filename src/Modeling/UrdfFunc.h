@@ -1,18 +1,20 @@
+//
+// Created by wjv on 2025/11/18.
+//
 #pragma once
 
-#include <string>
+#include "Topology/TextureMesh.h"
+#include <Field/FilePath.h>
+// #inclued "Material.h"
 
-// Forward declarations
-namespace tinygltf {
-    class Model;
+
+namespace dyno {
+    bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh, const FilePath& urdfFullPath);
+    // bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh, const std::string& filepath, bool useToCenter = true);
+    // bool loadTextureMeshFromObj_new(const FilePath& meshPath,
+    //                         std::vector<dyno::Vec3f>& outVertices,
+    //                         std::vector<dyno::Vec3f>& outNormals,
+    //                         std::vector<dyno::Vec2f>& outTexCoords,
+    //                         std::vector<uint>& outShapeIds,
+    //                         std::vector<std::shared_ptr<Material>>& outMaterials);
 }
-
-template <typename T>
-int addAccessor(tinygltf::Model &model, const std::vector<T> &data,
-                int type, int componentType, int elemSize);
-
-/// rpy (roll pitch yaw) 转四元数
-std::array<double, 4> rpyToQuat(double roll, double pitch, double yaw);
-
-/// 将URDF文件转换为glTF格式
-bool urdfToGltf(const std::string &urdfPath, const std::string &outputPath);

@@ -68,8 +68,6 @@ namespace dyno
 
         bool parse(const std::string& filePath);
 
-
-
         std::vector<UrdfLink> links;
         std::vector<UrdfJoint> joints;
         std::string robotName;

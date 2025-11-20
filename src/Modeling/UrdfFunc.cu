@@ -148,7 +148,6 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             // diffuse 纹理
             if (!mtl.diffuse_texname.empty())
             {
-                std::cout << "Loading diffuse texture: " << mtl.diffuse_texname << std::endl;
                 auto tex_path = (urdfRoot / mtl.diffuse_texname).string();
                 if (loader->loadImage(tex_path.c_str(), texture))
                 {
@@ -159,7 +158,6 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             // bump / normal 贴图
             if (!mtl.bump_texname.empty())
             {
-                std::cout << "Loading bump texture: " << mtl.bump_texname << std::endl;
                 auto tex_path = (urdfRoot/ mtl.bump_texname).string();
                 if (loader->loadImage(tex_path.c_str(), texture))
                 {
@@ -177,7 +175,6 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         std::vector<TopologyModule::Triangle> texCoordIndex;
 
         Transform3f T_world_mesh = composeTransform(link.T_world, link.meshTransform);
-
         Vec3f lo( REAL_MAX);
         Vec3f hi(-REAL_MAX);
 
@@ -236,27 +233,27 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                     texCoordIndex.push_back(tri);
                 }
 
-                // Vec3f transformedV0 = T_world_mesh * vertices[v0];
-                // Vec3f transformedV1 = T_world_mesh * vertices[v1];
-                // Vec3f transformedV2 = T_world_mesh * vertices[v2];
-                //
-                // // Update the bounding box with transformed vertices
-                // lo = lo.minimum(transformedV0);
-                // lo = lo.minimum(transformedV1);
-                // lo = lo.minimum(transformedV2);
-                //
-                // hi = hi.maximum(transformedV0);
-                // hi = hi.maximum(transformedV1);
-                // hi = hi.maximum(transformedV2);
+                Vec3f transformedV0 = T_world_mesh * vertices[v0];
+                Vec3f transformedV1 = T_world_mesh * vertices[v1];
+                Vec3f transformedV2 = T_world_mesh * vertices[v2];
+
+                // Update the bounding box with transformed vertices
+                lo = lo.minimum(transformedV0);
+                lo = lo.minimum(transformedV1);
+                lo = lo.minimum(transformedV2);
+
+                hi = hi.maximum(transformedV0);
+                hi = hi.maximum(transformedV1);
+                hi = hi.maximum(transformedV2);
 
                 // // 更新包围盒
-                lo = lo.minimum(vertices[v0]);
-                lo = lo.minimum(vertices[v1]);
-                lo = lo.minimum(vertices[v2]);
-
-                hi = hi.maximum(vertices[v0]);
-                hi = hi.maximum(vertices[v1]);
-                hi = hi.maximum(vertices[v2]);
+                // lo = lo.minimum(vertices[v0]);
+                // lo = lo.minimum(vertices[v1]);
+                // lo = lo.minimum(vertices[v2]);
+                //
+                // hi = hi.maximum(vertices[v0]);
+                // hi = hi.maximum(vertices[v1]);
+                // hi = hi.maximum(vertices[v2]);
 
                 // 填 shapeIds：把这几个顶点标记为当前 globalShapeId
                 shapeIds[v0] = globalShapeId;
@@ -276,10 +273,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         reShapes.push_back(mergedShape);
         globalShapeId++;
 
-        // 应用 URDF 的 <visual><origin> 变换到属于这个 link 的顶点
-        // 也就是把 [vOffset, vertices.size()) 这一段的顶点乘以 T_world*link.meshTransform
         // p_world = T_world * link.meshTransform * p_mesh
-
         auto R = T_world_mesh.rotation();
         for (size_t i = vOffset; i < vertices.size(); ++i)
         {
@@ -334,12 +328,15 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         Reduction<Vec3f> reduceBounding;
 
         auto& bounding = texMesh->shapes()[i]->boundingBox;
-        Vec3f lo = reduceBounding.minimum(targetPoints.begin(), targetPoints.size());
-        Vec3f hi = reduceBounding.maximum(targetPoints.begin(), targetPoints.size());
+        // Vec3f lo = reduceBounding.minimum(targetPoints.begin(), targetPoints.size());
+        // Vec3f hi = reduceBounding.maximum(targetPoints.begin(), targetPoints.size());
 
-        bounding.v0 = lo;
-        bounding.v1 = hi;
-        texMesh->shapes()[i]->boundingTransform.translation() = (lo + hi) / 2;
+        // bounding.v0 = lo;
+        // bounding.v1 = hi;
+        // texMesh->shapes()[i]->boundingTransform.translation() = (lo + hi) / 2;
+
+        Vec3f lo = bounding.v0;
+        Vec3f hi = bounding.v1;
 
         c_shapeCenter[i] = (lo + hi) / 2;
 
@@ -362,12 +359,11 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             texMesh->shapeIds(),
             d_ShapeCenter);
 
-
         auto& reShapes = texMesh->shapes();
 
         for (size_t i = 0; i < shapeNum; i++)
         {
-            // reShapes[i]->boundingTransform.translation() = reShapes[i]->boundingTransform.translation() ;//+ this->varLocation()->getValue()
+            reShapes[i]->boundingTransform.translation() = reShapes[i]->boundingTransform.translation() ;//+ this->varLocation()->getValue()
         }
     }
     else

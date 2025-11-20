@@ -78,7 +78,7 @@ namespace dyno
                 {
                     link.meshTransform = parseOrigin(originElem);
                     // mesh(Y-up) -> link(Z-up) 的转换：绕 X 轴 +90°
-                    Real angle = Real(M_PI) * Real(0.5);   // +90 度
+                    Real angle = -Real(M_PI) * Real(0.5);   // +90 度
                     Quat<Real> q_yUpToZUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
                     SquareMatrix<Real, 3> R_yUpToZUp = q_yUpToZUp.toMatrix3x3();
 
@@ -334,13 +334,13 @@ namespace dyno
         // Quat<Real> q_zUpToYUp(0.5, 0.5, 0.5, 0.5);
         SquareMatrix<Real, 3> R_zUpToYUp = q_zUpToYUp.toMatrix3x3();
 
-        SquareMatrix<Real, 3> R_zToY {0, 1, 0, 0, 0, 1, 1, 0, 0};
+        // SquareMatrix<Real, 3> R_zToY {0, 1, 0, 0, 0, 1, 1, 0, 0};
 
         // std::cout << "yUptozUP rotation matrix: " << R_yUpToZUp << std::endl;
 
         Vec3f t(0, 0, 0);
         Vec3f s(1, 1, 1);
-        Transform3f T_world_root(t, R_zToY, s);
+        Transform3f T_world_root(t, R_zUpToYUp, s);
 
         // 递归下去
         computeWorldTransformsRecursive(rootLinkName, T_world_root, linkIndex, linkChildJoints);

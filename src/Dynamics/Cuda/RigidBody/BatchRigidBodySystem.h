@@ -41,7 +41,7 @@ public:
       std::vector<int> ids;
     };
 
-    struct BatchRigidBodySystemTorqueControlParam
+    struct BatchRigidBodySystemTorqueControlParam: public BatchRigidBodySystemControlParamBase
     {
       std::vector<Coord> torques;
     };

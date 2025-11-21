@@ -296,21 +296,15 @@ namespace dyno
         mbSystem = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
         mbSystem->varGravityEnabled()->setValue(false);
 
-        for (int i = 0; i < rigidSystems.size(); ++i) {
-            rigidSystems[i].robot->connect(mbSystem->importVehicles());
-        }
+	    auto uav = scn->addNode(std::make_shared<UAV<DataType3f>>());
 
-	    // auto bike = scn->addNode(std::make_shared<UAV<DataType3f>>());
+	    std::vector<Transform3f> vehicleTransforms;
+	    vehicleTransforms.push_back(Transform3f(Vec3f(0.5, 0, 0), Quat1f(1.57, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    vehicleTransforms.push_back(Transform3f(Vec3f(10, 2, 0), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    vehicleTransforms.push_back(Transform3f(Vec3f(10, 2, 2), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    uav->varVehiclesTransform()->setValue(vehicleTransforms);
 
-	    // std::vector<Transform3f> vehicleTransforms;
-	    // vehicleTransforms.push_back(Transform3f(Vec3f(-5, 0, 0), Quat1f(1.57, Vec3f(0, 1, 0)).toMatrix3x3()));
-	    // vehicleTransforms.push_back(Transform3f(Vec3f(10, 20, 0), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
-	    // vehicleTransforms.push_back(Transform3f(Vec3f(10, 20, 20), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
-	    // bike->varVehiclesTransform()->setValue(vehicleTransforms);
-
-        // bike->stateInstanceTransform();
-
-	    // bike->connect(mbSystem->importVehicles());
+	    uav->connect(mbSystem->importVehicles());
 
         auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
         plane->varLengthX()->setValue(50);

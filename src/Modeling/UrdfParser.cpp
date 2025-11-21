@@ -328,9 +328,6 @@ namespace dyno
         // 初始化 root link 世界变换为单位变换
         // Transform3f T_world_root;
 
-        Real angle = -Real(M_PI) * Real(0.5);   // -90 度
-        Quat<Real> q_zUpToYUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
-        // SquareMatrix<Real, 3> R_zUpToYUp = q_zUpToYUp.toMatrix3x3();
 
         SquareMatrix<Real, 3> R_zUpToYUp {0, 1, 0, 0, 0, 1, 1, 0, 0};
 

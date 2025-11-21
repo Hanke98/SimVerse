@@ -81,10 +81,6 @@ namespace dyno
 
 		if (instanceNum.size() > 0)
 			tms.resize(instanceNum);
-		for (int i = 0;i < instanceNum.size();i++)
-		{
-		printf("instanceNum[%d]=%d\n", i, instanceNum[i]);
-		}
 
 		//Initialize CArrayList
 		for (uint i = 0; i < N; i++)

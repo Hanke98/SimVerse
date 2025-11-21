@@ -93,16 +93,9 @@ namespace dyno
 			{
 				tms[i].insert(Transform3f());
 			}
-			printf("tms[%d].size()=%d\n", i, tms[i].size());
-			for (int j = 0; j < tms[i].size(); j++)
-			{
-				printf("tms[%d][%d]=(%f, %f, %f)\n", i, j, tms[i][j].translation().x, tms[i][j].translation().y, tms[i][j].translation().z);
-			}
 		}
 
 		this->stateInstanceTransform()->assign(tms);
-		printf("tms.size()=%d\n", tms.size());
-		printf("this->stateInstanceTransform()->size()=%d\n", this->stateInstanceTransform()->size());
 
 		auto deTopo = this->stateTopology()->constDataPtr();
 		auto offset = deTopo->calculateElementOffset();
@@ -127,7 +120,6 @@ namespace dyno
 		this->stateBindingTag()->assign(tags);
 
 		this->updateInstanceTransform();
-	// abort();
 
 		tms.clear();
 		bindingPair.clear();

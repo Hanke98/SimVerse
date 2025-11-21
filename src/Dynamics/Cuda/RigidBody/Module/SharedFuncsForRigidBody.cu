@@ -21,7 +21,6 @@ namespace dyno
 		Mat3f rot = rotation[tId];
 
 		Transform3f ti = Transform3f(translate[tId], rot);
-		printf("tid: %4d, pair: (%4d, %4d) translate: (%f, %f, %f)\n", tId, pair.first, pair.second, translate[tId].x, translate[tId].y, translate[tId].z);
 
 		instanceTransform[pair.first][pair.second] = ti;
 	}
@@ -33,7 +32,6 @@ namespace dyno
 		const DArray<Pair<uint, uint>>& binding,
 		const DArray<int>& bindingtag)
 	{
-	printf("rotation.size()=%d\n", rotation.size());
 		cuExecute(rotation.size(),
 			SF_ApplyTransform,
 			instanceTransform,

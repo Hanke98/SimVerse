@@ -1,6 +1,7 @@
 #include "UrdfParser.h"
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
 namespace dyno
 {
@@ -24,11 +25,12 @@ namespace dyno
         return processedPath;
     }
 
-    bool UrdfParser::parse(const std::string& filePath, 
-                          std::vector<UrdfLink>& links, 
-                          std::vector<UrdfJoint>& joints,
-                          std::string& robotName)
+    bool UrdfParser::parse(const std::string& filePath, bool objYUp)
     {
+        links.clear();
+        joints.clear();
+        robotName.clear();
+
         tinyxml2::XMLDocument doc;
         tinyxml2::XMLError error = doc.LoadFile(filePath.c_str());
         if (error != tinyxml2::XML_SUCCESS)
@@ -76,9 +78,28 @@ namespace dyno
             {
                 // 解析原点变换
                 tinyxml2::XMLElement* originElem = visualElem->FirstChildElement("origin");
+
+                // bool yUp = true;
+                Transform3f meshTransform;
+
+                if (objYUp) {
+                    Real angle = Real(M_PI) * Real(0.5);   // +90 度
+                    Quat<Real> q_yUpToZUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
+                    SquareMatrix<Real, 3> R_yUpToZUp = q_yUpToZUp.toMatrix3x3();
+
+                    Vec3f t(0, 0, 0);
+                    Vec3f s(1, 1, 1);
+                    meshTransform.rotation() = R_yUpToZUp;
+                }
+
                 if (originElem)
                 {
-                    link.origin = parseOrigin(originElem);
+                    link.meshTransform = parseOrigin(originElem);
+                    // meshTransform  = origin * (yUpToZUp * p_meshYup)
+                    link.meshTransform = composeTransform(link.meshTransform, meshTransform);
+                } else {
+                    // meshTransform = origin * (yUpToZUp)
+                    link.meshTransform = meshTransform;
                 }
 
                 // 解析几何信息
@@ -89,6 +110,27 @@ namespace dyno
                     if (meshElem && meshElem->Attribute("filename"))
                     {
                         link.visualMeshPath = processMeshPath(meshElem->Attribute("filename"));
+                    }
+                }
+            }
+            tinyxml2::XMLElement* collisionElem = linkElem->FirstChildElement("collision");
+            if (collisionElem)
+            {
+                // 解析原点变换
+                // tinyxml2::XMLElement* originElem = visualElem->FirstChildElement("origin");
+                // if (originElem)
+                // {
+                //     link.origin = parseOrigin(originElem);
+                // }
+
+                // 解析几何信息
+                tinyxml2::XMLElement* geometryElem = collisionElem->FirstChildElement("geometry");
+                if (geometryElem)
+                {
+                    tinyxml2::XMLElement* meshElem = geometryElem->FirstChildElement("mesh");
+                    if (meshElem && meshElem->Attribute("filename"))
+                    {
+                        link.collisionMeshPath = processMeshPath(meshElem->Attribute("filename"));
                     }
                 }
             }
@@ -138,7 +180,7 @@ namespace dyno
             tinyxml2::XMLElement* originElem = jointElem->FirstChildElement("origin");
             if (originElem)
             {
-                joint.origin = parseOrigin(originElem);
+                joint.originLocal = parseOrigin(originElem);
             }
 
             // 解析关节轴
@@ -165,13 +207,43 @@ namespace dyno
             joints.push_back(joint);
         }
 
+        // link name to index
+        std::unordered_map<std::string, int> linkIndex;
+        for (size_t i = 0; i < links.size(); ++i)
+        {
+            linkIndex[links[i].name] = static_cast<int>(i);
+        }
+
+        // 记录每个 link 的子关节
+        std::unordered_map<std::string, std::vector<int>> linkChildJoints;
+        // 记录“谁是 child link”，用来找 root link
+        std::unordered_set<std::string> childLinks;
+
+        for (size_t j = 0; j < joints.size(); ++j)
+        {
+            const auto& joint = joints[j];
+            linkChildJoints[joint.parentLink].push_back(static_cast<int>(j));
+            childLinks.insert(joint.childLink);
+        }
+
+        // 找 root link：出现在 links 中，但不在 childLinks 中
+        std::string rootLinkName;
+        for (auto& link : links)
+        {
+            if (!childLinks.count(link.name))
+            {
+                rootLinkName = link.name;
+                link.isRoot = true;
+                break;
+            }
+        }
+
+        computeWorldTransforms(rootLinkName, linkIndex, linkChildJoints);
         return true;
     }
 
     Transform3f UrdfParser::parseOrigin(tinyxml2::XMLElement* originElem)
     {
-        Transform3f transform;
-        
         // 解析xyz平移
         Vec3f xyz(0, 0, 0);
         if (originElem->Attribute("xyz"))
@@ -187,11 +259,12 @@ namespace dyno
             std::stringstream ss(originElem->Attribute("rpy"));
             ss >> rpy[0] >> rpy[1] >> rpy[2];
         }
-        
-        // transform.setTranslation(xyz);
-        // transform.setRotation(Quat1f(rpy[0], Vec3f(1, 0, 0)) * 
-        //                      Quat1f(rpy[1], Vec3f(0, 1, 0)) * 
-        //                      Quat1f(rpy[2], Vec3f(0, 0, 1)));
+
+        Quat<Real> quat(rpy[2], rpy[1], rpy[0]);
+        SquareMatrix<Real, 3> rotationMatrixLocal = quat.toMatrix3x3();
+        Vec3f scale(1, 1, 1);
+
+        Transform3f transform(xyz, rotationMatrixLocal, scale);
                              
         return transform;
     }
@@ -228,5 +301,75 @@ namespace dyno
             ss >> vec[0] >> vec[1] >> vec[2];
         }
         return vec;
+    }
+
+    Transform3f composeTransform(const Transform3f& parent,
+                                    const Transform3f& local)
+    {
+        Transform3f out;
+
+        // R_out = R_p * R_l
+        out.rotation() = parent.rotation() * local.rotation();
+
+        // t_out = R_p * t_l + t_p
+        out.translation() = parent.rotation() * local.translation()
+                            + parent.translation();
+
+        // or：parent.scale() * local.scale()
+        out.scale() = parent.scale();
+
+        return out;
+    }
+
+    void UrdfParser::computeWorldTransforms(const std::string& rootLinkName,
+                                        const std::unordered_map<std::string, int>& linkIndex,
+                                        const std::unordered_map<std::string, std::vector<int>>& linkChildJoints)
+    {
+        // 初始化 root link 世界变换为单位变换
+        // Transform3f T_world_root;
+
+
+        SquareMatrix<Real, 3> R_zUpToYUp {0, 1, 0, 0, 0, 1, 1, 0, 0};
+
+        Vec3f t(0, 0, 0);
+        Vec3f s(1, 1, 1);
+        Transform3f T_world_root(t, R_zUpToYUp, s);
+
+        // 递归下去
+        computeWorldTransformsRecursive(rootLinkName, T_world_root, linkIndex, linkChildJoints);
+    }
+
+    void UrdfParser::computeWorldTransformsRecursive(
+        const std::string& linkName,
+        const Transform3f& T_world_link,
+        const std::unordered_map<std::string, int>& linkIndex,
+        const std::unordered_map<std::string, std::vector<int>>& linkChildJoints)
+    {
+        // 写回 link 的 world pose
+        auto itLink = linkIndex.find(linkName);
+        if (itLink == linkIndex.end()) return;
+
+        UrdfLink& link = links[itLink->second];
+        link.T_world = T_world_link;
+
+        // 找这个 link 下挂了哪些关节
+        auto itJoints = linkChildJoints.find(linkName);
+        if (itJoints == linkChildJoints.end())
+            return;
+
+        for (int jointIdx : itJoints->second)
+        {
+            UrdfJoint& joint = joints[jointIdx];
+
+            // joint.originWorld = T_world_parent * originLocal
+            joint.originWorld = composeTransform(T_world_link, joint.originLocal);
+
+            // 若你在 link 里还有额外的 <origin> (例如视觉/碰撞)，可以再乘一次
+            const std::string& childName = joint.childLink;
+            Transform3f T_world_child = joint.originWorld;  // world -> child
+
+            // 递归子 link
+            computeWorldTransformsRecursive(childName, T_world_child, linkIndex, linkChildJoints);
+        }
     }
 }

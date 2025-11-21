@@ -72,7 +72,7 @@ else()
         endforeach()
     endif()
     
-    add_library(${LIB_NAME} STATIC ${LIB_SRC} ${GPU_SRC}) 
+    add_library(${LIB_NAME} STATIC ${LIB_SRC} ${GPU_SRC})
 endif()
 
 add_compile_definitions(GLM_ENABLE_EXPERIMENTAL)

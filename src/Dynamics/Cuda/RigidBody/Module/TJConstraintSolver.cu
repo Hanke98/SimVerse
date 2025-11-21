@@ -259,7 +259,6 @@ namespace dyno
 		mImpulseExt.reset();
 
 		Real dt = this->inTimeStep()->getData();
-	  printf("in TJConstraintSolver::constrain(), dt=%f\n", dt);
 
 
 		if (!this->inContacts()->isEmpty() || topo->totalJointSize() > 0)
@@ -312,11 +311,11 @@ namespace dyno
 
 				mImpulseC.reset();
 				initializeJacobian(dh);
-				auto error = checkOutPositionError(
-					this->inCenter()->getData(),
-					mVelocityConstraints
-				);
-				printf(" Substep %d, Position Error = %f\n", i, error);
+				// auto error = checkOutPositionError(
+				// 	this->inCenter()->getData(),
+				// 	mVelocityConstraints
+				// );
+				// printf(" Substep %d, Position Error = %f\n", i, error);
 
 				{
 					PROFILE_SCOPE("JacobiIterationLoop");

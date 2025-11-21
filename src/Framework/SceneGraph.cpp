@@ -253,7 +253,7 @@ namespace dyno
 
 		timer.stop();
 
-		PROFILE_REPORT_FROM("TJConstraintSolver::constrain");
+		// PROFILE_REPORT_FROM("TJConstraintSolver::constrain");
 
 		std::cout << "----------------    Frame " << mFrameNumber << " Ended! ( " << timer.getElapsedTime() << " ms in Total)  ----------------" << std::endl << std::endl;
 

@@ -51,6 +51,8 @@ public:
 
 		DEF_VAR(FilePath, UrdfFilePath, "", "");
 
+    // ------------------------------------
+    // Control APIs
 	  void createBatchMultiBodies(Coord base, Coord offset, int num_x, int num_y, int num_z);
 
     void resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param);
@@ -58,6 +60,19 @@ public:
     void applyTorqueControl(BatchRigidBodySystemTorqueControlParam& torque_param);
 
     void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
+    // ------------------------------------
+
+    // ------------------------------------
+    // Setters and Getters
+    void setDt(Real dt)
+    {
+    }
+
+    void setGravityEnabled(bool enabled)
+    {
+      this->varGravityEnabled()->setValue(enabled);
+    }
+    // ------------------------------------
 
 protected:
 

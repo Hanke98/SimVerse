@@ -87,8 +87,6 @@ namespace dyno
                     rigidbody.motionType = BodyType::Dynamic;
                 }
 
-                rigidbody.linearVelocity = Vec3f(1.0, 0.0, 0.0);
-
                 auto actor = this->createRigidBody(rigidbody);
                 actors[it] = actor;
 
@@ -105,19 +103,19 @@ namespace dyno
                 auto parentName = this->urdfParser.joints[j].parentLink;
                 auto childName = this->urdfParser.joints[j].childLink;
 
-                if (this->urdfParser.joints[j].type == 0) {
+                if (this->urdfParser.joints[j].type == REVOLUTE) {
                     auto &joint = this->createHingeJoint(actors[linkIndex[parentName]], actors[linkIndex[childName]]);
                     joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
                     joint.setAxis(this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis);
                     joint.setRange(this->urdfParser.joints[j].limits.lower, this->urdfParser.joints[j].limits.upper);
                 }
-                if (this->urdfParser.joints[j].type == 1) {
+                if (this->urdfParser.joints[j].type == PRISMATIC) {
                     auto &joint = this->createSliderJoint(actors[linkIndex[parentName]], actors[linkIndex[childName]]);
                     joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
                     joint.setAxis(this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis);
                     joint.setRange(this->urdfParser.joints[j].limits.lower, this->urdfParser.joints[j].limits.upper);
                 }
-                if (this->urdfParser.joints[j].type == 2) {
+                if (this->urdfParser.joints[j].type == FIXED) {
                     auto &joint = this->createFixedJoint(actors[linkIndex[parentName]], actors[linkIndex[childName]]);
                     joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
                 }

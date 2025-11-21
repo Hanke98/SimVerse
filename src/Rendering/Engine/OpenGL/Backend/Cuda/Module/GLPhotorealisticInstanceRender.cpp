@@ -50,6 +50,7 @@ namespace dyno
 	void GLPhotorealisticInstanceRender::updateImpl()
 	{
 		auto inst = this->inTransform()->constDataPtr();
+		printf("[GLPhotorealisticRender] inst.size()=%d\n", inst->size());
 
 		if (this->inTransform()->isModified())
 		{

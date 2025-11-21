@@ -35,10 +35,15 @@ public:
       int type;
     };
 
-    struct BatchRigidBodySystemControlParam
+    struct BatchRigidBodySystemControlParamBase
     {
-      std::vector<int> reset_mb_ids;
-      std::vector<NonCtrlMultiBodyStatesInfo> non_ctrl_mb_states;
+      int num_bodies;
+      std::vector<int> ids;
+    };
+
+    struct BatchRigidBodySystemTorqueControlParam
+    {
+      std::vector<Coord> torques;
     };
 
     BatchRigidBodySystem();
@@ -46,15 +51,21 @@ public:
 
 		DEF_VAR(FilePath, UrdfFilePath, "", "");
 
-	  void createOneMultiBody(Coord base, Coord offset);
-
 	  void createBatchMultiBodies(Coord base, Coord offset, int num_x, int num_y, int num_z);
+
+    void resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param);
+  
+    void applyTorqueControl(BatchRigidBodySystemTorqueControlParam& torque_param);
+
+    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
+
+protected:
 
     void resetOneMultiBodies(int mb_id);
 
-    void resetBatchMultiBodies(BatchRigidBodySystemControlParam& param);
+	  void createOneMultiBody(Coord base, Coord offset);
 
-    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
+    void applyOneMultiBodyTorqueControl(int mb_id, Coord torque);
 
 protected:
     std::vector<MulitBodyChainIndices> ctrl_mb_chains; // main multi-body chains with control

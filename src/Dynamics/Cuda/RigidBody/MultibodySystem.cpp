@@ -91,7 +91,6 @@ namespace dyno
 
 		auto vehicles = this->getVehicles();
 
-	printf("in multibody resetStates() vehicles.size(): %d\n", vehicles.size());
 		if (vehicles.size() > 0)
 		{
 			CArray<std::shared_ptr<DiscreteElements<TDataType>>> topos;
@@ -108,7 +107,6 @@ namespace dyno
 				sizeOfRigidBodies += vehicle->stateMass()->size();
 			printf("vehicle %d has %d rigid bodies\n", i, vehicle->stateMass()->size());
 			}
-		abort();
 
 			auto curTopo = this->stateTopology()->getDataPtr();
 

@@ -33,20 +33,20 @@ namespace dyno
     auto defaultTopo = std::make_shared<DiscreteElements<TDataType>>();
     this->stateTopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
     //
-    // auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
-    // this->stateTopology()->connect(elementQuery->inDiscreteElements());
-    // this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
-    // this->stateAttribute()->connect(elementQuery->inAttribute());
-    // this->animationPipeline()->pushModule(elementQuery);
-    //
-    // auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
-    // this->stateTopology()->connect(cdBV->inDiscreteElements());
-    // this->animationPipeline()->pushModule(cdBV);
-    //
-    // auto merge = std::make_shared<ContactsUnion<TDataType>>();
-    // elementQuery->outContacts()->connect(merge->inContactsA());
-    // cdBV->outContacts()->connect(merge->inContactsB());
-    // this->animationPipeline()->pushModule(merge);
+    auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
+    this->stateTopology()->connect(elementQuery->inDiscreteElements());
+    this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
+    this->stateAttribute()->connect(elementQuery->inAttribute());
+    this->animationPipeline()->pushModule(elementQuery);
+
+    auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
+    this->stateTopology()->connect(cdBV->inDiscreteElements());
+    this->animationPipeline()->pushModule(cdBV);
+
+    auto merge = std::make_shared<ContactsUnion<TDataType>>();
+    elementQuery->outContacts()->connect(merge->inContactsA());
+    cdBV->outContacts()->connect(merge->inContactsB());
+    this->animationPipeline()->pushModule(merge);
 
     auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
     // auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
@@ -71,7 +71,7 @@ namespace dyno
     this->stateQuaternion()->connect(iterSolver->inQuaternion());
     this->stateInitialInertia()->connect(iterSolver->inInitialInertia());
     this->stateTopology()->connect(iterSolver->inDiscreteElements());
-    // merge->outContacts()->connect(iterSolver->inContacts());
+    merge->outContacts()->connect(iterSolver->inContacts());
     this->animationPipeline()->pushModule(iterSolver);
 
     this->setDt(0.016f);

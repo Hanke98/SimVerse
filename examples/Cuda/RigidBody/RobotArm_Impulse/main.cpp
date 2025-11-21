@@ -16,19 +16,19 @@ int main() {
     simulator.createScene();
     std::cout << "场景创建完成" << std::endl;
     
-    // simulator.initBatchSolver();
+    simulator.initBatchSolver();
 
     // 2. 添加机械臂系统
     Vec3f offset(1.0f, 0.0f, 0.0f);    // 机械臂基座偏移
     Vec3f targetPos(0.2, 1.0, 0.3); // 目标位置示例
     std::vector<std::vector<float>> moterVelocities;
     std::vector<float> moterVelocities1{0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    const int N = 1;
-    for (int i = 0; i < N; ++i) {
-        moterVelocities.push_back(moterVelocities1);
-        simulator.addRigidSystem(offset, targetPos, 50.0f);
-    }
-    simulator.addMultiBoydSystem();
+    // const int N = 1;
+    // for (int i = 0; i < N; ++i) {
+    //     moterVelocities.push_back(moterVelocities1);
+    //     simulator.addRigidSystem(offset, targetPos, 50.0f);
+    // }
+    // simulator.addMultiBoydSystem();
 
     // 3. 初始化仿真环境（窗口大小1280x768）
     simulator.setupSceneGraph();

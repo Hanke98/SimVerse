@@ -68,7 +68,6 @@ namespace dyno
 		uint N = 0;
 		if (texMesh != NULL);
 		N = texMesh->shapes().size();
-	printf("N: %d\n", N);
 
 		CArrayList<Transform3f> tms;
 		CArray<uint> instanceNum(N);
@@ -82,6 +81,10 @@ namespace dyno
 
 		if (instanceNum.size() > 0)
 			tms.resize(instanceNum);
+		for (int i = 0;i < instanceNum.size();i++)
+		{
+		printf("instanceNum[%d]=%d\n", i, instanceNum[i]);
+		}
 
 		//Initialize CArrayList
 		for (uint i = 0; i < N; i++)
@@ -90,9 +93,16 @@ namespace dyno
 			{
 				tms[i].insert(Transform3f());
 			}
+			printf("tms[%d].size()=%d\n", i, tms[i].size());
+			for (int j = 0; j < tms[i].size(); j++)
+			{
+				printf("tms[%d][%d]=(%f, %f, %f)\n", i, j, tms[i][j].translation().x, tms[i][j].translation().y, tms[i][j].translation().z);
+			}
 		}
 
 		this->stateInstanceTransform()->assign(tms);
+		printf("tms.size()=%d\n", tms.size());
+		printf("this->stateInstanceTransform()->size()=%d\n", this->stateInstanceTransform()->size());
 
 		auto deTopo = this->stateTopology()->constDataPtr();
 		auto offset = deTopo->calculateElementOffset();
@@ -117,6 +127,7 @@ namespace dyno
 		this->stateBindingTag()->assign(tags);
 
 		this->updateInstanceTransform();
+	// abort();
 
 		tms.clear();
 		bindingPair.clear();

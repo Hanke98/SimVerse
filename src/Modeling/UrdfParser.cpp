@@ -25,7 +25,7 @@ namespace dyno
         return processedPath;
     }
 
-    bool UrdfParser::parse(const std::string& filePath)
+    bool UrdfParser::parse(const std::string& filePath, bool objYUp)
     {
         links.clear();
         joints.clear();
@@ -79,22 +79,27 @@ namespace dyno
                 // 解析原点变换
                 tinyxml2::XMLElement* originElem = visualElem->FirstChildElement("origin");
 
-                Real angle = Real(M_PI) * Real(0.5);   // +90 度
-                Quat<Real> q_yUpToZUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
-                SquareMatrix<Real, 3> R_yUpToZUp = q_yUpToZUp.toMatrix3x3();
+                // bool yUp = true;
+                Transform3f meshTransform;
 
-                Vec3f t(0, 0, 0);
-                Vec3f s(1, 1, 1);
-                Transform3f yUpToZUp(t, R_yUpToZUp, s);
+                if (objYUp) {
+                    Real angle = Real(M_PI) * Real(0.5);   // +90 度
+                    Quat<Real> q_yUpToZUp(0, 0, angle);    // yaw=0, pitch=0, roll=+90°
+                    SquareMatrix<Real, 3> R_yUpToZUp = q_yUpToZUp.toMatrix3x3();
+
+                    Vec3f t(0, 0, 0);
+                    Vec3f s(1, 1, 1);
+                    meshTransform.rotation() = R_yUpToZUp;
+                }
 
                 if (originElem)
                 {
                     link.meshTransform = parseOrigin(originElem);
                     // meshTransform  = origin * (yUpToZUp * p_meshYup)
-                    link.meshTransform = composeTransform(link.meshTransform, yUpToZUp);
+                    link.meshTransform = composeTransform(link.meshTransform, meshTransform);
                 } else {
                     // meshTransform = origin * (yUpToZUp)
-                    link.meshTransform = yUpToZUp;
+                    link.meshTransform = meshTransform;
                 }
 
                 // 解析几何信息
@@ -223,11 +228,12 @@ namespace dyno
 
         // 找 root link：出现在 links 中，但不在 childLinks 中
         std::string rootLinkName;
-        for (const auto& link : links)
+        for (auto& link : links)
         {
             if (!childLinks.count(link.name))
             {
                 rootLinkName = link.name;
+                link.isRoot = true;
                 break;
             }
         }

@@ -29,6 +29,7 @@ namespace dyno
         std::string collisionMeshPath; // collision mesh path
         Transform3f T_world; // world transform
         uint shapeId;
+        bool isRoot = false;
     };
 
     // 关节限制信息
@@ -62,7 +63,7 @@ namespace dyno
         UrdfParser() = default;
         ~UrdfParser() = default;
 
-        bool parse(const std::string& filePath);
+        bool parse(const std::string& filePath, bool objYUp);
 
         std::vector<UrdfLink> links;
         std::vector<UrdfJoint> joints;

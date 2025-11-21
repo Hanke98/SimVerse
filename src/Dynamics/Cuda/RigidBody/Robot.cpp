@@ -39,6 +39,9 @@ namespace dyno
 		this->clearRobot();
 
 		std::string filename = getAssetPath() + "../asset/franka_description/robots/franka_panda.urdf";
+        // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka.urdf";
+        // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka_allegro_touch_sensor.urdf";
+
 		if (this->varFilePath()->getValue() != filename)
 		{
 			this->varFilePath()->setValue(FilePath(filename));
@@ -78,12 +81,13 @@ namespace dyno
 
                 rigidbody.position = Quat1f(instances[i].rotation()).rotate(texMesh->shapes()[it]->boundingTransform.translation()) + instances[i].translation();
                 rigidbody.angle = Quat1f(instances[i].rotation());
-                rigidbody.motionType = BodyType::Dynamic;
-                if (it == 1) {
-                    rigidbody.angularVelocity = Vec3f(0, 1, 0);
+                if (this->urdfParser.links[l].isRoot) {
+                    rigidbody.motionType = BodyType::Static;
                 } else {
-                    rigidbody.linearVelocity = Vec3f(1, 0, 0);
+                    rigidbody.motionType = BodyType::Dynamic;
                 }
+
+                rigidbody.linearVelocity = Vec3f(1.0, 0.0, 0.0);
 
                 auto actor = this->createRigidBody(rigidbody);
                 actors[it] = actor;
@@ -97,31 +101,11 @@ namespace dyno
                 this->bindShape(actor, Pair<uint, uint>(it, i));
             }
 
-            // for (size_t linkId = 0; linkId < this->urdfParser.links.size(); ++linkId)
-            // {
-            //     const auto& link = this->urdfParser.links[linkId];
-            //     auto actorIt = actors.find(linkId);  // 根据索引从 actors 中找到对应的 actor
-            //
-            //     if (actorIt != actors.end())
-            //     {
-            //         linkNameToActor[link.name] = actorIt->second;  // 将 linkName 映射到 actor
-            //     }
-            //     else
-            //     {
-            //         std::cerr << "Error: Actor not found for link: " << link.name << std::endl;
-            //     }
-            // }
-
-            // for (const auto& actorPair : actors) {
-            //     std::cout << "Actor index: " << actorPair.first << " | Actor: " << actorPair.second->idx << std::endl;
-            // }
-
             for (int j = 0; j < this->urdfParser.joints.size(); ++j) {
                 auto parentName = this->urdfParser.joints[j].parentLink;
                 auto childName = this->urdfParser.joints[j].childLink;
 
                 if (this->urdfParser.joints[j].type == 0) {
-                    // std::cout << parentName.c_str() << " 's actorId:" << linkIndex[parentName] << std::endl;
                     auto &joint = this->createHingeJoint(actors[linkIndex[parentName]], actors[linkIndex[childName]]);
                     joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
                     joint.setAxis(this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis);
@@ -144,51 +128,6 @@ namespace dyno
                 std::cout << j << " lower limits and upper limits: " << this->urdfParser.joints[j].limits.lower
                 << ", " << this->urdfParser.joints[j].limits.upper<< std::endl;
             }
-
-            //
-            // auto &joint2 = this->createHingeJoint(actors[Link_main[1]], actors[Link_main[2]]);
-            // joint2.setAnchorPoint(Vec3f(0.0f, 0.333f, 0.0f) + instances[i].translation());
-            // joint2.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
-            // joint2.setRange(-1.7628, 1.7628);
-            //
-            // auto &joint3 = this->createHingeJoint(actors[Link_main[2]], actors[Link_main[3]]);
-            // joint3.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f, 0.0f) + instances[i].translation());
-            // joint3.setAxis(Vec3f(0.0f, 1.0f, 0.0f));
-            // joint3.setRange(-2.8973, 2.8973);
-            //
-            // auto &joint4 = this->createHingeJoint(actors[Link_main[3]], actors[Link_main[4]]);
-            // joint4.setAnchorPoint(Vec3f(0.0825f, 0.333f + 0.316f, 0.0f) + instances[i].translation());
-            // joint4.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
-            // // joint4.setRange(-3.0718, -0.0698);
-            // joint4.setRange(-3.0, 0.087);
-            //
-            // auto &joint5 = this->createHingeJoint(actors[Link_main[4]], actors[Link_main[5]]);
-            // joint5.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316f + 0.384f, 0.0f) + instances[i].translation());
-            // joint5.setAxis(Vec3f(0.0f, 1.0f, 0.0f ));
-            // joint5.setRange(-2.8973, 2.8973);
-            //
-            // auto &joint6 = this->createHingeJoint(actors[Link_main[5]], actors[Link_main[6]]);
-            // joint6.setAnchorPoint(Vec3f(0.0f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
-            // joint6.setAxis(Vec3f(-1.0f, 0.0f, 0.0f ));
-            // joint6.setRange(-0.0175, 3.7525);
-            //
-            // auto &joint7 = this->createHingeJoint(actors[Link_main[6]], actors[Link_main[7]]);
-            // joint7.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f, 0.0f) + instances[i].translation());
-            // joint7.setAxis(Vec3f(0.0f, -1.0f, 0.0f ));
-            // joint7.setRange(-2.8973, 2.8973);  !!!!!!
-            //
-            // auto &handjoint = this->createFixedJoint(actors[Link_main[7]], actors[Link_main[8]]);
-            // handjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f, 0.0f) + instances[i].translation()); !!!
-            //
-            // auto &leftfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[9]]);
-            // leftfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
-            // leftfingerjoint.setAxis(Vec3f(-0.7071f, 0.0f, 0.7071f));
-            // leftfingerjoint.setRange(0, 0.04);
-            //
-            // auto &rightfingerjoint = this->createSliderJoint(actors[Link_main[8]], actors[Link_main[10]]);
-            // rightfingerjoint.setAnchorPoint(Vec3f(0.088f, 0.333f + 0.316 + 0.384f - 0.107f - 0.0584, 0.0f) + instances[i].translation());
-            // rightfingerjoint.setAxis(Vec3f(0.7071f, 0.0f, -0.7071f));
-            // rightfingerjoint.setRange(0, 0.04);
         }
 
         //**************************************************//
@@ -196,15 +135,15 @@ namespace dyno
     }
     
     template<typename TDataType>
-    bool Robot<TDataType>::loadFromUrdf(const std::string& filePath)
+    bool Robot<TDataType>::loadFromUrdf()
     {
-        UrdfParser parser;
+        auto parser = this->urdfParser;
         // if (!parser.parse(filePath, m_links, m_joints, m_robotName))
-        if (!parser.parse(filePath))
-        {
-            std::cerr << "Failed to parse URDF file: " << filePath << std::endl;
-            return false;
-        }
+        // if (!parser.parse(filePath))
+        // {
+        //     std::cerr << "Failed to parse URDF file: " << filePath << std::endl;
+        //     return false;
+        // }
 
         m_links = parser.links;
         m_joints = parser.joints;

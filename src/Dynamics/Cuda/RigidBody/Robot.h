@@ -25,7 +25,7 @@ namespace dyno
         ~Robot() override;
 
         // 从URDF文件加载机器人模型
-        bool loadFromUrdf(const std::string& filePath);
+        bool loadFromUrdf();
 
         // 获取机器人名称
         const std::string& getName() const { return m_robotName; }

@@ -42,7 +42,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     uint globalShapeId = 0;
 
     // Iterate through each link and handle the visual mesh
-    for (const auto& link : links) {
+    for (auto& link : links) {
         if (link.visualMeshPath.empty())
             continue;
 
@@ -271,6 +271,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         mergedShape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
 
         reShapes.push_back(mergedShape);
+        link.shapeId = globalShapeId;
         globalShapeId++;
 
         // p_world = T_world * link.meshTransform * p_mesh

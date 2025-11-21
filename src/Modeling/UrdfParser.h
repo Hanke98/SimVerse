@@ -28,6 +28,7 @@ namespace dyno
         Transform3f meshTransform;          // 原点变换
         std::string collisionMeshPath; // collision mesh path
         Transform3f T_world; // world transform
+        uint shapeId;
     };
 
     // 关节限制信息

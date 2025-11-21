@@ -66,8 +66,13 @@ namespace dyno
 
             auto shapes = texMesh->shapes();
             // auto shapeid = texMesh->shapeIds();
+            std::unordered_map<std::string, int> linkIndex;
 
-            for (int it = 0; it < shapes.size(); ++it) {
+            for (int l = 0; l < this->urdfParser.links.size(); ++l) {
+
+                auto it = this->urdfParser.links[l].shapeId;
+                linkIndex[this->urdfParser.links[l].name] = it;
+                std::cout << "name of link: " << this->urdfParser.links[l].name << " | shapeId of link: " << this->urdfParser.links[l].shapeId << std::endl;
                 auto up = texMesh->shapes()[it]->boundingBox.v1;
                 auto down = texMesh->shapes()[it]->boundingBox.v0;
 
@@ -112,22 +117,28 @@ namespace dyno
             // }
 
             for (int j = 0; j < this->urdfParser.joints.size(); ++j) {
+                auto parentName = this->urdfParser.joints[j].parentLink;
+                auto childName = this->urdfParser.joints[j].childLink;
+
                 if (this->urdfParser.joints[j].type == 0) {
-                    auto &joint = this->createHingeJoint(actors[j], actors[j+1]);
+                    // std::cout << parentName.c_str() << " 's actorId:" << linkIndex[parentName] << std::endl;
+                    auto &joint = this->createHingeJoint(actors[linkIndex[parentName]], actors[linkIndex[childName]]);
                     joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
                     joint.setAxis(this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis);
                     joint.setRange(this->urdfParser.joints[j].limits.lower, this->urdfParser.joints[j].limits.upper);
                 }
                 if (this->urdfParser.joints[j].type == 1) {
-                    auto &joint = this->createSliderJoint(actors[j], actors[j+1]);
+                    auto &joint = this->createSliderJoint(actors[linkIndex[parentName]], actors[linkIndex[childName]]);
                     joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
                     joint.setAxis(this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis);
                     joint.setRange(this->urdfParser.joints[j].limits.lower, this->urdfParser.joints[j].limits.upper);
                 }
                 if (this->urdfParser.joints[j].type == 2) {
-                    auto &joint = this->createFixedJoint(actors[j], actors[j+1]);
+                    auto &joint = this->createFixedJoint(actors[linkIndex[parentName]], actors[linkIndex[childName]]);
                     joint.setAnchorPoint(this->urdfParser.joints[j].originWorld.translation() + instances[i].translation());
                 }
+                std::cout << j << " joint parent: "<< parentName.c_str() << " | actorId:" << linkIndex[parentName] << std::endl;
+                std::cout << j << " joint child: "<< childName.c_str() << " | actorId:" << linkIndex[childName] << std::endl;
                 std::cout << j << " joint axis: " <<this->urdfParser.joints[j].originWorld.rotation() * this->urdfParser.joints[j].axis << std::endl;
                 std::cout << j << " joint origin: " << this->urdfParser.joints[j].originWorld.translation() << std::endl;
                 std::cout << j << " lower limits and upper limits: " << this->urdfParser.joints[j].limits.lower

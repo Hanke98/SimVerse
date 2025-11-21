@@ -586,11 +586,8 @@ namespace dyno
 
 		auto instances = this->varVehiclesTransform()->getValue();
 		uint vehicleNum = instances.size();
-	printf("in VAV resetStates(), vehicleNum=%d\n", vehicleNum);
 		for (size_t i = 0; i < vehicleNum; i++)
 		{
-		printf("in VAV resetStates(), i=%d\n", i);
-		printf("translation: (%f, %f, %f)\n", instances[i].translation()[0], instances[i].translation()[1], instances[i].translation()[2]);
 			RigidBodyInfo rigidbody;
 			rigidbody.bodyId = i;
 			rigidbody.friction = this->varFrictionCoefficient()->getValue();
@@ -677,7 +674,6 @@ namespace dyno
 				joint.setAxis(Quat1f(instances[i].rotation()).rotate(Vec3f(0, 1, 0)));
 			}
 
-		printf("-----------------\n");
 		}
 
 		//**************************************************//

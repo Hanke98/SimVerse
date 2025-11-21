@@ -232,7 +232,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 } else {
                     texCoordIndex.push_back(tri);
                 }
-
+// TODO: Use oriented bounding box, and transform the bb later.
                 Vec3f transformedV0 = T_world_mesh * vertices[v0];
                 Vec3f transformedV1 = T_world_mesh * vertices[v1];
                 Vec3f transformedV2 = T_world_mesh * vertices[v2];

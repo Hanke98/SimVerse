@@ -45,8 +45,8 @@ namespace dyno
 		cdBV->outContacts()->connect(merge->inContactsB());
 		this->animationPipeline()->pushModule(merge);
 
-		auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
-		// auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
+		// auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
+		auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
 	
 		this->stateTimeStep()->connect(iterSolver->inTimeStep());
 		this->varFrictionEnabled()->connect(iterSolver->varFrictionEnabled());
@@ -105,6 +105,7 @@ namespace dyno
 				topos.pushBack(inTopo);
 
 				sizeOfRigidBodies += vehicle->stateMass()->size();
+			printf("vehicle %d has %d rigid bodies\n", i, vehicle->stateMass()->size());
 			}
 
 			auto curTopo = this->stateTopology()->getDataPtr();

@@ -1,5 +1,6 @@
 #include "TJConstraintSolver.h"
 #include "SharedFuncsForRigidBody.h"
+#include "Profiler.h"
 
 namespace dyno
 {
@@ -247,6 +248,7 @@ namespace dyno
 	template<typename TDataType>
 	void TJConstraintSolver<TDataType>::constrain()
 	{
+		PROFILE_SCOPE("TJConstraintSolver::constrain");
 		uint bodyNum = this->inCenter()->size();
 
 		auto topo = this->inDiscreteElements()->constDataPtr();
@@ -261,6 +263,7 @@ namespace dyno
 
 		if (!this->inContacts()->isEmpty() || topo->totalJointSize() > 0)
 		{
+			this->inContacts()->clear();
 			if (mContactsInLocalFrame.size() != this->inContacts()->size()) {
 				mContactsInLocalFrame.resize(this->inContacts()->size());
 			}
@@ -308,26 +311,44 @@ namespace dyno
 
 				mImpulseC.reset();
 				initializeJacobian(dh);
-				for (int j = 0; j < this->varIterationNumberForVelocitySolver()->getValue(); j++)
+				// auto error = checkOutPositionError(
+				// 	this->inCenter()->getData(),
+				// 	mVelocityConstraints
+				// );
+				// printf(" Substep %d, Position Error = %f\n", i, error);
+
 				{
-					JacobiIteration(
-						mLambda,
-						mImpulseC,
-						mJ,
-						mB,
-						mEta,
-						mVelocityConstraints,
-						mContactNumber,
-						mK_1,
-						mK_2,
-						mK_3,
-						this->inMass()->getData(),
-						this->inFrictionCoefficients()->getData(),
-						this->varFrictionCoefficient()->getData(),
-						this->varGravityValue()->getData(),
-						dh
-					);
+					PROFILE_SCOPE("JacobiIterationLoop");
+					// auto error0 = checkOutError(
+					// 	mJ,
+					// 	mImpulseC,
+					// 	mVelocityConstraints,
+					// 	mEta
+					// );
+					for (int j = 0; j < this->varIterationNumberForVelocitySolver()->getValue(); j++)
+					{
+						JacobiIteration(
+							mLambda,
+							mImpulseC,
+							mJ,
+							mB,
+							mEta,
+							mVelocityConstraints,
+							mContactNumber,
+							mK_1,
+							mK_2,
+							mK_3,
+							this->inMass()->getData(),
+							this->inFrictionCoefficients()->getData(),
+							this->varFrictionCoefficient()->getData(),
+							this->varGravityValue()->getData(),
+							dh
+						);
+
+					}
+
 				}
+
 
 				updateVelocity(
 					this->inAttribute()->getData(),
@@ -350,6 +371,7 @@ namespace dyno
 					this->inInitialInertia()->getData(),
 					dh
 				);
+
 			}
 		}
 

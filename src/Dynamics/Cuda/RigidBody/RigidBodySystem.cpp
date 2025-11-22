@@ -15,7 +15,8 @@
 // Module headers
 #include "RigidBody/Module/ContactsUnion.h"
 
-namespace dyno {
+namespace dyno
+{
   typedef typename dyno::TOrientedBox3D<Real> Box3D;
 
   template<typename TDataType>
@@ -31,7 +32,7 @@ namespace dyno {
   {
     auto defaultTopo = std::make_shared<DiscreteElements<TDataType>>();
     this->stateTopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
-
+    //
     auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
     this->stateTopology()->connect(elementQuery->inDiscreteElements());
     this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
@@ -45,10 +46,10 @@ namespace dyno {
     auto merge = std::make_shared<ContactsUnion<TDataType>>();
     elementQuery->outContacts()->connect(merge->inContactsA());
     cdBV->outContacts()->connect(merge->inContactsB());
-
     this->animationPipeline()->pushModule(merge);
 
     auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
+    // auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
     this->stateTimeStep()->connect(iterSolver->inTimeStep());
     this->varFrictionEnabled()->connect(iterSolver->varFrictionEnabled());
     this->varGravityEnabled()->connect(iterSolver->varGravityEnabled());
@@ -58,8 +59,7 @@ namespace dyno {
     this->stateMass()->connect(iterSolver->inMass());
 
     this->stateExternalForce()->connect(iterSolver->inExternalForce());
-		this->stateExternalTorque()->connect(iterSolver->inExternalTorque());
-
+    this->stateExternalTorque()->connect(iterSolver->inExternalTorque());
 
     this->stateFrictionCoefficients()->connect(iterSolver->inFrictionCoefficients());
     this->stateAttribute()->connect(iterSolver->inAttribute());

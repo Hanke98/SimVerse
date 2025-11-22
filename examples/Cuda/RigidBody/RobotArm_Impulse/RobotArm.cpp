@@ -12,11 +12,10 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include "../../../../src/Rendering/GUI/GlfwGUI/GlfwRenderWindow.h"
+#include "RigidBody/Vehicle.h"
 #include <SceneGraphFactory.h> 
 
 #include <BasicShapes/PlaneModel.h>
-
-
 
 
 namespace dyno
@@ -27,17 +26,24 @@ namespace dyno
     RobotArmSimulator<TDataType>::RobotArmSimulator() :
 		ArticulatedBody<TDataType>()
     {
-		auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
-		this->stateTopology()->connect(mapper->inDiscreteElements());
-		this->graphicsPipeline()->pushModule(mapper);
-
-		auto sRender = std::make_shared<GLSurfaceVisualModule>();
-		sRender->setColor(Color(1, 1, 0));
-		sRender->setAlpha(0.2);
-		mapper->outTriangleSet()->connect(sRender->inTriangleSet());
-		this->graphicsPipeline()->pushModule(sRender);
 	}
 
+    template<typename TDataType>
+    RobotArmSimulator<TDataType>::~RobotArmSimulator() {
+        terminateSimulation();
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::initBatchSolver(){
+        batchSolver = std::make_shared<BatchRigidBodySystem<TDataType>>();
+        batchSolver->setDt(1 / 100.0f);
+        batchSolver->varGravityEnabled()->setValue(true);
+        batchSolver->varFrictionEnabled()->setValue(false);
+        Vec3f base{ -0.0f, -0.0f, -0.0f };
+        Vec3f offset{ 0.0f, 0.0f, 20.0f };
+        batchSolver->addExampleRigidBodies("", base, offset, 1, 1, 1);
+        scn->addNode(batchSolver);
+    }
 
     template<typename TDataType>
 	void RobotArmSimulator<TDataType>::resetStates()
@@ -211,11 +217,13 @@ namespace dyno
 
 		//**************************************************//
 		ArticulatedBody<TDataType>::resetStates();
+
+	    std::cout << "after resetStates in RobotArmSimulator" << std::endl;
 	}
 
     template<typename TDataType>
-    RobotArmSimulator<TDataType>::~RobotArmSimulator() {
-        terminateSimulation();
+    void RobotArmSimulator<TDataType>::resetStates(CtrlParam& param) {
+        
     }
 
     template<typename TDataType>
@@ -240,6 +248,7 @@ namespace dyno
 
         data.robot = scn->addNode(std::make_shared<RobotArmSimulator<DataType3f>>());
         // data.robot = scn->addNode(std::make_shared<ArticulatedBody<DataType3f>>());
+
 
         // 计算当前实例的基础位置
         Vec3f basePos = Vec3f(index * offset.x - 0.45f, offset.y + 1.05f, index * offset.z);
@@ -266,19 +275,46 @@ namespace dyno
 
         // data.robot->varTargetCenter()->setValue(targetPosition);
 
-        data.system = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
-        data.system->varGravityEnabled()->setValue(false);
+        // data.system = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
+        // data.system->varGravityEnabled()->setValue(false);
 
-        data.robot->connect(data.system->importVehicles());
+        // data.robot->connect(data.system->importVehicles());
+        // auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
+        // plane->varLengthX()->setValue(50);
+        // plane->varLengthZ()->setValue(50);
+        // plane->varSegmentX()->setValue(10);
+        // plane->varSegmentZ()->setValue(10);
+        //
+        // plane->stateTriangleSet()->connect(data.system->inTriangleSet());
+
+        return data;
+    }
+
+    template<typename TDataType>
+    int RobotArmSimulator<TDataType>::addMultiBoydSystem() {
+
+        mbSystem = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
+        mbSystem->varGravityEnabled()->setValue(false);
+
+	    auto uav = scn->addNode(std::make_shared<UAV<DataType3f>>());
+
+	    std::vector<Transform3f> vehicleTransforms;
+	    vehicleTransforms.push_back(Transform3f(Vec3f(0.5, 0, 0), Quat1f(1.57, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    vehicleTransforms.push_back(Transform3f(Vec3f(10, 2, 0), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    vehicleTransforms.push_back(Transform3f(Vec3f(10, 2, 2), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
+	    uav->varVehiclesTransform()->setValue(vehicleTransforms);
+
+	    uav->connect(mbSystem->importVehicles());
+
         auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
         plane->varLengthX()->setValue(50);
         plane->varLengthZ()->setValue(50);
         plane->varSegmentX()->setValue(10);
         plane->varSegmentZ()->setValue(10);
 
-        plane->stateTriangleSet()->connect(data.system->inTriangleSet());
+        plane->stateTriangleSet()->connect(mbSystem->inTriangleSet());
 
-        return data;
+        return 0;
     }
 
     template<typename TDataType>
@@ -288,7 +324,7 @@ namespace dyno
         }
         m_offset = offset;
         int rigidID = generateRigidID();
-        // std::cout << "Add Rigid System with ID: " << rigidID << std::endl;
+        std::cout << "Add Rigid System with ID: " << rigidID << std::endl;
         rigidSystems[rigidID] = createSingleRigidSystem(rigidID, m_offset, targetPosition, density);
         // computeJointInitia(rigidID);
         std::vector<float> moterVelocities_tmp(7, 0.0f);
@@ -369,32 +405,36 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::applyImpulse(std::vector<std::vector<float>>& moterImpulses) {
 
-        for (int i = 0; i < rigidSystems.size(); ++i) {
-            int rigidbodys = rigidSystems[i].system->stateExternalForce()->size();
-            std::vector<Vec3f> systemForces(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
+        int rigidbodys = mbSystem->stateExternalForce()->size();
+        std::vector<Vec3f> systemForces(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
 
-            systemForces[1] = Vec3f(
+        int n = rigidSystems.size();
+        rigidbodys /= n;
+        int st = 0;
+        for (int i = 0; i < rigidSystems.size(); ++i) {
+            systemForces[1 + st] = Vec3f(
                 -moterImpulses[i][1],
                 0.0f,
                 0.0f);
 
-            systemForces[2] = Vec3f(
+            systemForces[2 + st] = Vec3f(
                 moterImpulses[i][1],
                 0.0f,
                 0.0f);
 
-            systemForces[4] = Vec3f(
+            systemForces[4 + st] = Vec3f(
                 0.0f,
                 -moterImpulses[i][4],
                 0.0f);
 
-            systemForces[5] = Vec3f(
+            systemForces[5 + st] = Vec3f(
                 0.0f,
                 moterImpulses[i][4],
                 0.0f);
 
-            rigidSystems[i].system->stateExternalTorque()->assign(systemForces);
+            st += rigidbodys;
         }
+        mbSystem->stateExternalTorque()->assign(systemForces);
     }
 
     template<typename TDataType>
@@ -405,7 +445,7 @@ namespace dyno
             // 处理事件
             glfwPollEvents();
 
-            applyImpulse(deltaMoterVelocities);
+            // applyImpulse(deltaMoterVelocities);
 
             if (activeScene) {
 

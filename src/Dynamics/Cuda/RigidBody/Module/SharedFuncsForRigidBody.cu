@@ -1,4 +1,5 @@
 #include "SharedFuncsForRigidBody.h"
+#include "Profiler.h"
 
 namespace dyno
 {
@@ -68,7 +69,7 @@ namespace dyno
 
 		if (attribute[tId].isDynamic())
 		{
-			velocity[tId] += impulse[2 * tId];
+			velocity[tId] += impulse[2 * tId]; // impulse is just velocity change
 			angular_velocity[tId] += impulse[2 * tId + 1];
 			//Damping
 			/*velocity[tId] *= 1.0f / (1.0f + dt * linearDamping);
@@ -1107,6 +1108,7 @@ namespace dyno
 			constraints);
 	}
 
+
 	/**
 	* calculate eta vector for PJS Baumgarte stabilization
 	*
@@ -1122,7 +1124,7 @@ namespace dyno
 	* @param dt					time step
 	* This function calculate the diagonal Matrix of JB
 	*/
-	template<typename Coord, typename Constraint, typename Real, typename Quat>
+	template<typename Coord, typename Constraint, typename Real, typename Quat, bool UpdateErrorOnly=false>
 	__global__ void SF_calculateEtaVectorForPJSBaumgarte(
 		DArray<Real> eta,
 		DArray<Coord> J,
@@ -1325,7 +1327,8 @@ namespace dyno
 			error = errorVec[2];
 		}
 
-		eta[tId] -= beta * invDt * error;
+		if constexpr(!UpdateErrorOnly)
+			eta[tId] -= beta * invDt * error;
 		errors[tId] = error;
 	}
 
@@ -1591,6 +1594,40 @@ namespace dyno
 
 		eta[tId] -= ERP[tId] * invDt * error;
 	}
+
+	void calculateErrorVector(
+		DArray<float> eta,
+		DArray<Vec3f> J,
+		DArray<Vec3f> velocity,
+		DArray<Vec3f> angular_velocity,
+		DArray<Vec3f> pos,
+		DArray<Quat1f> rotation_q,
+		DArray<TConstraintPair<float>> constraints,
+		DArray<float> errors,
+		float slop,
+		float beta,
+		uint substepping,
+		float dt
+		){
+	int blockDim = 64;
+	int gridDim = (constraints.size() + blockDim - 1) / blockDim;
+			SF_calculateEtaVectorForPJSBaumgarte<Vec3f, TConstraintPair<float>, float, Quat1f, true>
+			<<<gridDim, blockDim>>>(
+			eta,
+			J,
+			velocity,
+			angular_velocity,
+			pos,
+			rotation_q,
+			constraints,
+			errors,
+			slop,
+			beta,
+			substepping,
+			dt);
+	cudaDeviceSynchronize();
+	}
+
 
 	void calculateEtaVectorForPJSBaumgarte(
 		DArray<float> eta,
@@ -2759,7 +2796,6 @@ namespace dyno
 			else
 				constraints[baseIndex + 6].isValid = false;
 		}
-
 		else
 		{
 			constraints[baseIndex + 5].isValid = false;
@@ -3218,7 +3254,7 @@ namespace dyno
 	/**
 	* take one Jacobi Iteration
 	* @param lambda			
-	* @param impulse				
+	* @param impulse : used as velocity change			
 	* @param J			
 	* @param B		
 	* @param eta			
@@ -3231,12 +3267,13 @@ namespace dyno
 	* @param mu
 	* @param g
 	* @param dt
-	* This function take one Jacobi Iteration to calculate constrain impulse
+	* This function take one Jacobi Iteration to calculate constrain impulse 
+	* ljf: With 1-order Baumgarte stabilization
 	*/
 	template<typename Real, typename Coord, typename Constraint, typename Matrix3, typename Matrix2>
 	__global__ void SF_JacobiIteration(
 		DArray<Real> lambda,
-		DArray<Coord> impulse,
+		DArray<Coord> impulse, // is just velocity change
 		DArray<Coord> J,
 		DArray<Coord> B,
 		DArray<Real> eta,
@@ -3332,10 +3369,12 @@ namespace dyno
 
 		if (constraints[tId].type == ConstraintType::CN_ANCHOR_EQUAL_1 || constraints[tId].type == ConstraintType::CN_BAN_ROT_1)
 		{
-			Coord tmp(eta[tId], eta[tId + 1], eta[tId + 2]);
+			Coord tmp(eta[tId], eta[tId + 1], eta[tId + 2]); // ljf: \eta = - \beta/dt * error 
 			if (idx2 != INVALID)
 			{
-				for (int i = 0; i < 3; i++)
+				// ljf: loop over x,y,z (CN_ANCHOR_EQUAL_1, CN_ANCHOR_EQUAL_2, CN_ANCHOR_EQUAL_3, CN_BAN_ROT_1, CN_BAN_ROT_2, CN_BAN_ROT_3)
+				// the constraints are stored consecutively
+				for (int i = 0; i < 3; i++) 
 				{
 					tmp[i] -= J[4 * (tId + i)].dot(impulse[idx1 * 2]) + J[4 * (tId + i) + 2].dot(impulse[idx2 * 2]);
 					tmp[i] -= J[4 * (tId + i) + 1].dot(impulse[idx1 * 2 + 1]) + J[4 * (tId + i) + 3].dot(impulse[idx2 * 2 + 1]);
@@ -3350,15 +3389,17 @@ namespace dyno
 				}
 			}
 
+			// ljf: tmp = -JV -\eta
+		  // \lambda = (M^{-1}J^T)^{-1} * tmp
 			Coord delta_lambda = omega * (K_3[tId] * tmp);
 
 			for (int i = 0; i < 3; i++)
 			{
-				atomicAdd(&impulse[idx1 * 2][0], B[4 * (tId + i)][0] * delta_lambda[i]);
+				atomicAdd(&impulse[idx1 * 2][0], B[4 * (tId + i)][0] * delta_lambda[i]); // ljf: accumulate linear velocity change 
 				atomicAdd(&impulse[idx1 * 2][1], B[4 * (tId + i)][1] * delta_lambda[i]);
 				atomicAdd(&impulse[idx1 * 2][2], B[4 * (tId + i)][2] * delta_lambda[i]);
 
-				atomicAdd(&impulse[idx1 * 2 + 1][0], B[4 * (tId + i) + 1][0] * delta_lambda[i]);
+				atomicAdd(&impulse[idx1 * 2 + 1][0], B[4 * (tId + i) + 1][0] * delta_lambda[i]); // ljf: accumulate angular velocity change
 				atomicAdd(&impulse[idx1 * 2 + 1][1], B[4 * (tId + i) + 1][1] * delta_lambda[i]);
 				atomicAdd(&impulse[idx1 * 2 + 1][2], B[4 * (tId + i) + 1][2] * delta_lambda[i]);
 
@@ -4231,6 +4272,7 @@ namespace dyno
 		float dt
 	)
 	{
+		PROFILE_SCOPE("SingleJacobiIteration");
 		cuExecute(constraints.size(),
 			SF_JacobiIteration,
 			lambda,
@@ -4603,6 +4645,75 @@ namespace dyno
 		errorHost.clear();
 		return sqrt(tmp);
 	}
+
+	template<typename Coord, typename Real, typename Constraint>
+	__global__ void SF_checkOutPositionError(
+		DArray<Coord> pos,
+		DArray<Constraint> constraints,
+		DArray<Real> error
+	)
+	{
+		int tId = threadIdx.x + blockIdx.x * blockDim.x;
+		if (tId >= constraints.size())
+			return;
+
+		int idx1 = constraints[tId].bodyId1;
+		int idx2 = constraints[tId].bodyId2;
+
+	  auto type = constraints[tId].type;
+		if (type == ConstraintType::CN_ANCHOR_EQUAL_1)
+		{
+			Coord r1 = constraints[tId].normal1;
+			Coord r2 = constraints[tId].normal2;
+			Coord pos1 = constraints[tId].pos1;
+
+			Coord errorVec;
+			if (idx2 != INVALID)
+				errorVec = pos[idx2] + r2 - pos[idx1] - r1;
+			else
+				errorVec = pos1 - pos[idx1] - r1;
+
+			for (int i = 0; i < 3 ; i++)
+			{
+				error[tId + i] = errorVec[i] * errorVec[i];
+			}
+		}
+		else if (type != ConstraintType::CN_ANCHOR_EQUAL_2 && type != ConstraintType::CN_ANCHOR_EQUAL_3)
+		{
+			error[tId] = 0.0f;
+		}
+
+	}
+
+
+	Real checkOutPositionError(
+		DArray<Vec3f> pos,
+		DArray<TConstraintPair<float>> constraints
+	)
+  {
+  DArray<float> error;
+  error.resize(constraints.size());
+  error.reset();
+  cuExecute(constraints.size(),
+			SF_checkOutPositionError,
+			pos,
+			constraints,
+			error);
+
+		CArray<float> errorHost;
+		errorHost.assign(error);
+		Real tmp = 0.0f;
+		int num = errorHost.size();
+		for (int i = 0; i < num; i++)
+		{
+			tmp += errorHost[i];;
+		}
+		error.clear();
+		errorHost.clear();
+		return sqrt(tmp);
+	}
+
+
 
 	bool saveVectorToFile(
 		const std::vector<float>& vec,

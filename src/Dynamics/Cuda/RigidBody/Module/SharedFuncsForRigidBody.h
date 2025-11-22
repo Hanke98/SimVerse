@@ -89,6 +89,21 @@ namespace dyno
 		DArray<TConstraintPair<float>> constraints
 	);
 
+	void calculateErrorVector(
+		DArray<float> eta,
+		DArray<Vec3f> J,
+		DArray<Vec3f> velocity,
+		DArray<Vec3f> angular_velocity,
+		DArray<Vec3f> pos,
+		DArray<Quat1f> rotation_q,
+		DArray<TConstraintPair<float>> constraints,
+		DArray<float> errors,
+		float slop,
+		float beta,
+		uint substepping,
+		float dt
+	);
+
 	void calculateEtaVectorForPJSBaumgarte(
 		DArray<float> eta,
 		DArray<Vec3f> J,
@@ -337,6 +352,11 @@ namespace dyno
 		DArray<Vec3f> mImpulse,
 		DArray<TConstraintPair<float>> constraints,
 		DArray<float> eta
+	);
+
+	Real checkOutPositionError(
+		DArray<Vec3f> pos,
+		DArray<TConstraintPair<float>> constraints
 	);
 
 	void calculateDiagnals(

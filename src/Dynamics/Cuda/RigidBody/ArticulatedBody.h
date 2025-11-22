@@ -42,7 +42,7 @@ namespace dyno
 		//Bind rigid body to a shape in TextureMesh
 		void bindShape(std::shared_ptr<PdActor> actor, Pair<uint, uint> shapeId);
 
-		UrdfParser urdfParser;
+		UrdfInformation urdfInfo;
 
 	public:
 		DEF_VAR(FilePath, FilePath, "", "");

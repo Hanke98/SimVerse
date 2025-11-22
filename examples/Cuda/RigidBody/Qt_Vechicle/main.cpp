@@ -37,7 +37,7 @@ std::shared_ptr<SceneGraph> creatCar()
 	auto jeep = scn->addNode(std::make_shared<ArticulatedBody<DataType3f>>());
 	jeep->varFilePath()->setValue(getAssetPath() + "Jeep/JeepGltf/jeep.gltf");
 
-	uint N = 1;
+	uint N = 2;
 
 	for (uint i = 0; i < N; i++)
 	{

@@ -25,11 +25,11 @@ namespace dyno
         return processedPath;
     }
 
-    bool UrdfParser::parse(const std::string& filePath, bool objYUp)
+    bool UrdfParser::parse(const std::string& filePath, UrdfInformation& urdfInfo, bool objYUp)
     {
-        links.clear();
-        joints.clear();
-        robotName.clear();
+        urdfInfo.links.clear();
+        urdfInfo.joints.clear();
+        urdfInfo.robotName.clear();
 
         tinyxml2::XMLDocument doc;
         tinyxml2::XMLError error = doc.LoadFile(filePath.c_str());
@@ -51,7 +51,7 @@ namespace dyno
         // 获取机器人名称
         if (robotElem->Attribute("name"))
         {
-            robotName = robotElem->Attribute("name");
+            urdfInfo.robotName = robotElem->Attribute("name");
         }
 
         // 解析连杆
@@ -106,6 +106,7 @@ namespace dyno
                 tinyxml2::XMLElement* geometryElem = visualElem->FirstChildElement("geometry");
                 if (geometryElem)
                 {
+                    //***TODO***: Figure out which type of the visual mesh is(dae/obj/stl)
                     tinyxml2::XMLElement* meshElem = geometryElem->FirstChildElement("mesh");
                     if (meshElem && meshElem->Attribute("filename"))
                     {
@@ -135,7 +136,7 @@ namespace dyno
                 }
             }
 
-            links.push_back(link);
+            urdfInfo.links.push_back(link);
         }
 
         // 解析关节
@@ -204,14 +205,14 @@ namespace dyno
                 joint.damping = 0.0f;  // 默认阻尼
             }
 
-            joints.push_back(joint);
+            urdfInfo.joints.push_back(joint);
         }
 
         // link name to index
         std::unordered_map<std::string, int> linkIndex;
-        for (size_t i = 0; i < links.size(); ++i)
+        for (int i = 0; i < urdfInfo.links.size(); ++i)
         {
-            linkIndex[links[i].name] = static_cast<int>(i);
+            linkIndex[urdfInfo.links[i].name] = i;
         }
 
         // 记录每个 link 的子关节
@@ -219,16 +220,32 @@ namespace dyno
         // 记录“谁是 child link”，用来找 root link
         std::unordered_set<std::string> childLinks;
 
-        for (size_t j = 0; j < joints.size(); ++j)
+        for (size_t j = 0; j < urdfInfo.joints.size(); ++j)
         {
-            const auto& joint = joints[j];
+            auto& joint = urdfInfo.joints[j];
             linkChildJoints[joint.parentLink].push_back(static_cast<int>(j));
             childLinks.insert(joint.childLink);
+
+            auto pIt = linkIndex.find(joint.parentLink);
+            auto cIt = linkIndex.find(joint.childLink);
+
+            if (pIt == linkIndex.end() || cIt == linkIndex.end())
+            {
+                std::cerr << "URDF error: link name not found: "
+                          << joint.parentLink << " or " << joint.childLink << std::endl;
+                continue;
+            }
+
+            joint.parentLinkId = pIt->second;
+            joint.childLinkId  = cIt->second;
+
+            // std::cout << "name of joint parent: " << joint.parentLink.c_str() <<" index of parent: " << pIt->second << std::endl;
+            // std::cout << "name of joint child: " << joint.childLink.c_str() <<" index of child: " << cIt->second << std::endl;
         }
 
         // 找 root link：出现在 links 中，但不在 childLinks 中
         std::string rootLinkName;
-        for (auto& link : links)
+        for (auto& link : urdfInfo.links)
         {
             if (!childLinks.count(link.name))
             {
@@ -238,7 +255,7 @@ namespace dyno
             }
         }
 
-        computeWorldTransforms(rootLinkName, linkIndex, linkChildJoints);
+        computeWorldTransforms(rootLinkName, linkIndex, linkChildJoints, urdfInfo);
         return true;
     }
 
@@ -323,7 +340,8 @@ namespace dyno
 
     void UrdfParser::computeWorldTransforms(const std::string& rootLinkName,
                                         const std::unordered_map<std::string, int>& linkIndex,
-                                        const std::unordered_map<std::string, std::vector<int>>& linkChildJoints)
+                                        const std::unordered_map<std::string, std::vector<int>>& linkChildJoints,
+                                        UrdfInformation& urdfInfo)
     {
         // 初始化 root link 世界变换为单位变换
         // Transform3f T_world_root;
@@ -336,20 +354,21 @@ namespace dyno
         Transform3f T_world_root(t, R_zUpToYUp, s);
 
         // 递归下去
-        computeWorldTransformsRecursive(rootLinkName, T_world_root, linkIndex, linkChildJoints);
+        computeWorldTransformsRecursive(rootLinkName, T_world_root, linkIndex, linkChildJoints, urdfInfo);
     }
 
     void UrdfParser::computeWorldTransformsRecursive(
         const std::string& linkName,
         const Transform3f& T_world_link,
         const std::unordered_map<std::string, int>& linkIndex,
-        const std::unordered_map<std::string, std::vector<int>>& linkChildJoints)
+        const std::unordered_map<std::string, std::vector<int>>& linkChildJoints,
+        UrdfInformation& urdfInfo)
     {
         // 写回 link 的 world pose
         auto itLink = linkIndex.find(linkName);
         if (itLink == linkIndex.end()) return;
 
-        UrdfLink& link = links[itLink->second];
+        UrdfLink& link = urdfInfo.links[itLink->second];
         link.T_world = T_world_link;
 
         // 找这个 link 下挂了哪些关节
@@ -359,7 +378,7 @@ namespace dyno
 
         for (int jointIdx : itJoints->second)
         {
-            UrdfJoint& joint = joints[jointIdx];
+            UrdfJoint& joint = urdfInfo.joints[jointIdx];
 
             // joint.originWorld = T_world_parent * originLocal
             joint.originWorld = composeTransform(T_world_link, joint.originLocal);
@@ -369,7 +388,7 @@ namespace dyno
             Transform3f T_world_child = joint.originWorld;  // world -> child
 
             // 递归子 link
-            computeWorldTransformsRecursive(childName, T_world_child, linkIndex, linkChildJoints);
+            computeWorldTransformsRecursive(childName, T_world_child, linkIndex, linkChildJoints, urdfInfo);
         }
     }
 }

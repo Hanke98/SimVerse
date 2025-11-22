@@ -48,6 +48,8 @@ namespace dyno
         UrdfJointType type;
         std::string parentLink;
         std::string childLink;
+        uint parentLinkId;
+        uint childLinkId;
         Vec3f axis;               // 关节轴
         Vec3f axisWorld;
         Transform3f originLocal;  // 原点变换
@@ -56,6 +58,14 @@ namespace dyno
         float damping;            // 阻尼系数
     };
 
+    // TODO: Refactor this to `KinematicsChainInfo`
+    struct UrdfInformation
+    {
+        std::vector<UrdfLink> links;
+        std::vector<UrdfJoint> joints;
+        std::string robotName;
+    };
+    
     // URDF解析器类
     class UrdfParser
     {
@@ -63,11 +73,12 @@ namespace dyno
         UrdfParser() = default;
         ~UrdfParser() = default;
 
-        bool parse(const std::string& filePath, bool objYUp);
+        bool parse(const std::string& filePath, UrdfInformation& urdfInfo, bool objYUp);
 
-        std::vector<UrdfLink> links;
-        std::vector<UrdfJoint> joints;
-        std::string robotName;
+        // ***TODO***: create a new structure to store all the information
+        // std::vector<UrdfLink> links;
+        // std::vector<UrdfJoint> joints;
+        // std::string robotName;
 
     private:
         // 解析变换信息
@@ -84,13 +95,15 @@ namespace dyno
 
         void computeWorldTransforms(const std::string& rootLinkName,
                                     const std::unordered_map<std::string, int>& linkIndex,
-                                    const std::unordered_map<std::string, std::vector<int>>& linkChildJoints);
+                                    const std::unordered_map<std::string, std::vector<int>>& linkChildJoints,
+                                    UrdfInformation& urdfInfo);
 
         void computeWorldTransformsRecursive(
                                     const std::string& linkName,
                                     const Transform3f& T_world_link,
                                     const std::unordered_map<std::string, int>& linkIndex,
-                                    const std::unordered_map<std::string, std::vector<int>>& linkChildJoints);
+                                    const std::unordered_map<std::string, std::vector<int>>& linkChildJoints,
+                                    UrdfInformation& urdfInfo);
     };
 
     Transform3f composeTransform(const Transform3f& parent, const Transform3f& local);

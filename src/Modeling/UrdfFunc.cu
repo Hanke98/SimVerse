@@ -12,20 +12,21 @@ namespace dyno
 
 bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                          const FilePath& urdfFullPath,
-                         UrdfParser& parser, bool objYUp)
+                         UrdfInformation& urdfInfo, bool objYUp)
 {
     // Parse the URDF and extract the mesh
+    UrdfParser parser;
 
     auto urdfPath  = urdfFullPath;
     auto urdfRoot  = urdfPath.path().parent_path();
 
-    if (!parser.parse(urdfPath.string().c_str(), objYUp))
+    if (!parser.parse(urdfPath.string().c_str(), urdfInfo, objYUp))
     {
         std::cerr << "Failed to parse URDF: " << urdfPath.string().c_str() << std::endl;
         return false;
     }
 
-    auto& links = parser.links;
+    auto& links = urdfInfo.links;
 
     texMesh->clear();
 

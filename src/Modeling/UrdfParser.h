@@ -58,6 +58,7 @@ namespace dyno
         float damping;            // 阻尼系数
     };
 
+    // TODO: Refactor this to `KinematicsChainInfo`
     struct UrdfInformation
     {
         std::vector<UrdfLink> links;

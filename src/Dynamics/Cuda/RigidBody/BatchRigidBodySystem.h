@@ -13,7 +13,7 @@
 namespace dyno
 {
   template<typename TDataType>
-  class BatchRigidBodySystem : virtual public RigidBodySystem<TDataType> {
+  class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
 public:
     typedef typename TDataType::Real Real; 
     typedef typename TDataType::Coord Coord;

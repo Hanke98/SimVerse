@@ -44,6 +44,8 @@ namespace dyno
 
 		UrdfParser urdfParser;
 
+		UrdfInformation urdfInfo;
+
 	public:
 		DEF_VAR(FilePath, FilePath, "", "");
 

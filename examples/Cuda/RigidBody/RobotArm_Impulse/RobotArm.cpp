@@ -40,8 +40,8 @@ namespace dyno
         batchSolver->varGravityEnabled()->setValue(true);
         batchSolver->varFrictionEnabled()->setValue(false);
         Vec3f base{ -0.0f, -0.0f, -0.0f };
-        Vec3f offset{ 0.0f, 0.0f, 20.0f };
-        batchSolver->addExampleRigidBodies("", base, offset, 1, 1, 1);
+        Vec3f offset{ 0.0f, 0.0f, 2.0f };
+        batchSolver->addExampleRigidBodies("", base, offset, 2, 1, 1);
         scn->addNode(batchSolver);
     }
 
@@ -334,13 +334,13 @@ namespace dyno
 
     // template<typename TDataType>
     // void RobotArmSimulator<TDataType>::computeJointInitia(int rigidID) {
-        
+
     //     std::vector<float> jointsInitia_temp;
-        
+
     //     auto hingeJoints = rigidSystems[rigidID].robot->getHingeJoints();
-        
+
     //     auto instances = rigidSystems[rigidID].robot->varVehiclesTransform()->getValue();
-        
+
     //     float joint1_init = computeHingeEffectiveInertiaWorld(rigidID, hingeJoints[0], Vec3f(0.0f, 0.333f, 0.0f) + instances[0].translation());
     //     jointsInitia_temp.push_back(joint1_init);
     //     // float joint2_init = computeHingeEffectiveInertiaWorld(rigidID,hingeJoints[1], Vec3f(0.0f, 0.333f, 0.0f) + instances[0].translation());
@@ -435,6 +435,7 @@ namespace dyno
             st += rigidbodys;
         }
         mbSystem->stateExternalTorque()->assign(systemForces);
+        auto externalforce = mbSystem->stateExternalTorque()->getData();
     }
 
     template<typename TDataType>
@@ -452,7 +453,7 @@ namespace dyno
                 activeScene->takeOneFrame();
                 activeScene->updateGraphicsContext();
             }
-            
+
             // 获取渲染窗口
             GlfwRenderWindow* renderWindow = dynamic_cast<GlfwRenderWindow*>(app.renderWindow());
             if (!renderWindow) return;
@@ -500,7 +501,7 @@ namespace dyno
             if (window) {
                 glfwSwapBuffers(window);
             }
-            
+
             // setMoters(deltaMoterVelocities);
             // applyImpulse(deltaMoterVelocities);
             

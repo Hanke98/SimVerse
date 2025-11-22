@@ -42,9 +42,33 @@ int main() {
     Real roll_old, pitch_old, yaw_old = 0.0f;
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
+        if (i == 100) {
+            RobotArmSimulator<DataType3f>::CtrlParam param;
+            param.num_bodies = 1;
+            param.ids.push_back(0);
+            simulator.resetStates(param);
+        }
+
+        if (i == 200) {
+            RobotArmSimulator<DataType3f>::CtrlParam param;
+            param.num_bodies = 1;
+            param.ids.push_back(1);
+            simulator.resetStates(param);
+        }
+
+        if (i == 300) {
+            RobotArmSimulator<DataType3f>::CtrlParam param;
+            param.num_bodies = 2;
+            param.ids.push_back(0);
+            param.ids.push_back(1);
+            simulator.resetStates(param);
+        }
+
         simulator.stepSimulation(moterVelocities, true);
         // 处理窗口事件
         glfwPollEvents();
+
+        i++;
     }
     
     // 5. 仿真结束（析构函数会自动调用terminateSimulation）

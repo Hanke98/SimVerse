@@ -223,7 +223,7 @@ namespace dyno
 
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::resetStates(CtrlParam& param) {
-        
+        batchSolver->resetBatchMultiBodies(param);
     }
 
     template<typename TDataType>
@@ -441,18 +441,18 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::stepSimulation(std::vector<std::vector<float>>& deltaMoterVelocities, bool enableRendering) {
         if (!isInitialized) return;
+
+        // applyImpulse(deltaMoterVelocities);
+
+        if (activeScene) {
+
+            activeScene->takeOneFrame();
+            activeScene->updateGraphicsContext();
+        }
         
         if (enableRendering) {
             // 处理事件
             glfwPollEvents();
-
-            // applyImpulse(deltaMoterVelocities);
-
-            if (activeScene) {
-
-                activeScene->takeOneFrame();
-                activeScene->updateGraphicsContext();
-            }
 
             // 获取渲染窗口
             GlfwRenderWindow* renderWindow = dynamic_cast<GlfwRenderWindow*>(app.renderWindow());
@@ -500,16 +500,6 @@ namespace dyno
             GLFWwindow* window = renderWindow->getGLFWWindow();
             if (window) {
                 glfwSwapBuffers(window);
-            }
-
-            // setMoters(deltaMoterVelocities);
-            // applyImpulse(deltaMoterVelocities);
-            
-        } else {
-            if (activeScene) {
-                activeScene->takeOneFrame();
-                activeScene->updateGraphicsContext();
-                // setMoters(deltaMoterVelocities);
             }
         }
     }

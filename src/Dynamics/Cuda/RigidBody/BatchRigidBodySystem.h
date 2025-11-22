@@ -72,6 +72,13 @@ public:
     {
       this->varGravityEnabled()->setValue(enabled);
     }
+
+    // Array<Vec3f, DeviceType::CPU>* gethCenters() {return &hCenters;}
+    // Array<TQuat, DeviceType::CPU>* gethAngels() {return &hAngles;}
+    //
+    // Array<Vec3f, DeviceType::CPU>* gethVelocities() {return &hVelocities;}
+    // Array<Vec3f, DeviceType::CPU>* gethAngularVelocity() {return &hAngularVelocity;}
+
     // ------------------------------------
 
 protected:
@@ -85,6 +92,10 @@ protected:
 protected:
     std::vector<MulitBodyChainIndices> ctrl_mb_chains; // main multi-body chains with control
     std::vector<MulitBodyChainIndices> non_ctrl_mb_chains; // other multi-body chains in the env.
+
+    std::vector<Vec3f> initialPositions; // initial position of all rigid bodies
+    std::vector<TQuat> initialQuats; // initial rotation quaternion of all rigid bodies
+    std::vector<Matrix> initialRotations; // initial rotation matrix of all rigid bodies
   };
 
 } // namespace dyno

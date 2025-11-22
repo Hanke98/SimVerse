@@ -191,6 +191,11 @@ namespace dyno
 
                     rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + _offset;
                     // rigidbody.angle = Quat1f(instances[robotarmIndex].rotation());
+
+                    initialPositions.push_back(rigidbody.position);
+                    initialQuats.push_back(rigidbody.angle);
+                    initialRotations.push_back(rigidbody.angle.toMatrix3x3());
+
                     if (this->urdfInfo.links[l].isRoot) {
                         rigidbody.motionType = BodyType::Static;
                     } else {
@@ -296,6 +301,44 @@ namespace dyno
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param)
     {
+        auto siziOfRigid = this->stateCenter()->size();
+        std::vector<Vec3f> systemPosition(siziOfRigid, Vec3f(0.0f, 0.0f, 0.0f));
+
+        Array<Vec3f, DeviceType::CPU> hCenters;
+        Array<Vec3f, DeviceType::CPU> hVelocities;
+        Array<TQuat, CPU> hAngles;
+        Array<Vec3f, CPU> hAngularVelocities;
+        Array<Matrix, CPU> hRotations;
+
+        hCenters.assign(*this->stateCenter()->getDataPtr());
+        hAngularVelocities.assign(*this->stateAngularVelocity()->getDataPtr());
+        hAngles.assign(*this->stateQuaternion()->getDataPtr());
+        hVelocities.assign(*this->stateVelocity()->getDataPtr());
+        hRotations.assign(*this->stateRotationMatrix()->getDataPtr());
+
+        std::cout << "size of hCenters: " << hCenters.size() << std::endl;
+
+        for (int i = 0; i < param.ids.size(); i++) {
+            std::cout << "param.ids: " << param.ids[i] << std::endl;
+        }
+
+        for (auto it : param.ids) {
+            for (auto index : ctrl_mb_chains[it].body_indices) {
+                hCenters[index] = initialPositions[index];
+                hAngles[index] = initialQuats[index];
+                hRotations[index] = initialRotations[index];
+                hVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
+                hAngularVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
+            }
+        }
+
+        this->stateCenter()->assign(hCenters);
+        this->stateQuaternion()->assign(hAngles);
+        this->stateRotationMatrix()->assign(hRotations);
+        this->stateVelocity()->assign(hVelocities);
+        this->stateAngularVelocity()->assign(hAngularVelocities);
+
+
     }
 
     DEFINE_CLASS(BatchRigidBodySystem);

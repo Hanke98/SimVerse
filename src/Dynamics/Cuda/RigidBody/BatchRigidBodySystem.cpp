@@ -353,8 +353,11 @@ namespace dyno
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::applyHingeTorqueControl(BatchRigidBodySystemHingeTorqueControlParam& torque_param) {
 
-        Array<Vec3f, DeviceType::CPU> systemTorque;
-        systemTorque.assign(*this->stateExternalTorque()->getDataPtr());
+        // Array<Vec3f, DeviceType::CPU> systemTorque;
+        // systemTorque.assign(*this->stateExternalTorque()->getDataPtr());
+
+        int rigidbodys = this->stateExternalTorque()->size();
+        std::vector<Vec3f> systemTorque(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
 
         for (int i : torque_param.ids) {
             auto& mb_chain = ctrl_mb_chains[i];
@@ -362,9 +365,10 @@ namespace dyno
                 auto& joint = this->urdfInfo.joints[j];
                 auto parentId = joint.parentLinkId;
                 auto childId = joint.childLinkId;
-                auto jointAxis = joint.axisWorld;
-                systemTorque[mb_chain.body_indices[parentId]] = -torque_param.torques[i][j] * jointAxis;
-                systemTorque[mb_chain.body_indices[childId]] = torque_param.torques[i][j] * jointAxis;
+                auto jointAxis = joint.originWorld.rotation() * joint.axis;
+
+                systemTorque[mb_chain.body_indices[parentId]] -= torque_param.torques[i][j] * jointAxis;
+                systemTorque[mb_chain.body_indices[childId]] += torque_param.torques[i][j] * jointAxis;
             }
         }
         this->stateExternalTorque()->assign(systemTorque);

@@ -22,6 +22,7 @@ namespace dyno
         DECLARE_TCLASS(RobotArmSimulator, TDataType)
     public:
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemControlParamBase CtrlParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemHingeTorqueControlParam CtrlHingeParam;
 
         typedef typename TDataType::Real Real;
         typedef typename TDataType::Coord Coord;
@@ -51,6 +52,8 @@ namespace dyno
         void setMoters(std::vector<std::vector<float>>& moterImpulses);
 
         void applyImpulse(std::vector<std::vector<float>>& moterImpulses);
+
+        void applyHingeTorques(CtrlHingeParam& param);
 
         std::shared_ptr<SceneGraph> activeScene;
         int getRigidSystemCount() const

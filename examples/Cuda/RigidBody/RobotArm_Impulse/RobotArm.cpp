@@ -37,7 +37,7 @@ namespace dyno
     void RobotArmSimulator<TDataType>::initBatchSolver(){
         batchSolver = std::make_shared<BatchRigidBodySystem<TDataType>>();
         batchSolver->setDt(1 / 100.0f);
-        batchSolver->varGravityEnabled()->setValue(true);
+        batchSolver->varGravityEnabled()->setValue(false);
         batchSolver->varFrictionEnabled()->setValue(false);
         Vec3f base{ -0.0f, -0.0f, -0.0f };
         Vec3f offset{ 0.0f, 0.0f, 2.0f };
@@ -224,6 +224,11 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::resetStates(CtrlParam& param) {
         batchSolver->resetBatchMultiBodies(param);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::applyHingeTorques(CtrlHingeParam& param) {
+        batchSolver->applyHingeTorqueControl(param);
     }
 
     template<typename TDataType>

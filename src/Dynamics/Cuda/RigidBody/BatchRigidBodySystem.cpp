@@ -316,12 +316,6 @@ namespace dyno
         hVelocities.assign(*this->stateVelocity()->getDataPtr());
         hRotations.assign(*this->stateRotationMatrix()->getDataPtr());
 
-        std::cout << "size of hCenters: " << hCenters.size() << std::endl;
-
-        for (int i = 0; i < param.ids.size(); i++) {
-            std::cout << "param.ids: " << param.ids[i] << std::endl;
-        }
-
         for (auto it : param.ids) {
             for (auto index : ctrl_mb_chains[it].body_indices) {
                 hCenters[index] = initialPositions[index];
@@ -337,8 +331,43 @@ namespace dyno
         this->stateRotationMatrix()->assign(hRotations);
         this->stateVelocity()->assign(hVelocities);
         this->stateAngularVelocity()->assign(hAngularVelocities);
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::resetOneMultiBodies(int mb_id)
+    {
+
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::applyTorqueControl(BatchRigidBodySystemTorqueControlParam& torque_param)
+    {
+        int rigidbodys = this->stateExternalForce()->size();
+        std::vector<Vec3f> systemForces(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
+
+        const int n = torque_param.num_bodies;
 
 
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::applyHingeTorqueControl(BatchRigidBodySystemHingeTorqueControlParam& torque_param) {
+
+        Array<Vec3f, DeviceType::CPU> systemTorque;
+        systemTorque.assign(*this->stateExternalTorque()->getDataPtr());
+
+        for (int i : torque_param.ids) {
+            auto& mb_chain = ctrl_mb_chains[i];
+            for (int j = 0; j < mb_chain.hinge_joint_indices.size(); ++j) {
+                auto& joint = this->urdfInfo.joints[j];
+                auto parentId = joint.parentLinkId;
+                auto childId = joint.childLinkId;
+                auto jointAxis = joint.axisWorld;
+                systemTorque[mb_chain.body_indices[parentId]] = -torque_param.torques[i][j] * jointAxis;
+                systemTorque[mb_chain.body_indices[childId]] = torque_param.torques[i][j] * jointAxis;
+            }
+        }
+        this->stateExternalTorque()->assign(systemTorque);
     }
 
     DEFINE_CLASS(BatchRigidBodySystem);

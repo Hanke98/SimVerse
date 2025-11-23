@@ -435,7 +435,6 @@ namespace dyno
             st += rigidbodys;
         }
         mbSystem->stateExternalTorque()->assign(systemForces);
-        auto externalforce = mbSystem->stateExternalTorque()->getData();
     }
 
     template<typename TDataType>

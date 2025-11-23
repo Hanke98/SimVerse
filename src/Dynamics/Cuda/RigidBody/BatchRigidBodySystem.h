@@ -46,6 +46,11 @@ public:
       std::vector<Coord> torques;
     };
 
+    struct BatchRigidBodySystemHingeTorqueControlParam: public BatchRigidBodySystemControlParamBase
+    {
+      std::vector<std::vector<float>> torques;
+    };
+
     BatchRigidBodySystem();
     ~BatchRigidBodySystem() override;
 
@@ -58,6 +63,8 @@ public:
     void resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param);
   
     void applyTorqueControl(BatchRigidBodySystemTorqueControlParam& torque_param);
+
+    void applyHingeTorqueControl(BatchRigidBodySystemHingeTorqueControlParam& torque_param);
 
     void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
     // ------------------------------------

@@ -41,6 +41,9 @@ int main() {
     std::cout << "开始仿真循环（按ESC退出）" << std::endl;
     int i = 0;
     Real roll_old = 0.0f, pitch_old, yaw_old = 0.0f;
+    Real hingeAngle_old2 = 0.0f;
+    Real hingeAngle_old5 = 0.0f;
+    Quat<Real> qRel5_old(0, 0, 0, 1);
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
         // if (i == 100) {
@@ -80,22 +83,93 @@ int main() {
         RobotArmSimulator<DataType3f>::LocalIndexParam local_param;
         local_param.num_bodies = 1;
         local_param.ids.push_back(0);
-        local_param.localRigidBodyid.push_back(2);
-        auto quatOfBody2 = simulator.getAngelsByLocalIndex(local_param);
+        for (int i = 0; i <= 7; ++i) {
+            local_param.localRigidBodyid.push_back(i);
+        }
+        auto quat = simulator.getAngelsByLocalIndex(local_param);
 
-        Real roll, pitch, yaw;
-        quatOfBody2[0].toEulerAngle(yaw, pitch, roll);
-        std::cout << "roll of rigidbody2 is :" << roll << std::endl;
-        //
-        // Real torque = - kp * (yaw - 0.5) - kv * ang_vel.x;
-        Real torque = - kp * (roll - 0.5) - kv * (roll - roll_old) * 100;
-        roll_old = roll;
+        auto unwrapAngle = [](Real angle, Real prevAngle) -> Real
+        {
+            const Real twoPi = Real(2.0 * M_PI);
 
-        moterVelocities1 = {0.0f, torque, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+            // six candidates：±angle, ±(angle + 2π), ±(angle - 2π)
+            Real cand[6] = {
+                angle,
+                -angle,
+                angle + twoPi,
+                -(angle + twoPi),
+                angle - twoPi,
+                -(angle - twoPi)
+            };
+
+            Real best = cand[0];
+            Real bestDiff = fabs(cand[0] - prevAngle);
+
+            for (int i = 1; i < 6; ++i)
+            {
+                Real d = fabs(cand[i] - prevAngle);
+                if (d < bestDiff)
+                {
+                    best = cand[i];
+                    bestDiff = d;
+                }
+            }
+
+            return best;
+        };
+
+        // ---------------- joint 2 ----------------
+        auto quatOfBody1 = quat[1];
+        auto quatOfBody2 = quat[2];
+        auto qRel2 = quatOfBody1.inverse() * quatOfBody2;
+        qRel2.normalize();
+
+        auto axisWorld2 = quatOfBody1.rotate(Vec3f(1.0f, 0.0f, 0.0f));
+        axisWorld2.normalize();
+
+        Real rot2;
+        Vec3f axisRel2;
+        qRel2.toRotationAxis(rot2, axisRel2);
+        // std::cout << "axisRel2 is : " << axisRel2 << std::endl;
+        Real sign2 = axisRel2.dot(axisWorld2) > 0 ? Real(1) : Real(-1);
+        Real rawAngle2 = sign2 * rot2;
+
+        Real hingeAngle2 = unwrapAngle(rawAngle2, hingeAngle_old2);
+
+        std::cout << "hingeAngle of joint 2 is :" << hingeAngle2 << std::endl;
+
+        Real torque2 = - kp * (hingeAngle2 - 0.3)
+                       - kv * (hingeAngle2 - hingeAngle_old2) * 100;
+
+        hingeAngle_old2 = hingeAngle2;
+
+        // ---------------- joint 5 ----------------
+        auto quatOfBody4 = quat[4];
+        auto quatOfBody5 = quat[5];
+
+        auto qRel5 = quatOfBody4.inverse() * quatOfBody5;
+        qRel5.normalize();
+
+        auto axisWorld5 = quatOfBody4.rotate(Vec3f(0.0f, 1.0f, 0.0f));
+        Real rot5;
+        Vec3f axisRel5;
+        qRel5.toRotationAxis(rot5, axisRel5);
+        // std::cout << "axisRel5 is : " << axisRel5 << std::endl;
+        Real sign5 = axisRel5.dot(axisWorld5) > 0 ? Real(1) : Real(-1);
+        Real rawAngle5 = sign5 * rot5;
+
+        Real hingeAngle5 = unwrapAngle(rawAngle5, hingeAngle_old5);
+
+        std::cout << "hingeAngle of joint 5 is :" << hingeAngle5 << std::endl;
+
+        Real torque5 = - kp * (hingeAngle5 - 0.5)
+                       - kv * (hingeAngle5 - hingeAngle_old5) * 100;
+
+        hingeAngle_old5 = hingeAngle5;
+
+        moterVelocities1 = {0.0f, torque2, 0.0f, 0.0f, torque5, 0.0f, 0.0f};
         // moterVelocities.pop_back();
         // moterVelocities.push_back(moterVelocities1);
-
-
 
         i++;
     }

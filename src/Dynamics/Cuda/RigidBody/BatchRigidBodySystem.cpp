@@ -366,9 +366,10 @@ namespace dyno
                 auto parentId = joint.parentLinkId;
                 auto childId = joint.childLinkId;
                 auto jointAxis = joint.originWorld.rotation() * joint.axis;
+                auto hingeTorque = torque_param.torques[i][j] * jointAxis;
 
-                systemTorque[mb_chain.body_indices[parentId]] -= torque_param.torques[i][j] * jointAxis;
-                systemTorque[mb_chain.body_indices[childId]] += torque_param.torques[i][j] * jointAxis;
+                systemTorque[mb_chain.body_indices[parentId]] -= hingeTorque;
+                systemTorque[mb_chain.body_indices[childId]] += hingeTorque;
             }
         }
         this->stateExternalTorque()->assign(systemTorque);

@@ -7,8 +7,8 @@ using namespace dyno;
 
 int main() {
     getchar();
-    Real kp = 100;
-    Real kv = 40;
+    Real kp = 1;
+    Real kv = 0.4;
     // 创建机械臂仿真器实例
     RobotArmSimulator<DataType3f> simulator;
     
@@ -22,8 +22,8 @@ int main() {
     Vec3f offset(1.0f, 0.0f, 0.0f);    // 机械臂基座偏移
     Vec3f targetPos(0.2, 1.0, 0.3); // 目标位置示例
     std::vector<std::vector<float>> moterVelocities;
-    std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.1f, 0.0f};
-    std::vector<float> moterVelocities2{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    // std::vector<float> moterVelocities2{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     // const int N = 1;
     // for (int i = 0; i < N; ++i) {
     //     moterVelocities.push_back(moterVelocities1);
@@ -40,42 +40,62 @@ int main() {
     // 4. 主仿真循环
     std::cout << "开始仿真循环（按ESC退出）" << std::endl;
     int i = 0;
-    Real roll_old, pitch_old, yaw_old = 0.0f;
+    Real roll_old = 0.0f, pitch_old, yaw_old = 0.0f;
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
-        if (i == 100) {
-            RobotArmSimulator<DataType3f>::CtrlParam param;
-            param.num_bodies = 1;
-            param.ids.push_back(0);
-            simulator.resetStates(param);
-        }
-
-        if (i == 200) {
-            RobotArmSimulator<DataType3f>::CtrlParam param;
-            param.num_bodies = 1;
-            param.ids.push_back(1);
-            simulator.resetStates(param);
-        }
-
-        if (i == 300) {
-            RobotArmSimulator<DataType3f>::CtrlParam param;
-            param.num_bodies = 2;
-            param.ids.push_back(0);
-            param.ids.push_back(1);
-            simulator.resetStates(param);
-        }
+        // if (i == 100) {
+        //     RobotArmSimulator<DataType3f>::CtrlParam param;
+        //     param.num_bodies = 1;
+        //     param.ids.push_back(0);
+        //     simulator.resetStates(param);
+        // }
+        //
+        // if (i == 200) {
+        //     RobotArmSimulator<DataType3f>::CtrlParam param;
+        //     param.num_bodies = 1;
+        //     param.ids.push_back(1);
+        //     simulator.resetStates(param);
+        // }
+        //
+        // if (i == 300) {
+        //     RobotArmSimulator<DataType3f>::CtrlParam param;
+        //     param.num_bodies = 2;
+        //     param.ids.push_back(0);
+        //     param.ids.push_back(1);
+        //     simulator.resetStates(param);
+        // }
 
         RobotArmSimulator<DataType3f>::CtrlHingeParam param;
-        param.num_bodies = 2;
+        param.num_bodies = 1;
         param.ids.push_back(0);
-        param.ids.push_back(1);
+        // param.ids.push_back(1);
         param.torques.push_back(moterVelocities1);
-        param.torques.push_back(moterVelocities2);
+        // param.torques.push_back(moterVelocities2);
         simulator.applyHingeTorques(param);
 
         simulator.stepSimulation(moterVelocities, true);
         // 处理窗口事件
         glfwPollEvents();
+
+        RobotArmSimulator<DataType3f>::LocalIndexParam local_param;
+        local_param.num_bodies = 1;
+        local_param.ids.push_back(0);
+        local_param.localRigidBodyid.push_back(2);
+        auto quatOfBody2 = simulator.getAngelsByLocalIndex(local_param);
+
+        Real roll, pitch, yaw;
+        quatOfBody2[0].toEulerAngle(yaw, pitch, roll);
+        std::cout << "roll of rigidbody2 is :" << roll << std::endl;
+        //
+        // Real torque = - kp * (yaw - 0.5) - kv * ang_vel.x;
+        Real torque = - kp * (roll - 0.5) - kv * (roll - roll_old) * 100;
+        roll_old = roll;
+
+        moterVelocities1 = {0.0f, torque, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+        // moterVelocities.pop_back();
+        // moterVelocities.push_back(moterVelocities1);
+
+
 
         i++;
     }

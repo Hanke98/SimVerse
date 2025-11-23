@@ -41,7 +41,7 @@ namespace dyno
         batchSolver->varFrictionEnabled()->setValue(false);
         Vec3f base{ -0.0f, -0.0f, -0.0f };
         Vec3f offset{ 0.0f, 0.0f, 2.0f };
-        batchSolver->addExampleRigidBodies("", base, offset, 2, 1, 1);
+        batchSolver->addExampleRigidBodies("", base, offset, 1, 1, 1);
         scn->addNode(batchSolver);
     }
 
@@ -533,6 +533,13 @@ namespace dyno
                 activeScene->reset();
             }
         }
+    }
+
+    template<typename TDataType>
+    std::vector<typename RobotArmSimulator<TDataType>::TQuat> RobotArmSimulator<TDataType>::getAngelsByLocalIndex(
+        LocalIndexParam& param) {
+        auto returnAngels = batchSolver->getAngelsByLocalIndex(param);
+        return returnAngels;
     }
 
     // inline Mat3f outer(const Vec3f& a, const Vec3f& b)

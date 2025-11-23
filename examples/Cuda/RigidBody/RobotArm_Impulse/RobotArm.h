@@ -23,6 +23,7 @@ namespace dyno
     public:
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemControlParamBase CtrlParam;
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemHingeTorqueControlParam CtrlHingeParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemLocalIndexParam LocalIndexParam;
 
         typedef typename TDataType::Real Real;
         typedef typename TDataType::Coord Coord;
@@ -73,6 +74,8 @@ namespace dyno
         TQuat rigidRotation(int systemID, int rigidID);
         Vec3f rigidVelocity(int systemID, int rigidID);
         Vec3f rigidAngularVelocity(int systemID, int rigidID);
+
+        std::vector<TQuat> getAngelsByLocalIndex(LocalIndexParam& param);
 
     public:
         DEF_VAR(Coord, TargetCenter, 0, "Target center");

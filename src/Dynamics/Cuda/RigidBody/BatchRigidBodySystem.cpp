@@ -412,6 +412,21 @@ namespace dyno
         return hRotationMatrix;
     }
 
+    template<typename TDataType>
+    std::vector<typename BatchRigidBodySystem<TDataType>::TQuat> BatchRigidBodySystem<TDataType>::getAngelsByLocalIndex(
+        BatchRigidBodySystemLocalIndexParam& param) {
+        Array<TQuat, CPU> hAngels = gethAngels();
+        std::vector<TQuat> returnAngels;
+        for (int i : param.ids) {
+            auto mb = ctrl_mb_chains[i];
+            for (int j : param.localRigidBodyid) {
+                auto index = mb.body_indices[j];
+                returnAngels.push_back(hAngels[index]);
+            }
+        }
+        return returnAngels;
+    }
+
     DEFINE_CLASS(BatchRigidBodySystem);
 
 } // namespace dyno

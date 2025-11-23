@@ -51,7 +51,7 @@ public:
       std::vector<std::vector<float>> torques;
     };
 
-    struct BatchRigidBodySystemLocalParam: public BatchRigidBodySystemControlParamBase
+    struct BatchRigidBodySystemLocalIndexParam: public BatchRigidBodySystemControlParamBase
     {
       std::vector<int> localRigidBodyid;
     };
@@ -90,6 +90,8 @@ public:
     Array<Vec3f, DeviceType::CPU> gethVelocities();
     Array<Vec3f, DeviceType::CPU> gethAngularVelocities();
     Array<Mat3f, DeviceType::CPU> gethRotationMatrix();
+
+    std::vector<TQuat> getAngelsByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
 
     // ------------------------------------
 

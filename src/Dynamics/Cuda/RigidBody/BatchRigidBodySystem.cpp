@@ -301,25 +301,24 @@ namespace dyno
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param)
     {
-        auto siziOfRigid = this->stateCenter()->size();
-        std::vector<Vec3f> systemPosition(siziOfRigid, Vec3f(0.0f, 0.0f, 0.0f));
 
-        Array<Vec3f, DeviceType::CPU> hCenters;
-        Array<Vec3f, DeviceType::CPU> hVelocities;
-        Array<TQuat, CPU> hAngles;
-        Array<Vec3f, CPU> hAngularVelocities;
-        Array<Matrix, CPU> hRotations;
 
-        hCenters.assign(*this->stateCenter()->getDataPtr());
-        hAngularVelocities.assign(*this->stateAngularVelocity()->getDataPtr());
-        hAngles.assign(*this->stateQuaternion()->getDataPtr());
-        hVelocities.assign(*this->stateVelocity()->getDataPtr());
-        hRotations.assign(*this->stateRotationMatrix()->getDataPtr());
+        Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
+        Array<TQuat, CPU> hAngels = gethAngels();
+        Array<Vec3f, DeviceType::CPU> hVelocities = gethVelocities();
+        Array<Vec3f, CPU> hAngularVelocities = gethAngularVelocities();
+        Array<Mat3f, CPU> hRotations = gethRotationMatrix();
+
+        // hCenters.assign(*this->stateCenter()->getDataPtr());
+        // hAngularVelocities.assign(*this->stateAngularVelocity()->getDataPtr());
+        // hAngels.assign(*this->stateQuaternion()->getDataPtr());
+        // hVelocities.assign(*this->stateVelocity()->getDataPtr());
+        // hRotations.assign(*this->stateRotationMatrix()->getDataPtr());
 
         for (auto it : param.ids) {
             for (auto index : ctrl_mb_chains[it].body_indices) {
                 hCenters[index] = initialPositions[index];
-                hAngles[index] = initialQuats[index];
+                hAngels[index] = initialQuats[index];
                 hRotations[index] = initialRotations[index];
                 hVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
                 hAngularVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
@@ -327,7 +326,7 @@ namespace dyno
         }
 
         this->stateCenter()->assign(hCenters);
-        this->stateQuaternion()->assign(hAngles);
+        this->stateQuaternion()->assign(hAngels);
         this->stateRotationMatrix()->assign(hRotations);
         this->stateVelocity()->assign(hVelocities);
         this->stateAngularVelocity()->assign(hAngularVelocities);
@@ -346,8 +345,6 @@ namespace dyno
         std::vector<Vec3f> systemForces(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
 
         const int n = torque_param.num_bodies;
-
-
     }
 
     template<typename TDataType>
@@ -373,6 +370,46 @@ namespace dyno
             }
         }
         this->stateExternalTorque()->assign(systemTorque);
+    }
+
+    template<typename TDataType>
+    Array<Vec3f, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethCenters()
+    {
+        Array<Vec3f, DeviceType::CPU> hCenters;
+        hCenters.assign(*this->stateCenter()->getDataPtr());
+        return hCenters;
+    }
+
+    template<typename TDataType>
+    Array<typename BatchRigidBodySystem<TDataType>::TQuat, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethAngels()
+    {
+        Array<TQuat, DeviceType::CPU> hAngles;
+        hAngles.assign(*this->stateQuaternion()->getDataPtr());
+        return hAngles;
+    }
+
+    template<typename TDataType>
+    Array<Vec3f, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethVelocities()
+    {
+        Array<Vec3f, DeviceType::CPU> hVelocities;
+        hVelocities.assign(*this->stateVelocity()->getDataPtr());
+        return hVelocities;
+    }
+
+    template<typename TDataType>
+    Array<Vec3f, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethAngularVelocities()
+    {
+        Array<Vec3f, DeviceType::CPU> hAngularVelocities;
+        hAngularVelocities.assign(*this->stateAngularVelocity()->getDataPtr());
+        return hAngularVelocities;
+    }
+
+    template<typename TDataType>
+    Array<Mat3f, CPU> BatchRigidBodySystem<TDataType>::gethRotationMatrix()
+    {
+        Array<Mat3f, CPU> hRotationMatrix;
+        hRotationMatrix.assign(*this->stateRotationMatrix()->getDataPtr());
+        return hRotationMatrix;
     }
 
     DEFINE_CLASS(BatchRigidBodySystem);

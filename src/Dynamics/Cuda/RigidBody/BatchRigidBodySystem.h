@@ -37,7 +37,7 @@ public:
 
     struct BatchRigidBodySystemControlParamBase
     {
-      int num_bodies;
+      int num_bodies = 0;
       std::vector<int> ids;
     };
 
@@ -49,6 +49,11 @@ public:
     struct BatchRigidBodySystemHingeTorqueControlParam: public BatchRigidBodySystemControlParamBase
     {
       std::vector<std::vector<float>> torques;
+    };
+
+    struct BatchRigidBodySystemLocalParam: public BatchRigidBodySystemControlParamBase
+    {
+      std::vector<int> localRigidBodyid;
     };
 
     BatchRigidBodySystem();
@@ -80,11 +85,11 @@ public:
       this->varGravityEnabled()->setValue(enabled);
     }
 
-    // Array<Vec3f, DeviceType::CPU>* gethCenters() {return &hCenters;}
-    // Array<TQuat, DeviceType::CPU>* gethAngels() {return &hAngles;}
-    //
-    // Array<Vec3f, DeviceType::CPU>* gethVelocities() {return &hVelocities;}
-    // Array<Vec3f, DeviceType::CPU>* gethAngularVelocity() {return &hAngularVelocity;}
+    Array<Vec3f, DeviceType::CPU> gethCenters();
+    Array<TQuat, DeviceType::CPU> gethAngels();
+    Array<Vec3f, DeviceType::CPU> gethVelocities();
+    Array<Vec3f, DeviceType::CPU> gethAngularVelocities();
+    Array<Mat3f, DeviceType::CPU> gethRotationMatrix();
 
     // ------------------------------------
 

@@ -22,8 +22,8 @@ int main() {
     Vec3f offset(1.0f, 0.0f, 0.0f);    // 机械臂基座偏移
     Vec3f targetPos(0.2, 1.0, 0.3); // 目标位置示例
     std::vector<std::vector<float>> moterVelocities;
-    std::vector<float> moterVelocities1{0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    std::vector<float> moterVelocities2{0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.1f, 0.0f};
+    std::vector<float> moterVelocities2{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     // const int N = 1;
     // for (int i = 0; i < N; ++i) {
     //     moterVelocities.push_back(moterVelocities1);

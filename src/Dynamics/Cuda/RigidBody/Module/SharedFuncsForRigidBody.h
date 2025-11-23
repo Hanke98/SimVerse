@@ -329,6 +329,10 @@ namespace dyno
 		DArray<Mat3f> K_3
 	);
 
+	void initExtImpulse(
+		DArray<Vec3f> impulse_ext
+	);
+
 	void setUpGravity(
 		DArray<Vec3f> impulse_ext,
 		float g,

@@ -279,6 +279,8 @@ namespace dyno
 
 			for (int i = 0; i < this->varSubStepping()->getValue(); i++)
 			{
+				initExtImpulse(mImpulseExt);
+
 				if (this->varGravityEnabled()->getValue())
 				{
 					setUpGravity(
@@ -377,6 +379,8 @@ namespace dyno
 
 		else
 		{
+			initExtImpulse(mImpulseExt);
+
 			if (this->varGravityEnabled()->getValue())
 			{
 				setUpGravity(

@@ -346,7 +346,6 @@ namespace dyno
         // 初始化 root link 世界变换为单位变换
         // Transform3f T_world_root;
 
-
         SquareMatrix<Real, 3> R_zUpToYUp {0, 1, 0, 0, 0, 1, 1, 0, 0};
 
         Vec3f t(0, 0, 0);
@@ -382,6 +381,7 @@ namespace dyno
 
             // joint.originWorld = T_world_parent * originLocal
             joint.originWorld = composeTransform(T_world_link, joint.originLocal);
+            joint.axisWorld = joint.originWorld.rotation() * joint.axis;
 
             // 若你在 link 里还有额外的 <origin> (例如视觉/碰撞)，可以再乘一次
             const std::string& childName = joint.childLink;

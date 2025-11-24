@@ -209,11 +209,15 @@ namespace dyno
 
                     box.halfLength = (up - down) / 2;
 
-                    this->bindBox(actor, box);
+                    this->bindBox(actor, box, 1000);
 
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
 
                     mb.body_indices.push_back(actor->idx);
+
+                    std::cout << "BoxInfo " << l << ": \n"
+                              << "Position: " << rigidbody.position << "\n"
+                              << "halfLength: " << box.halfLength << "\n"<< std::endl;
                 }
 
                 for (int j = 0; j < this->urdfInfo.joints.size(); ++j) {
@@ -226,21 +230,42 @@ namespace dyno
                     if (this->urdfInfo.joints[j].type == REVOLUTE) {
                         auto &joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + _offset);
-                        joint.setAxis(this->urdfInfo.joints[j].originWorld.rotation() * this->urdfInfo.joints[j].axis);
+                        // joint.setAxis(this->urdfInfo.joints[j].originWorld.rotation() * this->urdfInfo.joints[j].axis);
+                        joint.setAxis(this->urdfInfo.joints[j].axisWorld);
                         joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
                         mb.hinge_joint_indices.push_back(this->getHostHingeJoints().size() - 1);
+                        std::cout << "JointInfo " << j << ": \n"
+                        << "Joint type: Hinge\n"
+                        << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
+                        << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
+                        << "Axis: " << this->urdfInfo.joints[j].axisWorld << "\n"
+                        << "Hinge range: (" << this->urdfInfo.joints[j].limits.lower << ", " << this->urdfInfo.joints[j].limits.upper << ")\n"
+                        << std::endl;
                     }
                     if (this->urdfInfo.joints[j].type == PRISMATIC) {
                         auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + _offset);
-                        joint.setAxis(this->urdfInfo.joints[j].originWorld.rotation() * this->urdfInfo.joints[j].axis);
+                        // joint.setAxis(this->urdfInfo.joints[j].originWorld.rotation() * this->urdfInfo.joints[j].axis);
+                        joint.setAxis(this->urdfInfo.joints[j].axisWorld);
                         joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
                         mb.slider_joint_indices.push_back(this->getHostSliderJoints().size() - 1);
+                        std::cout << "JointInfo " << j << ": \n"
+                        << "Joint type: Slider\n"
+                        << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
+                        << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
+                        << "Axis: " << this->urdfInfo.joints[j].axisWorld << "\n"
+                        << "Slider range: (" << this->urdfInfo.joints[j].limits.lower << ", " << this->urdfInfo.joints[j].limits.upper << ")\n"
+                        << std::endl;
                     }
                     if (this->urdfInfo.joints[j].type == FIXED) {
                         auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + _offset);
                         mb.fixed_joint_indices.push_back(this->getHostFixedJoints().size() - 1);
+                        std::cout << "JointInfo " << j << ": \n"
+                        << "Joint type: Fixed\n"
+                        << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
+                        << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
+                        << std::endl;
                     }
                 }
 

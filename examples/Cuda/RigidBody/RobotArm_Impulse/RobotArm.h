@@ -36,7 +36,7 @@ namespace dyno
 
         void initBatchSolver();
         void resetStates(CtrlParam& param);
-        void resetStates() override;
+        // void resetStates() override;
         // 场景创建相关接口
         void createScene();
         int addRigidSystem(const Vec3f& offset, Vec3f& targetPosition, float denstiy); // 返回新创建的rigidID
@@ -50,7 +50,6 @@ namespace dyno
         void stepSimulation(std::vector<std::vector<float>>& moterVelocities, bool enableRendering = true);
         void terminateSimulation();
 
-        void setMoters(std::vector<std::vector<float>>& moterImpulses);
 
         void applyImpulse(std::vector<std::vector<float>>& moterImpulses);
 
@@ -63,19 +62,10 @@ namespace dyno
         }
 
         // void resetState(int rigidID);
-        void resetStatesBak();
-
-        Mat3f parallelAxisTheoremWorld(const Mat3f& I_world_about_ref, Real mass, const Vec3f& com_world, const Vec3f& pointO_world);
-        float computeHingeEffectiveInertiaWorld(int rigidID, const HingeJoint<Real>& joint, const Vec3f& jointPositionWorld);
-        void computeJointInitia(int rigidID);
-
-        Vec3f fingerPosition(int rigidID);
-        Vec3f rigidPosition(int systemID, int rigidID);
-        TQuat rigidRotation(int systemID, int rigidID);
-        Vec3f rigidVelocity(int systemID, int rigidID);
-        Vec3f rigidAngularVelocity(int systemID, int rigidID);
 
         std::vector<TQuat> getAngelsByLocalIndex(LocalIndexParam& param);
+
+        UrdfInformation getKinematicsChainInfo();
 
     public:
         DEF_VAR(Coord, TargetCenter, 0, "Target center");

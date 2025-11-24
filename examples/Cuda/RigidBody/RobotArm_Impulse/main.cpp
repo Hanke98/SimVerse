@@ -7,8 +7,8 @@ using namespace dyno;
 
 int main() {
     getchar();
-    Real kp = 1;
-    Real kv = 0.4;
+    Real kp = 5;
+    Real kv = 2;
     // 创建机械臂仿真器实例
     RobotArmSimulator<DataType3f> simulator;
     
@@ -36,6 +36,7 @@ int main() {
     std::cout << "初始化窗口" << std::endl;
     simulator.initialize(1280, 768, 2.5);
     std::cout << "仿真环境初始化完成" << std::endl;
+    UrdfInformation chainInfo = simulator.getKinematicsChainInfo();
     
     // 4. 主仿真循环
     std::cout << "开始仿真循环（按ESC退出）" << std::endl;
@@ -44,6 +45,59 @@ int main() {
     Real hingeAngle_old2 = 0.0f;
     Real hingeAngle_old5 = 0.0f;
     Quat<Real> qRel5_old(0, 0, 0, 1);
+
+    Real torque[7] = { Real(0) };
+    std::vector<float> hingeAngle_old(7, 0.0f);
+
+    // Vec3f jointAxisLocal[7] = {
+    //     Vec3f(0, 1, 0),   // joint 0: link0->link1
+    //     Vec3f(1, 0, 0),   // joint 1: link1->link2
+    //     Vec3f(0, 1, 0),   // joint 2: link2->link3
+    //     Vec3f(-1, 0, 0),   // joint 3: link3->link4
+    //     Vec3f(0, 1, 0),   // joint 4: link4->link5
+    //     Vec3f(-1, 0, 0),   // joint 5: link5->link6
+    //     Vec3f(0, -1, 0)    // joint 6: link6->link7
+    // };
+    Vec3f jointAxisLocal[7] = {
+        chainInfo.joints[0].axisWorld,   // joint 0: link0->link1
+        chainInfo.joints[1].axisWorld,   // joint 1: link1->link2
+        chainInfo.joints[2].axisWorld,   // joint 2: link2->link3
+        chainInfo.joints[3].axisWorld,   // joint 3: link3->link4
+        chainInfo.joints[4].axisWorld,   // joint 4: link4->link5
+        chainInfo.joints[5].axisWorld,   // joint 5: link5->link6
+        chainInfo.joints[6].axisWorld    // joint 6: link6->link7
+    };
+
+    float effortUpperLimit[7] = {
+        chainInfo.joints[0].limits.upper,   // joint 0: link0->link1
+        chainInfo.joints[1].limits.upper,   // joint 1: link1->link2
+        chainInfo.joints[2].limits.upper,   // joint 2: link2->link3
+        chainInfo.joints[3].limits.upper,   // joint 3: link3->link4
+        chainInfo.joints[4].limits.upper,   // joint 4: link4->link5
+        chainInfo.joints[5].limits.upper,   // joint 5: link5->link6
+        chainInfo.joints[6].limits.upper    // joint 6: link6->link7
+    };
+
+    float effortLowerLimit[7] = {
+        chainInfo.joints[0].limits.lower,   // joint 0: link0->link1
+        chainInfo.joints[1].limits.lower,   // joint 1: link1->link2
+        chainInfo.joints[2].limits.lower,   // joint 2: link2->link3
+        chainInfo.joints[3].limits.lower,   // joint 3: link3->link4
+        chainInfo.joints[4].limits.lower,   // joint 4: link4->link5
+        chainInfo.joints[5].limits.lower,   // joint 5: link5->link6
+        chainInfo.joints[6].limits.lower    // joint 6: link6->link7
+    };
+
+    //
+    Real targetAngle[7] = {
+        Real(0.0),    // joint 0
+        Real(0.3),    // joint 1
+        Real(0.0),    // joint 2
+        Real(-0.5),    // joint 3
+        Real(0.0),    // joint 4
+        Real(0.0),    // joint 5
+        Real(0.1)     // joint 6
+    };
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
         // if (i == 100) {
@@ -118,56 +172,70 @@ int main() {
             return best;
         };
 
-        // ---------------- joint 2 ----------------
-        auto quatOfBody1 = quat[1];
-        auto quatOfBody2 = quat[2];
-        auto qRel2 = quatOfBody1.inverse() * quatOfBody2;
-        qRel2.normalize();
+        // ------------- loop calculating 7 joint ----------------
+        for (int j = 0; j < 7; ++j)
+        {
+            int parentId = j;       // 父连杆：j
+            int childId  = j + 1;   // 子连杆：j+1
 
-        auto axisWorld2 = quatOfBody1.rotate(Vec3f(1.0f, 0.0f, 0.0f));
-        axisWorld2.normalize();
+            auto quatParent = quat[parentId];
+            auto quatChild  = quat[childId];
 
-        Real rot2;
-        Vec3f axisRel2;
-        qRel2.toRotationAxis(rot2, axisRel2);
-        // std::cout << "axisRel2 is : " << axisRel2 << std::endl;
-        Real sign2 = axisRel2.dot(axisWorld2) > 0 ? Real(1) : Real(-1);
-        Real rawAngle2 = sign2 * rot2;
+            // 相对旋转：child 相对于 parent
+            auto qRel = quatParent.inverse() * quatChild;
+            qRel.normalize();
 
-        Real hingeAngle2 = unwrapAngle(rawAngle2, hingeAngle_old2);
+            // 铰链轴在 world 坐标系下的方向
+            auto axisWorld = quatParent.rotate(jointAxisLocal[j]);
+            axisWorld.normalize();
 
-        std::cout << "hingeAngle of joint 2 is :" << hingeAngle2 << std::endl;
+            // 相对旋转 → 轴角
+            Real rot;
+            Vec3f axisRel;
+            qRel.toRotationAxis(rot, axisRel);
 
-        Real torque2 = - kp * (hingeAngle2 - 0.3)
-                       - kv * (hingeAngle2 - hingeAngle_old2) * 100;
+            // 通过和铰链轴的点积确定“正方向”
+            Real sign      = axisRel.dot(axisWorld) > 0 ? Real(1) : Real(-1);
+            Real rawAngle  = sign * rot;
 
-        hingeAngle_old2 = hingeAngle2;
+            // 用上一帧角度解包，得到连续的关节角
+            Real hingeAngle = unwrapAngle(rawAngle, hingeAngle_old[j]);
 
-        // ---------------- joint 5 ----------------
-        auto quatOfBody4 = quat[4];
-        auto quatOfBody5 = quat[5];
+            // PD 控制
+            Real e  = hingeAngle - targetAngle[j];
+            Real de = hingeAngle - hingeAngle_old[j];
+            torque[j] = - kp * e - kv * de * Real(100);
+            torque[j] = std::max(effortLowerLimit[j], std::min(effortUpperLimit[j], torque[j]));
+            // std::cout << "torque of joint " << j << " is: " << torque[j] << std::endl;
 
-        auto qRel5 = quatOfBody4.inverse() * quatOfBody5;
-        qRel5.normalize();
+            // 更新上一帧角度
+            hingeAngle_old[j] = hingeAngle;
 
-        auto axisWorld5 = quatOfBody4.rotate(Vec3f(0.0f, 1.0f, 0.0f));
-        Real rot5;
-        Vec3f axisRel5;
-        qRel5.toRotationAxis(rot5, axisRel5);
-        // std::cout << "axisRel5 is : " << axisRel5 << std::endl;
-        Real sign5 = axisRel5.dot(axisWorld5) > 0 ? Real(1) : Real(-1);
-        Real rawAngle5 = sign5 * rot5;
+            if (j == 3) {
+                // std::cout << "hingeAngle of joint " << j << " is: " << hingeAngle << std::endl;
+            }
+        }
 
-        Real hingeAngle5 = unwrapAngle(rawAngle5, hingeAngle_old5);
+        // moterVelocities1 = {
+        //     (float)torque[0],
+        //     (float)torque[1],
+        //     (float)torque[2],
+        //     (float)torque[3],
+        //     (float)torque[4],
+        //     (float)torque[5],
+        //     (float)torque[6]
+        // };
+        moterVelocities1 = {
+            (float)0.0f,
+            (float)torque[1],
+            (float)0.0f,
+            (float)torque[3],
+            (float)0.0f,
+            (float)0.0f,
+            (float)0.0f
+        };
 
-        std::cout << "hingeAngle of joint 5 is :" << hingeAngle5 << std::endl;
-
-        Real torque5 = - kp * (hingeAngle5 - 0.5)
-                       - kv * (hingeAngle5 - hingeAngle_old5) * 100;
-
-        hingeAngle_old5 = hingeAngle5;
-
-        moterVelocities1 = {0.0f, torque2, 0.0f, 0.0f, torque5, 0.0f, 0.0f};
+        // moterVelocities1 = {0.0f, (float)torque[2], 0.0f, 0.0f, (float)torque[4], 0.0f, 0.0f};
         // moterVelocities.pop_back();
         // moterVelocities.push_back(moterVelocities1);
 

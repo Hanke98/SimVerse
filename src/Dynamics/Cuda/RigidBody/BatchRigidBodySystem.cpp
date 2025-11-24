@@ -19,7 +19,7 @@ namespace dyno
 
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::addExampleRigidBodies(
-      std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z)
+      std::string urdf_fn, Vec3f base, Vec3f offset, float density, int num_copies_x, int num_copies_y, int num_copies_z)
     {
         // TODO: load urdf and create rigid bodies accordingly
 
@@ -162,7 +162,7 @@ namespace dyno
             auto addRigidArmExample3 = [&](Vec3f _offset) {
                 MulitBodyChainIndices mb;
 
-                std::string filename = getAssetPath() + "../asset/franka_description/robots/franka_panda.urdf";
+                std::string filename = getAssetPath() + "../asset/franka_description/robots/franka_panda_custom.urdf";
                 // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka.urdf";
                 // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka_allegro_touch_sensor.urdf";
 
@@ -209,7 +209,7 @@ namespace dyno
 
                     box.halfLength = (up - down) / 2;
 
-                    this->bindBox(actor, box, 1000);
+                    this->bindBox(actor, box, density);
 
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
 
@@ -230,7 +230,6 @@ namespace dyno
                     if (this->urdfInfo.joints[j].type == REVOLUTE) {
                         auto &joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + _offset);
-                        // joint.setAxis(this->urdfInfo.joints[j].originWorld.rotation() * this->urdfInfo.joints[j].axis);
                         joint.setAxis(this->urdfInfo.joints[j].axisWorld);
                         joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
                         mb.hinge_joint_indices.push_back(this->getHostHingeJoints().size() - 1);
@@ -238,6 +237,7 @@ namespace dyno
                         << "Joint type: Hinge\n"
                         << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
                         << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
+                        << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
                         << "Axis: " << this->urdfInfo.joints[j].axisWorld << "\n"
                         << "Hinge range: (" << this->urdfInfo.joints[j].limits.lower << ", " << this->urdfInfo.joints[j].limits.upper << ")\n"
                         << std::endl;
@@ -245,7 +245,6 @@ namespace dyno
                     if (this->urdfInfo.joints[j].type == PRISMATIC) {
                         auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + _offset);
-                        // joint.setAxis(this->urdfInfo.joints[j].originWorld.rotation() * this->urdfInfo.joints[j].axis);
                         joint.setAxis(this->urdfInfo.joints[j].axisWorld);
                         joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
                         mb.slider_joint_indices.push_back(this->getHostSliderJoints().size() - 1);
@@ -253,6 +252,7 @@ namespace dyno
                         << "Joint type: Slider\n"
                         << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
                         << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
+                        << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
                         << "Axis: " << this->urdfInfo.joints[j].axisWorld << "\n"
                         << "Slider range: (" << this->urdfInfo.joints[j].limits.lower << ", " << this->urdfInfo.joints[j].limits.upper << ")\n"
                         << std::endl;
@@ -265,6 +265,7 @@ namespace dyno
                         << "Joint type: Fixed\n"
                         << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
                         << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
+                        << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
                         << std::endl;
                     }
                 }
@@ -279,11 +280,11 @@ namespace dyno
                 rigid->stateTopology()->connect(mapper->inDiscreteElements());
                 rigid->graphicsPipeline()->pushModule(mapper);
 
-                auto sRender = std::make_shared<GLSurfaceVisualModule>();
-                sRender->setColor(Color(1, 1, 0));
-                sRender->setAlpha(0.5f);
-                mapper->outTriangleSet()->connect(sRender->inTriangleSet());
-                rigid->graphicsPipeline()->pushModule(sRender);
+                // auto sRender = std::make_shared<GLSurfaceVisualModule>();
+                // sRender->setColor(Color(1, 1, 0));
+                // sRender->setAlpha(0.5f);
+                // mapper->outTriangleSet()->connect(sRender->inTriangleSet());
+                // rigid->graphicsPipeline()->pushModule(sRender);
             };
 
             for (int x = 0; x < num_copies_x; x++)
@@ -387,7 +388,7 @@ namespace dyno
                 auto& joint = this->urdfInfo.joints[j];
                 auto parentId = joint.parentLinkId;
                 auto childId = joint.childLinkId;
-                auto jointAxis = joint.originWorld.rotation() * joint.axis;
+                auto jointAxis = joint.axisWorld;
                 auto hingeTorque = torque_param.torques[i][j] * jointAxis;
 
                 systemTorque[mb_chain.body_indices[parentId]] -= hingeTorque;

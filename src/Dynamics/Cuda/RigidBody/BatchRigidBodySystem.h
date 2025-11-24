@@ -71,7 +71,8 @@ public:
 
     void applyHingeTorqueControl(BatchRigidBodySystemHingeTorqueControlParam& torque_param);
 
-    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
+    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, float density,
+                               int num_copies_x, int num_copies_y, int num_copies_z);
     // ------------------------------------
 
     // ------------------------------------

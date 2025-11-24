@@ -7,7 +7,7 @@ using namespace dyno;
 
 int main() {
     getchar();
-    Real kp = 5;
+    Real kp = 0.3;
     Real kv = 2;
     // 创建机械臂仿真器实例
     RobotArmSimulator<DataType3f> simulator;
@@ -15,8 +15,11 @@ int main() {
     // 1. 创建场景
     simulator.createScene();
     std::cout << "场景创建完成" << std::endl;
+
+    float dt = 0.01;
+    float density = 1000.0f;
     
-    simulator.initBatchSolver();
+    simulator.initBatchSolver(dt, density);
 
     // 2. 添加机械臂系统
     Vec3f offset(1.0f, 0.0f, 0.0f);    // 机械臂基座偏移
@@ -34,7 +37,7 @@ int main() {
     // 3. 初始化仿真环境（窗口大小1280x768）
     simulator.setupSceneGraph();
     std::cout << "初始化窗口" << std::endl;
-    simulator.initialize(1280, 768, 2.5);
+    simulator.initialize(1280, 768, 1);
     std::cout << "仿真环境初始化完成" << std::endl;
     UrdfInformation chainInfo = simulator.getKinematicsChainInfo();
     
@@ -48,6 +51,7 @@ int main() {
 
     Real torque[7] = { Real(0) };
     std::vector<float> hingeAngle_old(7, 0.0f);
+    std::vector<float> error(7, 0.0f);
 
     // Vec3f jointAxisLocal[7] = {
     //     Vec3f(0, 1, 0),   // joint 0: link0->link1
@@ -68,36 +72,28 @@ int main() {
         chainInfo.joints[6].axisWorld    // joint 6: link6->link7
     };
 
-    float effortUpperLimit[7] = {
-        chainInfo.joints[0].limits.upper,   // joint 0: link0->link1
-        chainInfo.joints[1].limits.upper,   // joint 1: link1->link2
-        chainInfo.joints[2].limits.upper,   // joint 2: link2->link3
-        chainInfo.joints[3].limits.upper,   // joint 3: link3->link4
-        chainInfo.joints[4].limits.upper,   // joint 4: link4->link5
-        chainInfo.joints[5].limits.upper,   // joint 5: link5->link6
-        chainInfo.joints[6].limits.upper    // joint 6: link6->link7
-    };
-
-    float effortLowerLimit[7] = {
-        chainInfo.joints[0].limits.lower,   // joint 0: link0->link1
-        chainInfo.joints[1].limits.lower,   // joint 1: link1->link2
-        chainInfo.joints[2].limits.lower,   // joint 2: link2->link3
-        chainInfo.joints[3].limits.lower,   // joint 3: link3->link4
-        chainInfo.joints[4].limits.lower,   // joint 4: link4->link5
-        chainInfo.joints[5].limits.lower,   // joint 5: link5->link6
-        chainInfo.joints[6].limits.lower    // joint 6: link6->link7
+    float effortLimit[7] = {
+        chainInfo.joints[0].limits.effort,   // joint 0: link0->link1
+        chainInfo.joints[1].limits.effort,   // joint 1: link1->link2
+        chainInfo.joints[2].limits.effort,   // joint 2: link2->link3
+        chainInfo.joints[3].limits.effort,   // joint 3: link3->link4
+        chainInfo.joints[4].limits.effort,   // joint 4: link4->link5
+        chainInfo.joints[5].limits.effort,   // joint 5: link5->link6
+        chainInfo.joints[6].limits.effort    // joint 6: link6->link7
     };
 
     //
     Real targetAngle[7] = {
-        Real(0.0),    // joint 0
-        Real(0.3),    // joint 1
-        Real(0.0),    // joint 2
-        Real(-0.5),    // joint 3
-        Real(0.0),    // joint 4
-        Real(0.0),    // joint 5
+        Real(0.3),    // joint 0
+        Real(1.3),    // joint 1
+        Real(0.3),    // joint 2
+        Real(-0.3),    // joint 3
+        Real(0.3),    // joint 4
+        Real(1.8),    // joint 5
         Real(0.1)     // joint 6
     };
+
+    int checkFrequancy = 500;
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
         // if (i == 100) {
@@ -121,18 +117,6 @@ int main() {
         //     param.ids.push_back(1);
         //     simulator.resetStates(param);
         // }
-
-        RobotArmSimulator<DataType3f>::CtrlHingeParam param;
-        param.num_bodies = 1;
-        param.ids.push_back(0);
-        // param.ids.push_back(1);
-        param.torques.push_back(moterVelocities1);
-        // param.torques.push_back(moterVelocities2);
-        simulator.applyHingeTorques(param);
-
-        simulator.stepSimulation(moterVelocities, true);
-        // 处理窗口事件
-        glfwPollEvents();
 
         RobotArmSimulator<DataType3f>::LocalIndexParam local_param;
         local_param.num_bodies = 1;
@@ -202,38 +186,90 @@ int main() {
             Real hingeAngle = unwrapAngle(rawAngle, hingeAngle_old[j]);
 
             // PD 控制
-            Real e  = hingeAngle - targetAngle[j];
+            Real e  = targetAngle[j] - hingeAngle;
             Real de = hingeAngle - hingeAngle_old[j];
-            torque[j] = - kp * e - kv * de * Real(100);
-            torque[j] = std::max(effortLowerLimit[j], std::min(effortUpperLimit[j], torque[j]));
+            torque[j] = kp * e - kv * de / dt ;
+            torque[j] = std::max(-effortLimit[j], std::min(effortLimit[j], torque[j]));
             // std::cout << "torque of joint " << j << " is: " << torque[j] << std::endl;
 
             // 更新上一帧角度
             hingeAngle_old[j] = hingeAngle;
 
-            if (j == 3) {
-                // std::cout << "hingeAngle of joint " << j << " is: " << hingeAngle << std::endl;
+            if (std::abs(e) > std::abs(error[j])) {
+                error[j] = e;
+            }
+
+            // if (j == 5 && i % 50 == 0) {
+            //     bool sat = std::abs(torque[j]) >= effortLimit[j] - 1e-6;
+            //     std::cout << "step " << i
+            //               << ", joint " << j
+            //               << ", err = " << e
+            //               << ", torque = " << torque[j]
+            //               << (sat ? " (SATURATED)" : "")
+            //               << std::endl;
+            // }
+
+            // if (j == 1 || j == 3) {
+            //     std::cout << "err of joint " << j << " is: " << targetAngle[j] - hingeAngle << std::endl;
+            // }
+
+            if (i % checkFrequancy == 0 && j == 6) {
+                // std::cout << "The max error of joint " << j
+                // << " from " << (i / 100) * 100 - 100 << " to " << (i / 100) * 100 << " steps is "
+                // << error[j] << std::endl;
+
+
+                float best_val = error[0];
+                int best_idx = 0;
+                for (int idx = 1; idx < error.size(); ++idx) {
+                    if (std::abs(error[idx]) > std::abs(best_val)) {
+                        best_val = error[idx];
+                        best_idx = idx;
+                    }
+                }
+
+                std::cout << "From " << std::max(0, (i / checkFrequancy) * checkFrequancy - checkFrequancy)
+                          << " to " << (i / checkFrequancy) * checkFrequancy << " steps: " << "\n"
+                          << "The largest error is " << best_val << "\n"
+                          << "The joint of largest error is : " << best_idx << "\n"<< std::endl;
+
+                std::fill(error.begin(), error.end(), 0.0f);
+                // if (j == 6) {
+                //     std::cout << "\n" << std::endl;
+                // }
             }
         }
 
-        // moterVelocities1 = {
-        //     (float)torque[0],
-        //     (float)torque[1],
-        //     (float)torque[2],
-        //     (float)torque[3],
-        //     (float)torque[4],
-        //     (float)torque[5],
-        //     (float)torque[6]
-        // };
         moterVelocities1 = {
-            (float)0.0f,
+            (float)torque[0],
             (float)torque[1],
-            (float)0.0f,
+            (float)torque[2],
             (float)torque[3],
-            (float)0.0f,
-            (float)0.0f,
-            (float)0.0f
+            (float)torque[4],
+            (float)torque[5],
+            (float)torque[6]
         };
+        // moterVelocities1 = {
+        //     (float)0.0f,
+        //     (float)torque[1],
+        //     (float)0.0f,
+        //     (float)torque[3],
+        //     (float)0.0f,
+        //     (float)0.0f,
+        //     (float)0.0f
+        // };
+
+        RobotArmSimulator<DataType3f>::CtrlHingeParam param;
+        param.num_bodies = 1;
+        param.ids.push_back(0);
+        // param.ids.push_back(1);
+        param.torques.push_back(moterVelocities1);
+        // param.torques.push_back(moterVelocities2);
+        simulator.applyHingeTorques(param);
+
+        simulator.stepSimulation(moterVelocities, true);
+        // 处理窗口事件
+        glfwPollEvents();
 
         // moterVelocities1 = {0.0f, (float)torque[2], 0.0f, 0.0f, (float)torque[4], 0.0f, 0.0f};
         // moterVelocities.pop_back();

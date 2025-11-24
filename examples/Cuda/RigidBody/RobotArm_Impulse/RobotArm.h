@@ -34,7 +34,7 @@ namespace dyno
         RobotArmSimulator();
         ~RobotArmSimulator();
 
-        void initBatchSolver();
+        void initBatchSolver(Real dt, Real density);
         void resetStates(CtrlParam& param);
         // void resetStates() override;
         // 场景创建相关接口

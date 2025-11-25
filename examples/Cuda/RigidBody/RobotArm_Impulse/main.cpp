@@ -8,47 +8,45 @@ using namespace dyno;
 int main() {
     // getchar();
     Real scale = 1.0f;
-    // Real kp = 0.3 * scale;
+    // Real kp[7] = {
+    //     12 * scale,
+    //     20 * scale,
+    //     10 * scale,
+    //     30 * scale,
+    //     7 * scale, // joint 4
+    //     10 * scale,
+    //     3 * scale,
+    // };
+
+    // Real kv = 2 * scale;
+    // Real kd[7] = {
+    //     5 * scale,
+    //     30 * scale,
+    //     2 * scale,
+    //     40 * scale,
+    //     2 * scale,  //joint 4
+    //     2 * scale,
+    //     2 * scale,
+    // };
+
     Real kp[7] = {
-        12 * scale,
+        100 * scale,
+        100 * scale,
+        50 * scale,
+        100 * scale,
+        50 * scale, // joint 4
+        100 * scale,
+        20 * scale,
+    };
+    Real kd[7] = {
         20 * scale,
         10 * scale,
-        30 * scale,
-        7 * scale, // joint 4
+        2 * scale,
         10 * scale,
-        3 * scale,
-    };
-    // Real kp[7] = {
-    //     100 * scale,
-    //     100 * scale,
-    //     50 * scale,
-    //     100 * scale,
-    //     50 * scale, // joint 4
-    //     100 * scale,
-    //     20 * scale,
-    // };
-    // Real kv = 2 * scale;
-    Real kd[7] = {
-        5 * scale,
-        30 * scale,
-        2 * scale,
-        40 * scale,
         2 * scale,  //joint 4
-        2 * scale,
-        2 * scale,
+        8 * scale,
+        1 * scale,
     };
-
-    Real checkJoint = 0;
-    // Real kd[7] = {
-    //     20 * scale,
-    //     10 * scale,
-    //     2 * scale,
-    //     10 * scale,
-    //     2 * scale,  //joint 4
-    //     8 * scale,
-    //     1 * scale,
-    // };
-
 
     // 创建机械臂仿真器实例
     RobotArmSimulator<DataType3f> simulator;
@@ -58,7 +56,7 @@ int main() {
     std::cout << "场景创建完成" << std::endl;
 
     float dt = 0.01;
-    float density = 1000.0f;
+    float density = 2500.0f;
     
     simulator.initBatchSolver(dt, density);
 
@@ -67,13 +65,6 @@ int main() {
     Vec3f targetPos(0.2, 1.0, 0.3); // 目标位置示例
     std::vector<std::vector<float>> moterVelocities;
     std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    // std::vector<float> moterVelocities2{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
-    // const int N = 1;
-    // for (int i = 0; i < N; ++i) {
-    //     moterVelocities.push_back(moterVelocities1);
-    //     simulator.addRigidSystem(offset, targetPos, 50.0f);
-    // }
-    // simulator.addMultiBoydSystem();
 
     // 3. 初始化仿真环境（窗口大小1280x768）
     simulator.setupSceneGraph();
@@ -85,24 +76,11 @@ int main() {
     // 4. 主仿真循环
     std::cout << "开始仿真循环（按ESC退出）" << std::endl;
     int i = 0;
-    Real roll_old = 0.0f, pitch_old, yaw_old = 0.0f;
-    Real hingeAngle_old2 = 0.0f;
-    Real hingeAngle_old5 = 0.0f;
-    Quat<Real> qRel5_old(0, 0, 0, 1);
 
     Real torque[7] = { Real(0) };
     std::vector<float> hingeAngle_old(7, 0.0f);
     std::vector<float> error(7, 0.0f);
 
-    // Vec3f jointAxisLocal[7] = {
-    //     Vec3f(0, 1, 0),   // joint 0: link0->link1
-    //     Vec3f(1, 0, 0),   // joint 1: link1->link2
-    //     Vec3f(0, 1, 0),   // joint 2: link2->link3
-    //     Vec3f(-1, 0, 0),   // joint 3: link3->link4
-    //     Vec3f(0, 1, 0),   // joint 4: link4->link5
-    //     Vec3f(-1, 0, 0),   // joint 5: link5->link6
-    //     Vec3f(0, -1, 0)    // joint 6: link6->link7
-    // };
     Vec3f jointAxisLocal[7] = {
         chainInfo.joints[0].axisWorld,   // joint 0: link0->link1
         chainInfo.joints[1].axisWorld,   // joint 1: link1->link2
@@ -123,9 +101,8 @@ int main() {
         chainInfo.joints[6].limits.effort    // joint 6: link6->link7
     };
 
-    //
     Real targetAngle[7] = {
-        Real(0.3),    // joint 0
+        Real(1.0),    // joint 0
         Real(1.3),    // joint 1
         Real(0.3),    // joint 2
         Real(-0.3),    // joint 3
@@ -168,6 +145,8 @@ int main() {
         }
         auto quat = simulator.getAngelsByLocalIndex(local_param);
         auto angularVelocity = simulator.getAngularVelocitiesByLocalIndex(local_param);
+        // auto mass = simulator.getMassByLocalIndex(local_param);
+        // std::cout << "Mass: \n" << mass[7] << std::endl;
 
         auto unwrapAngle = [](Real angle, Real prevAngle) -> Real
         {
@@ -238,11 +217,7 @@ int main() {
             Real de = hingeAngle - hingeAngle_old[j];
             // torque[j] = kp * e - kv * de / dt ;
             torque[j] = kp[j] * e - kd[j] * hingeVelocity ;
-            if (j >= 0 && j <= 3) {
-                torque[j] = std::max(-effortLimit[j]/1, std::min(effortLimit[j]/1, torque[j]));
-            } else {
-                torque[j] = std::max(-effortLimit[j]/1, std::min(effortLimit[j]/1, torque[j]));
-            }
+            torque[j] = std::max(-effortLimit[j]/1, std::min(effortLimit[j]/1, torque[j]));
 
             // std::cout << "torque of joint " << j << " is: " << torque[j] << std::endl;
 
@@ -252,8 +227,6 @@ int main() {
             if (std::abs(e) > std::abs(error[j])) {
                 error[j] = e;
             }
-
-
 
             // if (j == 1 || j == 3) {
             //     std::cout << "err of joint " << j << " is: " << targetAngle[j] - hingeAngle << std::endl;
@@ -280,9 +253,6 @@ int main() {
                           << "The joint of largest error is : " << best_idx << "\n"<< std::endl;
 
                 std::fill(error.begin(), error.end(), 0.0f);
-                // if (j == 6) {
-                //     std::cout << "\n" << std::endl;
-                // }
             }
 
             if (j == best_idx && i % 10 == 0) {
@@ -306,31 +276,16 @@ int main() {
             (float)torque[5],
             (float)torque[6]
         };
-        // moterVelocities1 = {
-        //     (float)0.0f,
-        //     (float)torque[1],
-        //     (float)0.0f,
-        //     (float)torque[3],
-        //     (float)0.0f,
-        //     (float)0.0f,
-        //     (float)0.0f
-        // };
 
         RobotArmSimulator<DataType3f>::CtrlHingeParam param;
         param.num_bodies = 1;
         param.ids.push_back(0);
-        // param.ids.push_back(1);
         param.torques.push_back(moterVelocities1);
-        // param.torques.push_back(moterVelocities2);
         simulator.applyHingeTorques(param);
 
         simulator.stepSimulation(moterVelocities, true);
         // 处理窗口事件
         glfwPollEvents();
-
-        // moterVelocities1 = {0.0f, (float)torque[2], 0.0f, 0.0f, (float)torque[4], 0.0f, 0.0f};
-        // moterVelocities.pop_back();
-        // moterVelocities.push_back(moterVelocities1);
 
         i++;
     }

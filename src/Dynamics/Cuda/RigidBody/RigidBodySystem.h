@@ -231,7 +231,7 @@ namespace dyno
 		
 		DEF_ARRAY_STATE(Coord, ExternalTorque, DeviceType::GPU, "External torque applied to rigid bodies");
 
-		DEF_VAR(Real, AngularDamping, 0.0, "");
+		DEF_VAR(Real, AngularDamping, 50.0, "Angular Damping");
 
 	private:
 		void setupShape2RigidBodyMapping();

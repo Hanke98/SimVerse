@@ -60,6 +60,7 @@ namespace dyno
 
     this->stateExternalForce()->connect(iterSolver->inExternalForce());
     this->stateExternalTorque()->connect(iterSolver->inExternalTorque());
+    this->varAngularDamping()->connect(iterSolver->varAngularDamping());
 
     this->stateFrictionCoefficients()->connect(iterSolver->inFrictionCoefficients());
     this->stateAttribute()->connect(iterSolver->inAttribute());

@@ -323,6 +323,13 @@ namespace dyno
     }
 
     template<typename TDataType>
+    std::vector<float> RobotArmSimulator<TDataType>::getMassByLocalIndex(
+        LocalIndexParam& param) {
+        auto Mass = batchSolver->getMassByLocalIndex(param);
+        return Mass;
+    }
+
+    template<typename TDataType>
     UrdfInformation RobotArmSimulator<TDataType>::getKinematicsChainInfo() {
         return batchSolver->urdfInfo;
     }

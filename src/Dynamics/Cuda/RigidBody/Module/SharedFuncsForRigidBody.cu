@@ -74,6 +74,7 @@ namespace dyno
 			//Damping
 			/*velocity[tId] *= 1.0f / (1.0f + dt * linearDamping);
 			angular_velocity[tId] *= 1.0f / (1.0f + dt * angularDamping);*/
+			angular_velocity[tId] *= (1.0f - dt * angularDamping);
 		}
 	}
 

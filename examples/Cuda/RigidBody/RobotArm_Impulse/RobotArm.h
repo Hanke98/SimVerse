@@ -66,6 +66,8 @@ namespace dyno
         std::vector<TQuat> getAngelsByLocalIndex(LocalIndexParam& param);
         std::vector<Vec3f> getAngularVelocitiesByLocalIndex(LocalIndexParam& param);
 
+        std::vector<float> getMassByLocalIndex(LocalIndexParam& param);
+
         UrdfInformation getKinematicsChainInfo();
 
     public:

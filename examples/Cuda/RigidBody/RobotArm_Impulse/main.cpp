@@ -57,13 +57,19 @@ int main() {
 
     float dt = 0.01;
     float density = 2500.0f;
-    
-    simulator.initBatchSolver(dt, density);
+    bool enableGravity = false;
+    bool enableFriction = false;
+    Vec3f base{ -0.0f, -0.0f, -0.0f };
+    Vec3f offset{ 2.0f, 2.0f, 2.0f };
+    std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";
+
+    simulator.initBatchSolver();
+    simulator.setDt(dt);
+    simulator.enableGravity(enableGravity);
+    simulator.enableFriction(enableFriction);
+    simulator.addRobotArmRigidBodies(urdf_fn, base, offset, density, 1, 1, 1);
 
     // 2. 添加机械臂系统
-    Vec3f offset(1.0f, 0.0f, 0.0f);    // 机械臂基座偏移
-    Vec3f targetPos(0.2, 1.0, 0.3); // 目标位置示例
-    std::vector<std::vector<float>> moterVelocities;
     std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
     // 3. 初始化仿真环境（窗口大小1280x768）
@@ -283,7 +289,7 @@ int main() {
         param.torques.push_back(moterVelocities1);
         simulator.applyHingeTorques(param);
 
-        simulator.stepSimulation(moterVelocities, true);
+        simulator.stepSimulation(true);
         // 处理窗口事件
         glfwPollEvents();
 

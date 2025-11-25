@@ -162,7 +162,9 @@ namespace dyno
             auto addRigidArmExample3 = [&](Vec3f _offset) {
                 MulitBodyChainIndices mb;
 
-                std::string filename = getAssetPath() + "../asset/franka_description/robots/franka_panda_custom.urdf";
+                std::string filename = getAssetPath() + urdf_fn;
+
+                // std::string filename = getAssetPath() + "../asset/franka_description/robots/franka_panda_custom.urdf";
                 // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka.urdf";
                 // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka_allegro_touch_sensor.urdf";
 
@@ -293,9 +295,9 @@ namespace dyno
                 {
                     for (int z = 0; z < num_copies_z; z++)
                     {
-                        Vec3f offset = base + Vec3f(x * 2.0f, y * 2.0f, z * 2.0f);
+                        Vec3f _offset = base + Vec3f(x * offset.x, y * offset.y, z * offset.z);
                         // auto mb = addRigidArm(offset);
-                        auto mb = addRigidArmExample3(offset);
+                        auto mb = addRigidArmExample3(_offset);
                         ctrl_mb_chains.push_back(mb);
                         robotarmIndex++;
                     }
@@ -327,19 +329,11 @@ namespace dyno
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param)
     {
-
-
         Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
         Array<TQuat, CPU> hAngels = gethAngels();
         Array<Vec3f, DeviceType::CPU> hVelocities = gethVelocities();
         Array<Vec3f, CPU> hAngularVelocities = gethAngularVelocities();
         Array<Mat3f, CPU> hRotations = gethRotationMatrix();
-
-        // hCenters.assign(*this->stateCenter()->getDataPtr());
-        // hAngularVelocities.assign(*this->stateAngularVelocity()->getDataPtr());
-        // hAngels.assign(*this->stateQuaternion()->getDataPtr());
-        // hVelocities.assign(*this->stateVelocity()->getDataPtr());
-        // hRotations.assign(*this->stateRotationMatrix()->getDataPtr());
 
         for (auto it : param.ids) {
             for (auto index : ctrl_mb_chains[it].body_indices) {
@@ -431,9 +425,9 @@ namespace dyno
     }
 
     template<typename TDataType>
-    Array<Mat3f, CPU> BatchRigidBodySystem<TDataType>::gethRotationMatrix()
+    Array<Mat3f, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethRotationMatrix()
     {
-        Array<Mat3f, CPU> hRotationMatrix;
+        Array<Mat3f, DeviceType::CPU> hRotationMatrix;
         hRotationMatrix.assign(*this->stateRotationMatrix()->getDataPtr());
         return hRotationMatrix;
     }
@@ -457,7 +451,7 @@ namespace dyno
     template<typename TDataType>
     std::vector<typename BatchRigidBodySystem<TDataType>::TQuat> BatchRigidBodySystem<TDataType>::getAngelsByLocalIndex(
         BatchRigidBodySystemLocalIndexParam& param) {
-        Array<TQuat, CPU> hAngels = gethAngels();
+        Array<TQuat, DeviceType::CPU> hAngels = gethAngels();
         std::vector<TQuat> returnAngels;
         for (int i : param.ids) {
             auto mb = ctrl_mb_chains[i];
@@ -472,7 +466,7 @@ namespace dyno
     template<typename TDataType>
     std::vector<Vec3f> BatchRigidBodySystem<TDataType>::getAngularVelocitiesByLocalIndex(
         BatchRigidBodySystemLocalIndexParam& param) {
-        Array<Vec3f, CPU> hAngularVelocities = gethAngularVelocities();
+        Array<Vec3f, DeviceType::CPU> hAngularVelocities = gethAngularVelocities();
         std::vector<Vec3f> returnAngularVelocities;
         for (int i : param.ids) {
             auto mb = ctrl_mb_chains[i];
@@ -487,7 +481,7 @@ namespace dyno
     template<typename TDataType>
     std::vector<Vec3f> BatchRigidBodySystem<TDataType>::getCentersByLocalIndex(
         BatchRigidBodySystemLocalIndexParam& param) {
-        Array<Vec3f, CPU> hCenters = gethCenters();
+        Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
         std::vector<Vec3f> returnCenters;
         for (int i : param.ids) {
             auto mb = ctrl_mb_chains[i];
@@ -502,7 +496,7 @@ namespace dyno
     template<typename TDataType>
     std::vector<Vec3f> BatchRigidBodySystem<TDataType>::getVelocitiesByLocalIndex(
         BatchRigidBodySystemLocalIndexParam& param) {
-        Array<Vec3f, CPU> hVelocities = gethVelocities();
+        Array<Vec3f, DeviceType::CPU> hVelocities = gethVelocities();
         std::vector<Vec3f> returnVelocities;
         for (int i : param.ids) {
             auto mb = ctrl_mb_chains[i];
@@ -517,7 +511,7 @@ namespace dyno
     template<typename TDataType>
     std::vector<float> BatchRigidBodySystem<TDataType>::getMassByLocalIndex(
         BatchRigidBodySystemLocalIndexParam& param) {
-        Array<float, CPU> hMass = gethMass();
+        Array<float, DeviceType::CPU> hMass = gethMass();
         std::vector<float> returnMass;
         for (int i : param.ids) {
             auto mb = ctrl_mb_chains[i];

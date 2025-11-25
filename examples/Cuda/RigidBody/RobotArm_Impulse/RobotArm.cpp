@@ -23,8 +23,7 @@ namespace dyno
     IMPLEMENT_TCLASS(RobotArmSimulator, TDataType)
 
     template<typename TDataType>
-    RobotArmSimulator<TDataType>::RobotArmSimulator() :
-		ArticulatedBody<TDataType>()
+    RobotArmSimulator<TDataType>::RobotArmSimulator()
     {
 	}
 
@@ -34,15 +33,34 @@ namespace dyno
     }
 
     template<typename TDataType>
-    void RobotArmSimulator<TDataType>::initBatchSolver(Real dt, Real density){
-        batchSolver = std::make_shared<BatchRigidBodySystem<TDataType>>();
+    void RobotArmSimulator<TDataType>::initBatchSolver(){
+        batchSolver = scn->addNode(std::make_shared<BatchRigidBodySystem<TDataType>>());
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setDt(Real dt) {
         batchSolver->setDt(dt);
-        batchSolver->varGravityEnabled()->setValue(false);
-        batchSolver->varFrictionEnabled()->setValue(false);
-        Vec3f base{ -0.0f, -0.0f, -0.0f };
-        Vec3f offset{ 0.0f, 0.0f, 2.0f };
-        batchSolver->addExampleRigidBodies("", base, offset, density, 1, 1, 1);
-        scn->addNode(batchSolver);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::enableGravity(bool flag) {
+        batchSolver->varGravityEnabled()->setValue(flag);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::enableFriction(bool flag) {
+        batchSolver->varFrictionEnabled()->setValue(flag);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::addRobotArmRigidBodies(std::string urdf_fn,
+                                                              Vec3f base,
+                                                              Vec3f offset,
+                                                              float density,
+                                                              int num_copies_x,
+                                                              int num_copies_y,
+                                                              int num_copies_z) {
+        batchSolver->addExampleRigidBodies(urdf_fn, base, offset, density, num_copies_x, num_copies_y, num_copies_y);
     }
 
     template<typename TDataType>
@@ -56,112 +74,9 @@ namespace dyno
     }
 
     template<typename TDataType>
-    int RobotArmSimulator<TDataType>::generateRigidID() {
-        return nextRigidID++;
-    }
-
-    template<typename TDataType>
     void RobotArmSimulator<TDataType>::createScene() {
         scn = std::make_shared<SceneGraph>();
-        scn->setGravity(Vec3f(0.0f, 0.0f, 0.0f));
-        rigidSystems.clear();
-        nextRigidID = 0;
     }
-
-    template<typename TDataType>
-    typename RobotArmSimulator<TDataType>::RigidSystemData RobotArmSimulator<TDataType>::createSingleRigidSystem(int index, const Vec3f& offset, Vec3f& targetPosition, float density) {
-    
-        RigidSystemData data;
-        
-        // 创建RigidBodySystem节点
-
-        data.robot = scn->addNode(std::make_shared<RobotArmSimulator<DataType3f>>());
-        // data.robot = scn->addNode(std::make_shared<ArticulatedBody<DataType3f>>());
-
-
-        // 计算当前实例的基础位置
-        Vec3f basePos = Vec3f(index * offset.x - 0.45f, offset.y + 1.05f, index * offset.z);
-
-        // 设置机械臂初始位置和姿态
-        std::vector<Transform3f> transforms(1);
-        transforms[0] = Transform3f(basePos, 
-                                    Mat3f(1.0f, 0.0f, 0.0f, 
-                                            0.0f, 1.0f, 0.0f, 
-                                            0.0f, 0.0f, 1.0f), 
-                                    Vec3f(0.0f, 0.0f, 0.0f));
-        
-        data.robot->varVehiclesTransform()->setValue(transforms);
-
-        data.robot->varDensity()->setValue(density);
-
-        // fingerPosition(index);
-
-        // data.robot->varFingerCenter()->setValue(fingerPosition(index));
-
-        // targetPosition += Vec3f(0.45f, -1.125f, 0.0f);
-
-        data.robot->varTargetCenter()->setValue(targetPosition);
-
-        // data.robot->varTargetCenter()->setValue(targetPosition);
-
-        // data.system = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
-        // data.system->varGravityEnabled()->setValue(false);
-
-        // data.robot->connect(data.system->importVehicles());
-        // auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
-        // plane->varLengthX()->setValue(50);
-        // plane->varLengthZ()->setValue(50);
-        // plane->varSegmentX()->setValue(10);
-        // plane->varSegmentZ()->setValue(10);
-        //
-        // plane->stateTriangleSet()->connect(data.system->inTriangleSet());
-
-        return data;
-    }
-
-    template<typename TDataType>
-    int RobotArmSimulator<TDataType>::addMultiBoydSystem() {
-
-        mbSystem = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());
-        mbSystem->varGravityEnabled()->setValue(false);
-
-	    auto uav = scn->addNode(std::make_shared<UAV<DataType3f>>());
-
-	    std::vector<Transform3f> vehicleTransforms;
-	    vehicleTransforms.push_back(Transform3f(Vec3f(0.5, 0, 0), Quat1f(1.57, Vec3f(0, 1, 0)).toMatrix3x3()));
-	    vehicleTransforms.push_back(Transform3f(Vec3f(10, 2, 0), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
-	    vehicleTransforms.push_back(Transform3f(Vec3f(10, 2, 2), Quat1f(0, Vec3f(0, 1, 0)).toMatrix3x3()));
-	    uav->varVehiclesTransform()->setValue(vehicleTransforms);
-
-	    uav->connect(mbSystem->importVehicles());
-
-        auto plane = scn->addNode(std::make_shared<PlaneModel<DataType3f>>());
-        plane->varLengthX()->setValue(50);
-        plane->varLengthZ()->setValue(50);
-        plane->varSegmentX()->setValue(10);
-        plane->varSegmentZ()->setValue(10);
-
-        plane->stateTriangleSet()->connect(mbSystem->inTriangleSet());
-
-        return 0;
-    }
-
-    template<typename TDataType>
-    int RobotArmSimulator<TDataType>::addRigidSystem(const Vec3f& offset, Vec3f& targetPosition, float density) {
-        if (!scn) {
-            createScene();
-        }
-        m_offset = offset;
-        int rigidID = generateRigidID();
-        std::cout << "Add Rigid System with ID: " << rigidID << std::endl;
-        rigidSystems[rigidID] = createSingleRigidSystem(rigidID, m_offset, targetPosition, density);
-        // computeJointInitia(rigidID);
-        std::vector<float> moterVelocities_tmp(7, 0.0f);
-        motersVelocity.push_back(moterVelocities_tmp);
-        return rigidID;
-    }
-
-
 
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::setupSceneGraph() {
@@ -181,45 +96,8 @@ namespace dyno
     }
 
     template<typename TDataType>
-    void RobotArmSimulator<TDataType>::applyImpulse(std::vector<std::vector<float>>& moterImpulses) {
-
-        int rigidbodys = mbSystem->stateExternalForce()->size();
-        std::vector<Vec3f> systemForces(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
-
-        int n = rigidSystems.size();
-        rigidbodys /= n;
-        int st = 0;
-        for (int i = 0; i < rigidSystems.size(); ++i) {
-            systemForces[1 + st] = Vec3f(
-                -moterImpulses[i][1],
-                0.0f,
-                0.0f);
-
-            systemForces[2 + st] = Vec3f(
-                moterImpulses[i][1],
-                0.0f,
-                0.0f);
-
-            systemForces[4 + st] = Vec3f(
-                0.0f,
-                -moterImpulses[i][4],
-                0.0f);
-
-            systemForces[5 + st] = Vec3f(
-                0.0f,
-                moterImpulses[i][4],
-                0.0f);
-
-            st += rigidbodys;
-        }
-        mbSystem->stateExternalTorque()->assign(systemForces);
-    }
-
-    template<typename TDataType>
-    void RobotArmSimulator<TDataType>::stepSimulation(std::vector<std::vector<float>>& deltaMoterVelocities, bool enableRendering) {
+    void RobotArmSimulator<TDataType>::stepSimulation(bool enableRendering) {
         if (!isInitialized) return;
-
-        // applyImpulse(deltaMoterVelocities);
 
         if (activeScene) {
 
@@ -293,45 +171,43 @@ namespace dyno
     }
 
     template<typename TDataType>
-    void RobotArmSimulator<TDataType>::reset(int rigidID, Vec3f& targetPosition) {
-        if (rigidID != -1) {
-            if (rigidSystems.find(rigidID) != rigidSystems.end()) {
-                // targetPosition += Vec3f(0.45f, -1.125f, 0.0f);
-                rigidSystems[rigidID].robot->varTargetCenter()->setValue(targetPosition);
-                motersVelocity[rigidID] = std::vector<float>(7, 0.0f);
-                activeScene->reset(rigidSystems[rigidID].robot);
-            }
-        } else {
-            for (auto& [id, data] : rigidSystems) {
-                activeScene->reset();
-            }
-        }
+    std::vector<Vec3f> RobotArmSimulator<TDataType>::getCentersByLocalIndex(
+        LocalIndexParam& param) {
+        return batchSolver->getCentersByLocalIndex(param);
+    }
+
+    template<typename TDataType>
+    std::vector<Vec3f> RobotArmSimulator<TDataType>::getVelocitiesByLocalIndex(
+        LocalIndexParam& param) {
+        return batchSolver->getVelocitiesByLocalIndex(param);
     }
 
     template<typename TDataType>
     std::vector<typename RobotArmSimulator<TDataType>::TQuat> RobotArmSimulator<TDataType>::getAngelsByLocalIndex(
         LocalIndexParam& param) {
-        auto returnAngels = batchSolver->getAngelsByLocalIndex(param);
-        return returnAngels;
+        return batchSolver->getAngelsByLocalIndex(param);
     }
 
     template<typename TDataType>
     std::vector<Vec3f> RobotArmSimulator<TDataType>::getAngularVelocitiesByLocalIndex(
         LocalIndexParam& param) {
-        auto AngularVelocities = batchSolver->getAngularVelocitiesByLocalIndex(param);
-        return AngularVelocities;
+        return batchSolver->getAngularVelocitiesByLocalIndex(param);
     }
 
     template<typename TDataType>
     std::vector<float> RobotArmSimulator<TDataType>::getMassByLocalIndex(
         LocalIndexParam& param) {
-        auto Mass = batchSolver->getMassByLocalIndex(param);
-        return Mass;
+        return batchSolver->getMassByLocalIndex(param);
     }
 
     template<typename TDataType>
     UrdfInformation RobotArmSimulator<TDataType>::getKinematicsChainInfo() {
         return batchSolver->urdfInfo;
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setAngularDamping(Real damping) {
+        batchSolver->varAngularDamping()->setValue(damping);
     }
 
     DEFINE_CLASS(RobotArmSimulator);

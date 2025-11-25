@@ -311,11 +311,6 @@ namespace dyno
 
 				mImpulseC.reset();
 				initializeJacobian(dh);
-				// auto error = checkOutPositionError(
-				// 	this->inCenter()->getData(),
-				// 	mVelocityConstraints
-				// );
-				// printf(" Substep %d, Position Error = %f\n", i, error);
 
 				{
 					PROFILE_SCOPE("JacobiIterationLoop");
@@ -344,11 +339,8 @@ namespace dyno
 							this->varGravityValue()->getData(),
 							dh
 						);
-
 					}
-
 				}
-
 
 				updateVelocity(
 					this->inAttribute()->getData(),
@@ -374,7 +366,6 @@ namespace dyno
 
 			}
 		}
-
 		else
 		{
 			if (this->varGravityEnabled()->getValue())
@@ -418,6 +409,54 @@ namespace dyno
 				this->inInitialInertia()->getData(),
 				dt
 			);
+		}
+
+		{
+			mImpulseC.reset();
+			initializeJacobian(dt);
+
+			CArray<Coord> old_velocity;
+			CArray<Coord> old_angular_velocity;
+			old_velocity.assign(this->inVelocity()->getData());
+			old_angular_velocity.assign(this->inAngularVelocity()->getData());
+
+			
+			{
+				PROFILE_SCOPE("FinalJacobiIterationLoop");
+				for (int j = 0; j < 30; j++)
+				{
+					PostStablization(
+						mLambda,
+						mImpulseC,
+						mJ,
+						mB,
+						mEta,
+						mVelocityConstraints,
+						mContactNumber,
+						mK_1,
+						mK_2,
+						mK_3,
+						this->inMass()->getData(),
+						this->inFrictionCoefficients()->getData(),
+						this->varFrictionCoefficient()->getData(),
+						this->varGravityValue()->getData()
+					);
+				}
+			}
+			updateVelocity(
+				this->inAttribute()->getData(),
+				this->inVelocity()->getData(),
+				this->inAngularVelocity()->getData(),
+				mImpulseC,
+				this->varLinearDamping()->getValue(),
+				this->varAngularDamping()->getValue(),
+				dt
+			);
+
+
+			this->inVelocity()->getData().assign(old_velocity);
+			this->inAngularVelocity()->getData().assign(old_angular_velocity);
+	
 		}
 
 	}

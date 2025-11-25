@@ -6,9 +6,10 @@
 using namespace dyno;
 
 int main() {
-    getchar();
-    Real kp = 0.3;
-    Real kv = 2;
+    // getchar();
+    Real scale = 1;
+    Real kp = 0.3 * scale;
+    Real kv = 2 * scale;
     // 创建机械臂仿真器实例
     RobotArmSimulator<DataType3f> simulator;
     
@@ -125,6 +126,7 @@ int main() {
             local_param.localRigidBodyid.push_back(i);
         }
         auto quat = simulator.getAngelsByLocalIndex(local_param);
+        auto angularVelocity = simulator.getAngularVelocitiesByLocalIndex(local_param);
 
         auto unwrapAngle = [](Real angle, Real prevAngle) -> Real
         {
@@ -185,10 +187,16 @@ int main() {
             // 用上一帧角度解包，得到连续的关节角
             Real hingeAngle = unwrapAngle(rawAngle, hingeAngle_old[j]);
 
+            auto angularVelocityParent = angularVelocity[parentId];
+            auto angularVelocityChild = angularVelocity[childId];
+            auto angularVelocityRel = angularVelocityChild - angularVelocityParent;
+            float hingeVelocity = angularVelocityRel.dot(axisWorld);
+
             // PD 控制
             Real e  = targetAngle[j] - hingeAngle;
             Real de = hingeAngle - hingeAngle_old[j];
-            torque[j] = kp * e - kv * de / dt ;
+            // torque[j] = kp * e - kv * de / dt ;
+            torque[j] = kp * e - kv * hingeVelocity ;
             torque[j] = std::max(-effortLimit[j], std::min(effortLimit[j], torque[j]));
             // std::cout << "torque of joint " << j << " is: " << torque[j] << std::endl;
 
@@ -199,7 +207,7 @@ int main() {
                 error[j] = e;
             }
 
-            // if (j == 5 && i % 50 == 0) {
+            // if (j == 6 && i % 50 == 0) {
             //     bool sat = std::abs(torque[j]) >= effortLimit[j] - 1e-6;
             //     std::cout << "step " << i
             //               << ", joint " << j

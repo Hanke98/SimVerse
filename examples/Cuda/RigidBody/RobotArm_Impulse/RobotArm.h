@@ -64,6 +64,7 @@ namespace dyno
         // void resetState(int rigidID);
 
         std::vector<TQuat> getAngelsByLocalIndex(LocalIndexParam& param);
+        std::vector<Vec3f> getAngularVelocitiesByLocalIndex(LocalIndexParam& param);
 
         UrdfInformation getKinematicsChainInfo();
 

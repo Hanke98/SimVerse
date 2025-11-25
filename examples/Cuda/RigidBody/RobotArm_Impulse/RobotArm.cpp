@@ -316,6 +316,13 @@ namespace dyno
     }
 
     template<typename TDataType>
+    std::vector<Vec3f> RobotArmSimulator<TDataType>::getAngularVelocitiesByLocalIndex(
+        LocalIndexParam& param) {
+        auto AngularVelocities = batchSolver->getAngularVelocitiesByLocalIndex(param);
+        return AngularVelocities;
+    }
+
+    template<typename TDataType>
     UrdfInformation RobotArmSimulator<TDataType>::getKinematicsChainInfo() {
         return batchSolver->urdfInfo;
     }

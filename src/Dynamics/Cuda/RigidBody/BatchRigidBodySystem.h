@@ -93,6 +93,7 @@ public:
     Array<Mat3f, DeviceType::CPU> gethRotationMatrix();
 
     std::vector<TQuat> getAngelsByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
+    std::vector<Vec3f> getAngularVelocitiesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
 
     // ------------------------------------
 

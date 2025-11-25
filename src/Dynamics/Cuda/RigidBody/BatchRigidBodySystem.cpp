@@ -453,6 +453,21 @@ namespace dyno
         return returnAngels;
     }
 
+    template<typename TDataType>
+    std::vector<Vec3f> BatchRigidBodySystem<TDataType>::getAngularVelocitiesByLocalIndex(
+        BatchRigidBodySystemLocalIndexParam& param) {
+        Array<Vec3f, CPU> hAngularVelocities = gethAngularVelocities();
+        std::vector<Vec3f> returnAngularVelocities;
+        for (int i : param.ids) {
+            auto mb = ctrl_mb_chains[i];
+            for (int j : param.localRigidBodyid) {
+                auto index = mb.body_indices[j];
+                returnAngularVelocities.push_back(hAngularVelocities[index]);
+            }
+        }
+        return returnAngularVelocities;
+    }
+
     DEFINE_CLASS(BatchRigidBodySystem);
 
 } // namespace dyno

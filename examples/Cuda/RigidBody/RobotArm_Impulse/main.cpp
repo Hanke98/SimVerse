@@ -7,7 +7,7 @@ using namespace dyno;
 
 int main() {
     // getchar();
-    Real scale = 1;
+    Real scale = 10;
     Real kp = 0.3 * scale;
     Real kv = 2 * scale;
     // 创建机械臂仿真器实例
@@ -197,7 +197,7 @@ int main() {
             Real de = hingeAngle - hingeAngle_old[j];
             // torque[j] = kp * e - kv * de / dt ;
             torque[j] = kp * e - kv * hingeVelocity ;
-            torque[j] = std::max(-effortLimit[j], std::min(effortLimit[j], torque[j]));
+            torque[j] = std::max(-effortLimit[j]/100, std::min(effortLimit[j]/100, torque[j]));
             // std::cout << "torque of joint " << j << " is: " << torque[j] << std::endl;
 
             // 更新上一帧角度
@@ -207,15 +207,15 @@ int main() {
                 error[j] = e;
             }
 
-            // if (j == 6 && i % 50 == 0) {
-            //     bool sat = std::abs(torque[j]) >= effortLimit[j] - 1e-6;
-            //     std::cout << "step " << i
-            //               << ", joint " << j
-            //               << ", err = " << e
-            //               << ", torque = " << torque[j]
-            //               << (sat ? " (SATURATED)" : "")
-            //               << std::endl;
-            // }
+            if (j == 6 && i % 50 == 0) {
+                bool sat = std::abs(torque[j]) >= effortLimit[j] - 1e-6;
+                std::cout << "step " << i
+                          << ", joint " << j
+                          << ", err = " << e
+                          << ", torque = " << torque[j]
+                          << (sat ? " (SATURATED)" : "")
+                          << std::endl;
+            }
 
             // if (j == 1 || j == 3) {
             //     std::cout << "err of joint " << j << " is: " << targetAngle[j] - hingeAngle << std::endl;

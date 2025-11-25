@@ -92,8 +92,15 @@ public:
     Array<Vec3f, DeviceType::CPU> gethAngularVelocities();
     Array<Mat3f, DeviceType::CPU> gethRotationMatrix();
 
+    Array<float, DeviceType::CPU> gethMass();
+    Array<Mat3f, DeviceType::CPU> gethInertia();
+
     std::vector<TQuat> getAngelsByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Vec3f> getAngularVelocitiesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
+    std::vector<Vec3f> getVelocitiesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
+    std::vector<Vec3f> getCentersByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
+
+    std::vector<float> getMassByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
 
     // ------------------------------------
 

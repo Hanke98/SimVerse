@@ -439,6 +439,22 @@ namespace dyno
     }
 
     template<typename TDataType>
+    Array<float, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethMass()
+    {
+        Array<float, DeviceType::CPU> hMass;
+        hMass.assign(*this->stateMass()->getDataPtr());
+        return hMass;
+    }
+
+    template<typename TDataType>
+    Array<Mat3f, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethInertia()
+    {
+        Array<Mat3f, DeviceType::CPU> hInertia;
+        hInertia.assign(*this->stateInertia()->getDataPtr());
+        return hInertia;
+    }
+
+    template<typename TDataType>
     std::vector<typename BatchRigidBodySystem<TDataType>::TQuat> BatchRigidBodySystem<TDataType>::getAngelsByLocalIndex(
         BatchRigidBodySystemLocalIndexParam& param) {
         Array<TQuat, CPU> hAngels = gethAngels();
@@ -466,6 +482,51 @@ namespace dyno
             }
         }
         return returnAngularVelocities;
+    }
+
+    template<typename TDataType>
+    std::vector<Vec3f> BatchRigidBodySystem<TDataType>::getCentersByLocalIndex(
+        BatchRigidBodySystemLocalIndexParam& param) {
+        Array<Vec3f, CPU> hCenters = gethCenters();
+        std::vector<Vec3f> returnCenters;
+        for (int i : param.ids) {
+            auto mb = ctrl_mb_chains[i];
+            for (int j : param.localRigidBodyid) {
+                auto index = mb.body_indices[j];
+                returnCenters.push_back(hCenters[index]);
+            }
+        }
+        return returnCenters;
+    }
+
+    template<typename TDataType>
+    std::vector<Vec3f> BatchRigidBodySystem<TDataType>::getVelocitiesByLocalIndex(
+        BatchRigidBodySystemLocalIndexParam& param) {
+        Array<Vec3f, CPU> hVelocities = gethVelocities();
+        std::vector<Vec3f> returnVelocities;
+        for (int i : param.ids) {
+            auto mb = ctrl_mb_chains[i];
+            for (int j : param.localRigidBodyid) {
+                auto index = mb.body_indices[j];
+                returnVelocities.push_back(hVelocities[index]);
+            }
+        }
+        return returnVelocities;
+    }
+
+    template<typename TDataType>
+    std::vector<float> BatchRigidBodySystem<TDataType>::getMassByLocalIndex(
+        BatchRigidBodySystemLocalIndexParam& param) {
+        Array<float, CPU> hMass = gethMass();
+        std::vector<float> returnMass;
+        for (int i : param.ids) {
+            auto mb = ctrl_mb_chains[i];
+            for (int j : param.localRigidBodyid) {
+                auto index = mb.body_indices[j];
+                returnMass.push_back(hMass[index]);
+            }
+        }
+        return returnMass;
     }
 
     DEFINE_CLASS(BatchRigidBodySystem);

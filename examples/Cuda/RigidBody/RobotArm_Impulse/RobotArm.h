@@ -22,8 +22,12 @@ namespace dyno
         DECLARE_TCLASS(RobotArmSimulator, TDataType)
     public:
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemControlParamBase CtrlParam;
-        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemHingeTorqueControlParam CtrlHingeParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemHingeTorqueControlParam HingeTorqueParam;
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemLocalIndexParam LocalIndexParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemMassParam MassParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemInertiaParam InertiaParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemResetParam ResetParam;
+
 
         typedef typename TDataType::Real Real;
         typedef typename TDataType::Coord Coord;
@@ -38,11 +42,12 @@ namespace dyno
                                     Vec3f base,
                                     Vec3f offset,
                                     float density = 1000,
+                                    std::vector<Vec3f> target_position = std::vector(1, Vec3f(0.0f)),
                                     int num_copies_x = 1,
                                     int num_copies_y = 1,
                                     int num_copies_z = 1);
 
-        void resetStates(CtrlParam& param);
+        void resetStates(ResetParam& param);
 
         // 场景创建相关接口
         void createScene();
@@ -52,13 +57,13 @@ namespace dyno
         void initialize(int width = 1280, int height = 768, float scale = 1.0f);
         void stepSimulation(bool enableRendering = true);
         void terminateSimulation();
-        void applyHingeTorques(CtrlHingeParam& param);
 
         std::shared_ptr<SceneGraph> activeScene;
         // -------------getters---------------
         std::vector<Vec3f> getCentersByLocalIndex(LocalIndexParam& param);
         std::vector<Vec3f> getVelocitiesByLocalIndex(LocalIndexParam& param);
-        std::vector<TQuat> getAngelsByLocalIndex(LocalIndexParam& param);
+        std::vector<TQuat> getAnglesByLocalIndex(LocalIndexParam& param);
+        std::vector<std::vector<float>> getAnglesVectorByLocalIndex(LocalIndexParam& param);
         std::vector<Vec3f> getAngularVelocitiesByLocalIndex(LocalIndexParam& param);
         std::vector<float> getMassByLocalIndex(LocalIndexParam& param);
         UrdfInformation getKinematicsChainInfo();
@@ -68,6 +73,10 @@ namespace dyno
         void setDt(Real dt);
         void enableGravity(bool flag);
         void enableFriction(bool flag);
+        void setHingeTorques(HingeTorqueParam& hingetorque_param);
+        void setMass(MassParam& mass_param);
+        void setInertia(InertiaParam& inertia_param);
+        void setTransform(Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
 
     private:
         std::shared_ptr<BatchRigidBodySystem<TDataType>> batchSolver;

@@ -41,6 +41,11 @@ public:
       std::vector<int> ids;
     };
 
+    struct BatchRigidBodySystemResetParam: public BatchRigidBodySystemControlParamBase
+    {
+      std::vector<Coord> targetPosition;
+    };
+
     struct BatchRigidBodySystemTorqueControlParam: public BatchRigidBodySystemControlParamBase
     {
       std::vector<Coord> torques;
@@ -49,6 +54,17 @@ public:
     struct BatchRigidBodySystemHingeTorqueControlParam: public BatchRigidBodySystemControlParamBase
     {
       std::vector<std::vector<float>> torques;
+      std::vector<std::vector<float>> dampings;
+    };
+
+    struct BatchRigidBodySystemMassParam: public BatchRigidBodySystemControlParamBase
+    {
+      std::vector<std::vector<float>> mass;
+    };
+
+    struct BatchRigidBodySystemInertiaParam: public BatchRigidBodySystemControlParamBase
+    {
+      std::vector<std::vector<Matrix>> inertia;
     };
 
     struct BatchRigidBodySystemLocalIndexParam: public BatchRigidBodySystemControlParamBase
@@ -65,13 +81,17 @@ public:
     // Control APIs
 	  void createBatchMultiBodies(Coord base, Coord offset, int num_x, int num_y, int num_z);
 
-    void resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param);
+    void resetBatchMultiBodies(BatchRigidBodySystemResetParam& reset_param);
   
     void applyTorqueControl(BatchRigidBodySystemTorqueControlParam& torque_param);
 
     void applyHingeTorqueControl(BatchRigidBodySystemHingeTorqueControlParam& torque_param);
 
-    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, float density,
+    void setMass(BatchRigidBodySystemMassParam& mass_param);
+
+    void setInertia(BatchRigidBodySystemInertiaParam& inertia_param);
+
+    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, float density, std::vector<Vec3f> targetPosition,
                                int num_copies_x, int num_copies_y, int num_copies_z);
     // ------------------------------------
 
@@ -87,7 +107,7 @@ public:
     }
 
     Array<Vec3f, DeviceType::CPU> gethCenters();
-    Array<TQuat, DeviceType::CPU> gethAngels();
+    Array<TQuat, DeviceType::CPU> gethAngles();
     Array<Vec3f, DeviceType::CPU> gethVelocities();
     Array<Vec3f, DeviceType::CPU> gethAngularVelocities();
     Array<Mat3f, DeviceType::CPU> gethRotationMatrix();
@@ -95,11 +115,10 @@ public:
     Array<float, DeviceType::CPU> gethMass();
     Array<Mat3f, DeviceType::CPU> gethInertia();
 
-    std::vector<TQuat> getAngelsByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
+    std::vector<TQuat> getAnglesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Vec3f> getAngularVelocitiesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Vec3f> getVelocitiesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Vec3f> getCentersByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
-
     std::vector<float> getMassByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
 
     // ------------------------------------

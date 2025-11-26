@@ -57,20 +57,50 @@ namespace dyno
                                                               Vec3f base,
                                                               Vec3f offset,
                                                               float density,
+                                                              std::vector<Vec3f> target_position,
                                                               int num_copies_x,
                                                               int num_copies_y,
                                                               int num_copies_z) {
-        batchSolver->addExampleRigidBodies(urdf_fn, base, offset, density, num_copies_x, num_copies_y, num_copies_y);
+        batchSolver->addExampleRigidBodies(urdf_fn, base, offset, density, target_position, num_copies_x, num_copies_y, num_copies_y);
     }
 
     template<typename TDataType>
-    void RobotArmSimulator<TDataType>::resetStates(CtrlParam& param) {
+    void RobotArmSimulator<TDataType>::resetStates(ResetParam& param) {
         batchSolver->resetBatchMultiBodies(param);
     }
 
     template<typename TDataType>
-    void RobotArmSimulator<TDataType>::applyHingeTorques(CtrlHingeParam& param) {
-        batchSolver->applyHingeTorqueControl(param);
+    void RobotArmSimulator<TDataType>::setHingeTorques(HingeTorqueParam& hingetorque_param) {
+        batchSolver->applyHingeTorqueControl(hingetorque_param);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setMass(MassParam& mass_param) {
+        batchSolver->setMass(mass_param);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setInertia(InertiaParam& inertia_param) {
+        batchSolver->setInertia(inertia_param);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setTransform(Vec3f base, Vec3f offset,int num_copies_x, int num_copies_y, int num_copies_z) {
+        std::vector<Transform3f> transforms;
+        for (int x = 0; x < num_copies_x; x++) {
+            for (int y = 0; y < num_copies_y; y++) {
+                for (int z = 0; z < num_copies_z; z++) {
+                    Vec3f _offset = base + Vec3f(x * offset.x, y * offset.y, z * offset.z);
+                    Transform3f transform(_offset,
+                                         Mat3f(1.0f, 0.0f, 0.0f,
+                                                  0.0f, 1.0f, 0.0f,
+                                                  0.0f, 0.0f, 1.0f),
+                                         Vec3f(0.0f, 0.0f, 0.0f));
+                    transforms.push_back(transform);
+                }
+            }
+        }
+        batchSolver->varVehiclesTransform()->setValue(transforms);
     }
 
     template<typename TDataType>
@@ -183,9 +213,20 @@ namespace dyno
     }
 
     template<typename TDataType>
-    std::vector<typename RobotArmSimulator<TDataType>::TQuat> RobotArmSimulator<TDataType>::getAngelsByLocalIndex(
+    std::vector<std::vector<float>> RobotArmSimulator<TDataType>::getAnglesVectorByLocalIndex(
         LocalIndexParam& param) {
-        return batchSolver->getAngelsByLocalIndex(param);
+        auto angles = batchSolver->getAnglesByLocalIndex(param);
+        std::vector<std::vector<float>> angles_quat_vector;
+        for (int i = 0; i < angles.size(); ++i) {
+            angles_quat_vector.push_back(std::vector{angles[i].x, angles[i].y, angles[i].z, angles[i].w});
+        }
+        return angles_quat_vector;
+    }
+
+    template<typename TDataType>
+    std::vector<typename RobotArmSimulator<TDataType>::TQuat> RobotArmSimulator<TDataType>::getAnglesByLocalIndex(
+        LocalIndexParam& param) {
+        return batchSolver->getAnglesByLocalIndex(param);
     }
 
     template<typename TDataType>

@@ -60,22 +60,32 @@ int main() {
     bool enableGravity = false;
     bool enableFriction = false;
     Vec3f base{ -0.0f, -0.0f, -0.0f };
-    Vec3f offset{ 2.0f, 2.0f, 2.0f };
+    Vec3f offset{ 1.5f, 0.0f, 1.5f };
+    std::vector<Vec3f> target_position;
+    Vec3f target1{0.5f, 0.5f, 0.5f};
+    target_position.push_back(target1);
+    target_position.push_back(target1);
+    int num_copies_x = 2;
+    int num_copies_y = 1;
+    int num_copies_z = 1;
     std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";
 
     simulator.initBatchSolver();
     simulator.setDt(dt);
     simulator.enableGravity(enableGravity);
     simulator.enableFriction(enableFriction);
-    simulator.addRobotArmRigidBodies(urdf_fn, base, offset, density, 1, 1, 1);
+    simulator.setTransform(base, offset, num_copies_x, num_copies_y, num_copies_z);
+    simulator.setAngularDamping(50.0);
+    simulator.addRobotArmRigidBodies(urdf_fn, base, offset, density, target_position, num_copies_x, num_copies_y, num_copies_z);
 
-    // 2. 添加机械臂系统
+    //
     std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> dampings{10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0};
 
-    // 3. 初始化仿真环境（窗口大小1280x768）
+    //
     simulator.setupSceneGraph();
     std::cout << "初始化窗口" << std::endl;
-    simulator.initialize(1280, 768, 1);
+    simulator.initialize(1280, 768, 1.5);
     std::cout << "仿真环境初始化完成" << std::endl;
     UrdfInformation chainInfo = simulator.getKinematicsChainInfo();
     
@@ -122,34 +132,43 @@ int main() {
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
         // if (i == 100) {
-        //     RobotArmSimulator<DataType3f>::CtrlParam param;
+        //     RobotArmSimulator<DataType3f>::ResetParam param;
         //     param.num_bodies = 1;
         //     param.ids.push_back(0);
+        //     Vec3f newTarget{ 0.5f, 1.0f, 0.5f };
+        //     param.targetPosition.push_back(newTarget);
         //     simulator.resetStates(param);
         // }
         //
         // if (i == 200) {
-        //     RobotArmSimulator<DataType3f>::CtrlParam param;
+        //     RobotArmSimulator<DataType3f>::ResetParam param;
         //     param.num_bodies = 1;
         //     param.ids.push_back(1);
-        //     simulator.resetStates(param);
-        // }
-        //
-        // if (i == 300) {
-        //     RobotArmSimulator<DataType3f>::CtrlParam param;
-        //     param.num_bodies = 2;
-        //     param.ids.push_back(0);
-        //     param.ids.push_back(1);
+        //     Vec3f newTarget{ 0.5f, 1.0f, 0.5f };
+        //     param.targetPosition.push_back(newTarget);
         //     simulator.resetStates(param);
         // }
 
+        if (i == 500) {
+            RobotArmSimulator<DataType3f>::ResetParam param;
+            param.num_bodies = 2;
+            param.ids.push_back(0);
+            param.ids.push_back(1);
+            Vec3f newTarget{ 0.5f, 1.0f, 0.5f };
+            param.targetPosition.push_back(newTarget);
+            param.targetPosition.push_back(newTarget);
+            std::cout << "size of targePosition" << param.targetPosition.size() << std::endl;
+            simulator.resetStates(param);
+        }
+
         RobotArmSimulator<DataType3f>::LocalIndexParam local_param;
-        local_param.num_bodies = 1;
+        local_param.num_bodies = 2;
         local_param.ids.push_back(0);
+        local_param.ids.push_back(1);
         for (int i = 0; i <= 7; ++i) {
             local_param.localRigidBodyid.push_back(i);
         }
-        auto quat = simulator.getAngelsByLocalIndex(local_param);
+        auto quat = simulator.getAnglesByLocalIndex(local_param);
         auto angularVelocity = simulator.getAngularVelocitiesByLocalIndex(local_param);
         // auto mass = simulator.getMassByLocalIndex(local_param);
         // std::cout << "Mass: \n" << mass[7] << std::endl;
@@ -283,11 +302,15 @@ int main() {
             (float)torque[6]
         };
 
-        RobotArmSimulator<DataType3f>::CtrlHingeParam param;
-        param.num_bodies = 1;
+        RobotArmSimulator<DataType3f>::HingeTorqueParam param;
+        param.num_bodies = 2;
         param.ids.push_back(0);
+        param.ids.push_back(1);
         param.torques.push_back(moterVelocities1);
-        simulator.applyHingeTorques(param);
+        param.torques.push_back(moterVelocities1);
+        param.dampings.push_back(dampings);
+        param.dampings.push_back(dampings);
+        simulator.setHingeTorques(param);
 
         simulator.stepSimulation(true);
         // 处理窗口事件

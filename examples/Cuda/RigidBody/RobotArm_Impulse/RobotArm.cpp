@@ -61,7 +61,7 @@ namespace dyno
                                                               int num_copies_x,
                                                               int num_copies_y,
                                                               int num_copies_z) {
-        batchSolver->addExampleRigidBodies(urdf_fn, base, offset, density, target_position, num_copies_x, num_copies_y, num_copies_y);
+        batchSolver->addRobotArmRigidBodies(urdf_fn, base, offset, density, target_position, num_copies_x, num_copies_y, num_copies_y);
     }
 
     template<typename TDataType>

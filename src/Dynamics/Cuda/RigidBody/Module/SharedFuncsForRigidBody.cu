@@ -504,7 +504,7 @@ namespace dyno
 
 		if (constraints[tId].type == ConstraintType::CN_ALLOW_ROT1D_1)
 		{
-			Coord b2 = constraints[tId].pos1;
+			Coord b2 = constraints[tId].pos1; // b2= (0, -a[2], a[1])
 			Coord a1 = constraints[tId].axis;
 
 			J[4 * tId] = Coord(0);
@@ -1118,6 +1118,8 @@ namespace dyno
 				errorVec = pos[idx2] + r2 - pos[idx1] - r1;
 			else
 				errorVec = pos1 - pos[idx1] - r1;
+
+			// printf("tId: %3d, type: CN_ANCHOR_EQUAL, error: (%15.12f, %15.12f, %15.12f)\n ", tId, errorVec[0], errorVec[1], errorVec[2]);
 			error = errorVec[0];
 		}
 
@@ -1234,6 +1236,18 @@ namespace dyno
 			Coord a1 = constraints[tId].axis;
 			Coord b2 = constraints[tId].pos1;
 			error = a1.dot(b2);
+			// printf(
+			//     "tid: %3d, type: CN_ALLOW_ROT1D_1, error: %.12f, eta_i: %.12f, a: (%15.12f, %15.12f, %15.12f), b: (%15.12f, %15.12f, "
+			//     "%15.12f)\n",
+			//     tId,
+			//     error,
+			//     eta_i,
+			//     a1[0],
+			//     a1[1],
+			//     a1[2],
+			//     b2[0],
+			//     b2[1],
+			//     b2[2]);
 		}
 
 		if (constraints[tId].type == ConstraintType::CN_ALLOW_ROT1D_2)
@@ -1241,6 +1255,18 @@ namespace dyno
 			Coord a1 = constraints[tId].axis;
 			Coord c2 = constraints[tId].pos2;
 			error = a1.dot(c2);
+			// printf(
+			//     "tid: %3d, type: CN_ALLOW_ROT1D_2, error: %.12f, eta_i: %.12f, a: (%15.12f, %15.12f, %15.12f), c: (%15.12f, %15.12f, "
+			//     "%15.12f)\n",
+			//     tId,
+			//     error,
+			//     eta_i,
+			//     a1[0],
+			//     a1[1],
+			//     a1[2],
+			//     c2[0],
+			//     c2[1],
+			//     c2[2]);
 		}
 
 		if (constraints[tId].type == ConstraintType::CN_JOINT_NO_MOVE_1)
@@ -1263,6 +1289,7 @@ namespace dyno
 
 		if constexpr (!UpdateErrorOnly)
 			eta[tId] -= beta * invDt * error;
+		// printf("tid: %d, error: %.12f, eta: %.12f, beta:: %.12f, dt: %.12f\n", tId, error, eta[tId], beta, invDt);
 		errors[tId] = error;
 	}
 
@@ -2738,7 +2765,15 @@ namespace dyno
 	    DArray<Quat1f>& rotQuat,
 	    int begin_index)
 	{
-		cuExecute(constraints.size(), SF_setUpFixedJointConstraints, constraints, joints, rotMat, rotQuat, begin_index);
+		cuExecute(
+		    /**/
+		    constraints.size(),
+		    SF_setUpFixedJointConstraints,
+		    constraints,
+		    joints,
+		    rotMat,
+		    rotQuat,
+		    begin_index);
 	}
 
 	/**
@@ -3028,8 +3063,95 @@ namespace dyno
 		cuExecute(constraints.size(), SF_calculateKWithCFM, constraints, J, B, pos, inertia, mass, K_1, K_2, K_3, CFM);
 	}
 
+	template<typename Real, typename Coord, typename Constraint>
+	__global__ void SF_PostStablizationErrorValidate(
+	    DArray<Real> errors,
+	    DArray<Coord> dp, // is just positonal change
+	    DArray<Coord> J,
+	    DArray<Real> errors_in,
+	    DArray<Constraint> constraints)
+	{
+		int tId = threadIdx.x + blockIdx.x * blockDim.x;
+		if (tId >= constraints.size())
+			return;
+
+		int idx1 = constraints[tId].bodyId1;
+		int idx2 = constraints[tId].bodyId2;
+
+		auto type = constraints[tId].type;
+		if ((ConstraintType::CN_JOINT_HINGE_MAX == type || ConstraintType::CN_JOINT_HINGE_MIN == type))
+		{
+			Real tmp = -errors_in[tId];
+			tmp -= J[4 * tId].dot(dp[idx1 * 2]) + J[4 * tId + 2].dot(dp[idx2 * 2]);
+			tmp -= J[4 * tId + 1].dot(dp[idx1 * 2 + 1]) + J[4 * tId + 3].dot(dp[idx2 * 2 + 1]);
+			errors[tId] = tmp;
+		}
+		if (ConstraintType::CN_ANCHOR_EQUAL_1 == type)
+		{
+			Coord tmp(errors_in[tId], errors_in[tId + 1], errors_in[tId + 2]); // ljf: \eta = - error
+			tmp = -tmp;
+			if (idx2 != INVALID)
+			{
+				// ljf: loop over x,y,z (CN_ANCHOR_EQUAL_1, CN_ANCHOR_EQUAL_2, CN_ANCHOR_EQUAL_3, CN_BAN_ROT_1, CN_BAN_ROT_2, CN_BAN_ROT_3)
+				// the constraints are stored consecutively
+				for (int i = 0; i < 3; i++)
+				{
+					tmp[i] -= J[4 * (tId + i)].dot(dp[idx1 * 2]) + J[4 * (tId + i) + 2].dot(dp[idx2 * 2]);
+					tmp[i] -= J[4 * (tId + i) + 1].dot(dp[idx1 * 2 + 1]) + J[4 * (tId + i) + 3].dot(dp[idx2 * 2 + 1]);
+				}
+			}
+			else
+			{
+				for (int i = 0; i < 3; i++)
+				{
+					tmp[i] -= J[4 * (tId + i)].dot(dp[idx1 * 2]);
+					tmp[i] -= J[4 * (tId + i) + 1].dot(dp[idx1 * 2 + 1]);
+				}
+			}
+			errors[tId] = tmp[0];
+			errors[tId + 1] = tmp[1];
+			errors[tId + 2] = tmp[2];
+		}
+		if (ConstraintType::CN_ALLOW_ROT1D_1 == type)
+		{
+			Vec2f tmp(errors_in[tId], errors_in[tId + 1]);
+			tmp = -tmp;
+			// ljf: loop over two rotational constraints
+			for (int i = 0; i < 2; i++)
+			{
+				tmp[i] -= J[4 * (tId + i)].dot(dp[idx1 * 2]) + J[4 * (tId + i) + 2].dot(dp[idx2 * 2]);
+				tmp[i] -= J[4 * (tId + i) + 1].dot(dp[idx1 * 2 + 1]) + J[4 * (tId + i) + 3].dot(dp[idx2 * 2 + 1]);
+			}
+
+			errors[tId] = tmp[0];
+			errors[tId + 1] = tmp[1];
+		}
+	}
+
+	float PostStablizationErrorValidate(
+	    /**/
+	    DArray<float> error_out,
+	    DArray<Vec3f> dp,
+	    DArray<Vec3f> J,
+	    DArray<float> error_in,
+	    DArray<TConstraintPair<float>> constraints)
+	{
+		error_out.resize(error_in.size());
+		error_out.reset();
+		cuExecute(
+		    /**/
+		    constraints.size(),
+		    SF_PostStablizationErrorValidate,
+		    error_out,
+		    dp,
+		    J,
+		    error_in,
+		    constraints);
+		return checkOutErrors(error_out);
+	}
+
 	template<typename Real, typename Coord, typename Constraint, typename Matrix3, typename Matrix2>
-	__global__ void SF_postStablizationJacobiIteration(
+	__global__ void SF_PostStablizationJacobiIteration(
 	    DArray<Real> lambda,
 	    DArray<Coord> dp, // is just positonal change
 	    DArray<Coord> J,
@@ -3054,9 +3176,10 @@ namespace dyno
 		int idx2 = constraints[tId].bodyId2;
 
 		auto type = constraints[tId].type;
-		if (ConstraintType::CN_JOINT_HINGE_MAX == type || ConstraintType::CN_JOINT_HINGE_MIN == type)
+		if ((ConstraintType::CN_JOINT_HINGE_MAX == type || ConstraintType::CN_JOINT_HINGE_MIN == type))
 		{
 			Real tmp = eta[tId];
+			tmp = -tmp;
 			tmp -= J[4 * tId].dot(dp[idx1 * 2]) + J[4 * tId + 2].dot(dp[idx2 * 2]);
 			tmp -= J[4 * tId + 1].dot(dp[idx1 * 2 + 1]) + J[4 * tId + 3].dot(dp[idx2 * 2 + 1]);
 			if (K_1[tId] > 0)
@@ -3083,6 +3206,7 @@ namespace dyno
 		if (ConstraintType::CN_ANCHOR_EQUAL_1 == type)
 		{
 			Coord tmp(eta[tId], eta[tId + 1], eta[tId + 2]); // ljf: \eta = - error
+			tmp = -tmp;
 			if (idx2 != INVALID)
 			{
 				// ljf: loop over x,y,z (CN_ANCHOR_EQUAL_1, CN_ANCHOR_EQUAL_2, CN_ANCHOR_EQUAL_3, CN_BAN_ROT_1, CN_BAN_ROT_2, CN_BAN_ROT_3)
@@ -3129,29 +3253,34 @@ namespace dyno
 			}
 		}
 
-		if (ConstraintType::CN_ALLOW_ROT1D_1)
+		if (ConstraintType::CN_ALLOW_ROT1D_1 == type)
 		{
 			Vec2f tmp(eta[tId], eta[tId + 1]);
-
+			tmp = -tmp;
 			for (int i = 0; i < 2; i++)
 			{
 				tmp[i] -= J[4 * (tId + i)].dot(dp[idx1 * 2]) + J[4 * (tId + i) + 2].dot(dp[idx2 * 2]);
 				tmp[i] -= J[4 * (tId + i) + 1].dot(dp[idx1 * 2 + 1]) + J[4 * (tId + i) + 3].dot(dp[idx2 * 2 + 1]);
 			}
 
+			// printf("tid: %d, type: %d, eta: %f, %f\n", tId, eta[tId], eta[tId + 1]);
 			Vec2f delta_lambda = (K_2[tId] * tmp);
+			// delta_lambda = Vec2f(0, 0);
 
 			for (int i = 0; i < 2; i++)
 			{
 				atomicAdd(&dp[idx1 * 2][0], B[4 * (tId + i)][0] * delta_lambda[i]);
 				atomicAdd(&dp[idx1 * 2][1], B[4 * (tId + i)][1] * delta_lambda[i]);
 				atomicAdd(&dp[idx1 * 2][2], B[4 * (tId + i)][2] * delta_lambda[i]);
+
 				atomicAdd(&dp[idx1 * 2 + 1][0], B[4 * (tId + i) + 1][0] * delta_lambda[i]);
 				atomicAdd(&dp[idx1 * 2 + 1][1], B[4 * (tId + i) + 1][1] * delta_lambda[i]);
 				atomicAdd(&dp[idx1 * 2 + 1][2], B[4 * (tId + i) + 1][2] * delta_lambda[i]);
+
 				atomicAdd(&dp[idx2 * 2][0], B[4 * (tId + i) + 2][0] * delta_lambda[i]);
 				atomicAdd(&dp[idx2 * 2][1], B[4 * (tId + i) + 2][1] * delta_lambda[i]);
 				atomicAdd(&dp[idx2 * 2][2], B[4 * (tId + i) + 2][2] * delta_lambda[i]);
+
 				atomicAdd(&dp[idx2 * 2 + 1][0], B[4 * (tId + i) + 3][0] * delta_lambda[i]);
 				atomicAdd(&dp[idx2 * 2 + 1][1], B[4 * (tId + i) + 3][1] * delta_lambda[i]);
 				atomicAdd(&dp[idx2 * 2 + 1][2], B[4 * (tId + i) + 3][2] * delta_lambda[i]);
@@ -3177,7 +3306,7 @@ namespace dyno
 	{
 		cuExecute(
 		    constraints.size(),
-		    SF_postStablizationJacobiIteration,
+		    SF_PostStablizationJacobiIteration,
 		    lambda,
 		    dp,
 		    J,
@@ -3325,6 +3454,7 @@ namespace dyno
 			}
 			else
 			{
+				printf("type: %d, idx2 invalid!\n");
 				for (int i = 0; i < 3; i++)
 				{
 					tmp[i] -= J[4 * (tId + i)].dot(impulse[idx1 * 2]);

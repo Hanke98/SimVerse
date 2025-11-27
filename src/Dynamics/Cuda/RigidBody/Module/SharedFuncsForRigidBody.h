@@ -245,6 +245,14 @@ namespace dyno
 		DArray<float> CFM
 	);
 
+	float PostStablizationErrorValidate(
+		DArray<float> error_out,
+		DArray<Vec3f> dp,
+		DArray<Vec3f> J,
+		DArray<float> error_in,
+		DArray<TConstraintPair<float>> constraints
+	);
+
 	void PostStablization(
 		DArray<float> lambda,
 		DArray<Vec3f> dp,

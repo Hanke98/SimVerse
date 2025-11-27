@@ -16,6 +16,7 @@
  */
 
 #pragma once
+#include "DeclarePort.h"
 #include "Module/ConstraintModule.h"
 #include "RigidBody/RigidBodyShared.h"
 
@@ -30,7 +31,7 @@ namespace dyno
 	class TJConstraintSolver : public ConstraintModule
 	{
 		DECLARE_TCLASS(TJConstraintSolver, TDataType)
-	public:
+		public:
 		typedef typename TDataType::Real Real;
 		typedef typename TDataType::Coord Coord;
 		typedef typename TDataType::Matrix Matrix;
@@ -48,7 +49,7 @@ namespace dyno
 		TJConstraintSolver();
 		~TJConstraintSolver();
 
-	public:
+		public:
 		DEF_VAR(bool, FrictionEnabled, true, "");
 
 		DEF_VAR(bool, GravityEnabled, true, "");
@@ -69,7 +70,7 @@ namespace dyno
 
 		DEF_VAR(Real, AngularDamping, 0.2, "");
 
-	public:
+		public:
 		DEF_VAR_IN(Real, TimeStep, "Time step size");
 
 		DEF_ARRAY_IN(Real, Mass, DeviceType::GPU, "Mass of rigid bodies");
@@ -77,8 +78,10 @@ namespace dyno
 		DEF_ARRAY_IN(Coord, Center, DeviceType::GPU, "Center of rigid bodies");
 
 		DEF_ARRAY_IN(Coord, Velocity, DeviceType::GPU, "Velocity of rigid bodies");
+		DEF_ARRAY_STATE(Coord, DpVelocity, DeviceType::GPU, "Velocity of rigid bodies");
 
 		DEF_ARRAY_IN(Coord, AngularVelocity, DeviceType::GPU, "Angular velocity of rigid bodies");
+		DEF_ARRAY_STATE(Coord, DpAngularVelocity, DeviceType::GPU, "Angular velocity of rigid bodies");
 
 		DEF_ARRAY_IN(Matrix, RotationMatrix, DeviceType::GPU, "Rotation matrix of rigid bodies");
 
@@ -100,13 +103,13 @@ namespace dyno
 
 		DEF_ARRAY_IN(Coord, ExternalTorque, DeviceType::GPU, "External torque applied to rigid bodies");
 
-	protected:
+		protected:
 		void constrain() override;
 
-	private:
+		private:
 		void initializeJacobian(Real dt);
 
-	private:
+		private:
 		DArray<Coord> mJ;
 		DArray<Coord> mB;
 
@@ -131,4 +134,4 @@ namespace dyno
 
 		DArray<Real> mErrors;
 	};
-}
+} // namespace dyno

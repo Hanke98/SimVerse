@@ -116,7 +116,7 @@ namespace dyno
 
                 auto* rigid = this;
 
-                float scale = 0.1;
+                float scale = 0.01;
                 BoxInfo box1;
                 box1.halfLength = Vec3f(4, 1, 1) * scale;
                 RigidBodyInfo boxInfo1;
@@ -124,7 +124,7 @@ namespace dyno
                 boxInfo1.friction = 0.0;
                 boxInfo1.motionType = Static;
                 boxInfo1.collisionMask = CT_Disabled;
-                auto boxAt1 = rigid->addBox(box1, boxInfo1, 100.0);
+                auto boxAt1 = rigid->addBox(box1, boxInfo1, 100000000.0);
                 mb.body_indices.push_back(boxAt1->idx);
 
                 auto func = [&](std::shared_ptr<PdActor> lastAct) {
@@ -141,18 +141,23 @@ namespace dyno
                     mb.body_indices.push_back(boxAt2_->idx);
 
                     Vec3f offset_4 = Vec3f(4.0, 0.0, 1.0) * scale;
-                    auto& joint_6 = rigid->createHingeJoint(lastAct, boxAt2_);
+                    auto& joint_6 = rigid->createHingeJoint(boxAt2_, lastAct);
                     joint_6.setAnchorPoint(last + offset_4 + _offset);
                     joint_6.setAxis(Vec3f(0.0f, 0.0f, 1.0f));
                     joint_6.setRange(-3.14f / 2.0f, 3.14f / 2.0f);
                     mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
                     return boxAt2_;
                 };
+
                 auto last_act = func(boxAt1);
                 auto last_act2 = func(last_act);
                 auto last_act3 = func(last_act2);
                 auto last_act4 = func(last_act3);
                 auto last_act5 = func(last_act4);
+
+                // auto j = rigid->createUnilateralFixedJoint(boxAt1);
+                // j.setAnchorPoint(boxInfo1.position);
+
 
                 return mb;
             };

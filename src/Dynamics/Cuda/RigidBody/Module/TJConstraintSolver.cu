@@ -1398,7 +1398,7 @@ namespace dyno
 		{
 			int tId = threadIdx.x + (blockIdx.x * blockDim.x);
 			const float omega = Real(1) / 5;  // 0.2
-			if (blockIdx.x <= SliderJointBlockOffset && SliderJointNum > 0)
+			if (blockIdx.x >= SliderJointBlockOffset && blockIdx.x < HingeJointBlockOffset - SliderJointBlockOffset)
 			{
 				SF_SliderJointJacobiIteration
 				(
@@ -1426,7 +1426,7 @@ namespace dyno
 					omega
 				);
 			}
-			else if (blockIdx.x <= HingeJointBlockOffset && HingeJointNum > 0)
+			else if (blockIdx.x >= HingeJointBlockOffset && blockIdx.x < FixedJointBlockOffset - HingeJointBlockOffset)
 			{
 				SF_HingeJointJacobiIteration
 				(
@@ -1454,7 +1454,7 @@ namespace dyno
 					omega
 				);
 			}
-			else if (blockIdx.x <= FixedJointBlockOffset && FixedJointNum > 0)
+			else if (blockIdx.x >= FixedJointBlockOffset && FixedJointNum > 0)
 			{
 
 				SF_FixedJointJacobiIteration

@@ -7,7 +7,7 @@ using namespace dyno;
 
 int main()
 {
-	// getchar();
+	getchar();
 	Real kp = 100;
 	Real kv = 40;
 	// 创建机械臂仿真器实例

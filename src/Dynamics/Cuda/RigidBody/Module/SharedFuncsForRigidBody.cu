@@ -509,13 +509,19 @@ namespace dyno
 
 			J[4 * tId] = Coord(0);
 			J[4 * tId + 1] = -b2.cross(a1);
-			J[4 * tId + 2] = Coord(0);
-			J[4 * tId + 3] = b2.cross(a1);
 
+			if (idx2 != INVALID)
+			{
+				J[4 * tId + 2] = Coord(0);
+				J[4 * tId + 3] = b2.cross(a1);
+			}
 			B[4 * tId] = Coord(0);
 			B[4 * tId + 1] = inertia[idx1].inverse() * J[4 * tId + 1];
-			B[4 * tId + 2] = Coord(0);
-			B[4 * tId + 3] = inertia[idx2].inverse() * J[4 * tId + 3];
+			if (idx2 != INVALID)
+			{
+				B[4 * tId + 2] = Coord(0);
+				B[4 * tId + 3] = inertia[idx2].inverse() * J[4 * tId + 3];
+			}
 		}
 
 		if (constraints[tId].type == ConstraintType::CN_ALLOW_ROT1D_2)
@@ -525,13 +531,18 @@ namespace dyno
 
 			J[4 * tId] = Coord(0);
 			J[4 * tId + 1] = -c2.cross(a1);
-			J[4 * tId + 2] = Coord(0);
-			J[4 * tId + 3] = c2.cross(a1);
-
+			if (idx2 != INVALID)
+			{
+				J[4 * tId + 2] = Coord(0);
+				J[4 * tId + 3] = c2.cross(a1);
+			}
 			B[4 * tId] = Coord(0);
 			B[4 * tId + 1] = inertia[idx1].inverse() * J[4 * tId + 1];
-			B[4 * tId + 2] = Coord(0);
-			B[4 * tId + 3] = inertia[idx2].inverse() * J[4 * tId + 3];
+			if (idx2 != INVALID)
+			{
+				B[4 * tId + 2] = Coord(0);
+				B[4 * tId + 3] = inertia[idx2].inverse() * J[4 * tId + 3];
+			}
 		}
 
 		if (constraints[tId].type == ConstraintType::CN_JOINT_HINGE_MIN)
@@ -541,13 +552,18 @@ namespace dyno
 				Coord a = constraints[tId].axis;
 				J[4 * tId] = Coord(0);
 				J[4 * tId + 1] = -a;
-				J[4 * tId + 2] = Coord(0);
-				J[4 * tId + 3] = a;
-
+				if (idx2 != INVALID)
+				{
+					J[4 * tId + 2] = Coord(0);
+					J[4 * tId + 3] = a;
+				}
 				B[4 * tId] = Coord(0);
 				B[4 * tId + 1] = inertia[idx1].inverse() * (-a);
-				B[4 * tId + 2] = Coord(0);
-				B[4 * tId + 3] = inertia[idx2].inverse() * (a);
+				if (idx2 != INVALID)
+				{
+					B[4 * tId + 2] = Coord(0);
+					B[4 * tId + 3] = inertia[idx2].inverse() * (a);
+				}
 			}
 		}
 
@@ -558,13 +574,18 @@ namespace dyno
 				Coord a = constraints[tId].axis;
 				J[4 * tId] = Coord(0);
 				J[4 * tId + 1] = a;
-				J[4 * tId + 2] = Coord(0);
-				J[4 * tId + 3] = -a;
-
+				if (idx2 != INVALID)
+				{
+					J[4 * tId + 2] = Coord(0);
+					J[4 * tId + 3] = -a;
+				}
 				B[4 * tId] = Coord(0);
 				B[4 * tId + 1] = inertia[idx1].inverse() * (a);
-				B[4 * tId + 2] = Coord(0);
-				B[4 * tId + 3] = inertia[idx2].inverse() * (-a);
+				if (idx2 != INVALID)
+				{
+					B[4 * tId + 2] = Coord(0);
+					B[4 * tId + 3] = inertia[idx2].inverse() * (-a);
+				}
 			}
 		}
 
@@ -1119,7 +1140,6 @@ namespace dyno
 			else
 				errorVec = pos1 - pos[idx1] - r1;
 
-			// printf("tId: %3d, type: CN_ANCHOR_EQUAL, error: (%15.12f, %15.12f, %15.12f)\n ", tId, errorVec[0], errorVec[1], errorVec[2]);
 			error = errorVec[0];
 		}
 
@@ -2601,15 +2621,27 @@ namespace dyno
 		int idx2 = joints[tId].bodyId2;
 
 		Matrix rotMat1 = rotMat[idx1];
-		Matrix rotMat2 = rotMat[idx2];
+		Matrix rotMat2 = idx2 == INVALID ? Matrix(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f) : rotMat[idx2];
 
 		Coord r1 = rotMat1 * joints[tId].r1;
 		Coord r2 = rotMat2 * joints[tId].r2;
 
 		Coord a1 = rotMat1 * joints[tId].hingeAxisBody1;
 		Coord a2 = rotMat2 * joints[tId].hingeAxisBody2;
+		printf(
+		    "tid: %3d, a1: (%15.12f, %15.12f, %15.12f), "
+		    "a2: (%15.12f, %15.12f, %15.12f)\n",
+		    tId,
+		    a1[0],
+		    a1[1],
+		    a1[2],
+		    a2[0],
+		    a2[1],
+		    a2[2]);
+		printf(
+		    "tid: %3d, r1: (%15.12f, %15.12f, %15.12f), r2: (%15.12f, %15.12f, %15.12f)\n", tId, r1[0], r1[1], r1[2], r2[0], r2[1], r2[2]);
 
-		// two vector orthogonal to the a2
+		// two vector orthogonal to the a1
 		Coord b2, c2;
 		if (abs(a2[1]) > EPSILON || abs(a2[2]) > EPSILON)
 		{
@@ -2630,14 +2662,27 @@ namespace dyno
 
 		if (joints[tId].useRange)
 		{
-			Real theta = rotation_q[idx2].angle(rotation_q[idx1]);
+			Quat rot_q2 = idx2 == INVALID ? Quat(0.0f, 0.0f, 0.0f, 1.0f) : rotation_q[idx2];
+			Real theta = rot_q2.angle(rotation_q[idx1]);
+			Quat q_rot = rot_q2 * rotation_q[idx1].inverse();
 
-			Quat q_rot = rotation_q[idx2] * rotation_q[idx1].inverse();
-
-			if (a1.dot(Coord(q_rot.x, q_rot.y, q_rot.z)) < 0)
+			if (a2.dot(Coord(q_rot.x, q_rot.y, q_rot.z)) < 0)
 			{
 				theta = -theta;
 			}
+			printf("tid: %3d, theta: %15.12f\n", tId, theta);
+			printf(
+			    "tid: %3d, rot_q1: (%15.12f, %15.12f, %15.12f, %15.12f), rot_q2: (%15.12f, %15.12f, %15.12f, %15.12f)\n",
+			    tId,
+			    rotation_q[idx1].x,
+			    rotation_q[idx1].y,
+			    rotation_q[idx1].z,
+			    rotation_q[idx1].w,
+			    rot_q2.x,
+			    rot_q2.y,
+			    rot_q2.z,
+			    rot_q2.w);
+			printf("----------------\n");
 
 			C_min = theta - joints[tId].d_min;
 			C_max = joints[tId].d_max - theta;
@@ -2683,6 +2728,13 @@ namespace dyno
 			constraints[baseIndex + i].d_min = C_min > 0 ? 0 : C_min;
 			constraints[baseIndex + i].d_max = C_max > 0 ? 0 : C_max;
 			constraints[baseIndex + i].interpenetration = v_moter;
+		}
+		if (idx2 == INVALID)
+		{
+			// TODO: use real pos for static body
+			constraints[baseIndex].pos1 = r2 + pos[0];
+			constraints[baseIndex + 1].pos1 = r2 + pos[0];
+			constraints[baseIndex + 2].pos1 = r2 + pos[0];
 		}
 
 		for (int i = 0; i < 5; i++)
@@ -2861,10 +2913,17 @@ namespace dyno
 			Coord c2 = constraints[tId].pos2;
 			Coord b2_c_a1 = b2.cross(a1);
 			Coord c2_c_a1 = c2.cross(a1);
-			Real a = b2_c_a1.dot(inertia[idx1].inverse() * b2_c_a1) + b2_c_a1.dot(inertia[idx2].inverse() * b2_c_a1);
-			Real b = b2_c_a1.dot(inertia[idx1].inverse() * c2_c_a1) + b2_c_a1.dot(inertia[idx2].inverse() * c2_c_a1);
-			Real c = c2_c_a1.dot(inertia[idx1].inverse() * b2_c_a1) + c2_c_a1.dot(inertia[idx2].inverse() * b2_c_a1);
-			Real d = c2_c_a1.dot(inertia[idx1].inverse() * c2_c_a1) + c2_c_a1.dot(inertia[idx2].inverse() * c2_c_a1);
+			Real a = b2_c_a1.dot(inertia[idx1].inverse() * b2_c_a1);
+			Real b = b2_c_a1.dot(inertia[idx1].inverse() * c2_c_a1);
+			Real c = c2_c_a1.dot(inertia[idx1].inverse() * b2_c_a1);
+			Real d = c2_c_a1.dot(inertia[idx1].inverse() * c2_c_a1);
+			if (idx2 != INVALID)
+			{
+				a += b2_c_a1.dot(inertia[idx2].inverse() * b2_c_a1);
+				b += b2_c_a1.dot(inertia[idx2].inverse() * c2_c_a1);
+				c += c2_c_a1.dot(inertia[idx2].inverse() * b2_c_a1);
+				d += c2_c_a1.dot(inertia[idx2].inverse() * c2_c_a1);
+			}
 			Mat2f K(a, b, c, d);
 			K_2[tId] = K.inverse();
 		}
@@ -3045,7 +3104,19 @@ namespace dyno
 	    DArray<Mat2f> K_2,
 	    DArray<Mat3f> K_3)
 	{
-		cuExecute(constraints.size(), SF_calculateK, constraints, J, B, pos, inertia, mass, K_1, K_2, K_3);
+		cuExecute(
+		    /**/
+		    constraints.size(),
+		    SF_calculateK,
+		    constraints,
+		    J,
+		    B,
+		    pos,
+		    inertia,
+		    mass,
+		    K_1,
+		    K_2,
+		    K_3);
 	}
 
 	void calculateKWithCFM(
@@ -3454,7 +3525,6 @@ namespace dyno
 			}
 			else
 			{
-				printf("type: %d, idx2 invalid!\n");
 				for (int i = 0; i < 3; i++)
 				{
 					tmp[i] -= J[4 * (tId + i)].dot(impulse[idx1 * 2]);
@@ -3493,10 +3563,21 @@ namespace dyno
 		{
 			Vec2f tmp(eta[tId], eta[tId + 1]);
 
-			for (int i = 0; i < 2; i++)
+			if (idx2 != INVALID)
 			{
-				tmp[i] -= J[4 * (tId + i)].dot(impulse[idx1 * 2]) + J[4 * (tId + i) + 2].dot(impulse[idx2 * 2]);
-				tmp[i] -= J[4 * (tId + i) + 1].dot(impulse[idx1 * 2 + 1]) + J[4 * (tId + i) + 3].dot(impulse[idx2 * 2 + 1]);
+				for (int i = 0; i < 2; i++)
+				{
+					tmp[i] -= J[4 * (tId + i)].dot(impulse[idx1 * 2]) + J[4 * (tId + i) + 2].dot(impulse[idx2 * 2]);
+					tmp[i] -= J[4 * (tId + i) + 1].dot(impulse[idx1 * 2 + 1]) + J[4 * (tId + i) + 3].dot(impulse[idx2 * 2 + 1]);
+				}
+			}
+			else
+			{
+				for (int i = 0; i < 2; i++)
+				{
+					tmp[i] -= J[4 * (tId + i)].dot(impulse[idx1 * 2]);
+					tmp[i] -= J[4 * (tId + i) + 1].dot(impulse[idx1 * 2 + 1]);
+				}
 			}
 
 			Vec2f delta_lambda = omega * (K_2[tId] * tmp);
@@ -3511,13 +3592,16 @@ namespace dyno
 				atomicAdd(&impulse[idx1 * 2 + 1][1], B[4 * (tId + i) + 1][1] * delta_lambda[i]);
 				atomicAdd(&impulse[idx1 * 2 + 1][2], B[4 * (tId + i) + 1][2] * delta_lambda[i]);
 
-				atomicAdd(&impulse[idx2 * 2][0], B[4 * (tId + i) + 2][0] * delta_lambda[i]);
-				atomicAdd(&impulse[idx2 * 2][1], B[4 * (tId + i) + 2][1] * delta_lambda[i]);
-				atomicAdd(&impulse[idx2 * 2][2], B[4 * (tId + i) + 2][2] * delta_lambda[i]);
+				if (idx2 != INVALID)
+				{
+					atomicAdd(&impulse[idx2 * 2][0], B[4 * (tId + i) + 2][0] * delta_lambda[i]);
+					atomicAdd(&impulse[idx2 * 2][1], B[4 * (tId + i) + 2][1] * delta_lambda[i]);
+					atomicAdd(&impulse[idx2 * 2][2], B[4 * (tId + i) + 2][2] * delta_lambda[i]);
 
-				atomicAdd(&impulse[idx2 * 2 + 1][0], B[4 * (tId + i) + 3][0] * delta_lambda[i]);
-				atomicAdd(&impulse[idx2 * 2 + 1][1], B[4 * (tId + i) + 3][1] * delta_lambda[i]);
-				atomicAdd(&impulse[idx2 * 2 + 1][2], B[4 * (tId + i) + 3][2] * delta_lambda[i]);
+					atomicAdd(&impulse[idx2 * 2 + 1][0], B[4 * (tId + i) + 3][0] * delta_lambda[i]);
+					atomicAdd(&impulse[idx2 * 2 + 1][1], B[4 * (tId + i) + 3][1] * delta_lambda[i]);
+					atomicAdd(&impulse[idx2 * 2 + 1][2], B[4 * (tId + i) + 3][2] * delta_lambda[i]);
+				}
 			}
 		}
 
@@ -3526,8 +3610,16 @@ namespace dyno
 		    constraints[tId].type == ConstraintType::CN_JOINT_SLIDER_MAX || constraints[tId].type == ConstraintType::CN_JOINT_SLIDER_MOTER)
 		{
 			Real tmp = eta[tId];
-			tmp -= J[4 * tId].dot(impulse[idx1 * 2]) + J[4 * tId + 2].dot(impulse[idx2 * 2]);
-			tmp -= J[4 * tId + 1].dot(impulse[idx1 * 2 + 1]) + J[4 * tId + 3].dot(impulse[idx2 * 2 + 1]);
+			if (idx2 != INVALID)
+			{
+				tmp -= J[4 * tId].dot(impulse[idx1 * 2]) + J[4 * tId + 2].dot(impulse[idx2 * 2]);
+				tmp -= J[4 * tId + 1].dot(impulse[idx1 * 2 + 1]) + J[4 * tId + 3].dot(impulse[idx2 * 2 + 1]);
+			}
+			else
+			{
+				tmp -= J[4 * tId].dot(impulse[idx1 * 2]);
+				tmp -= J[4 * tId + 1].dot(impulse[idx1 * 2 + 1]);
+			}
 			if (K_1[tId] > 0)
 			{
 				Real delta_lambda = tmp * K_1[tId] * omega;
@@ -3540,13 +3632,16 @@ namespace dyno
 				atomicAdd(&impulse[idx1 * 2 + 1][1], B[4 * tId + 1][1] * delta_lambda);
 				atomicAdd(&impulse[idx1 * 2 + 1][2], B[4 * tId + 1][2] * delta_lambda);
 
-				atomicAdd(&impulse[idx2 * 2][0], B[4 * tId + 2][0] * delta_lambda);
-				atomicAdd(&impulse[idx2 * 2][1], B[4 * tId + 2][1] * delta_lambda);
-				atomicAdd(&impulse[idx2 * 2][2], B[4 * tId + 2][2] * delta_lambda);
+				if (idx2 != INVALID)
+				{
+					atomicAdd(&impulse[idx2 * 2][0], B[4 * tId + 2][0] * delta_lambda);
+					atomicAdd(&impulse[idx2 * 2][1], B[4 * tId + 2][1] * delta_lambda);
+					atomicAdd(&impulse[idx2 * 2][2], B[4 * tId + 2][2] * delta_lambda);
 
-				atomicAdd(&impulse[idx2 * 2 + 1][0], B[4 * tId + 3][0] * delta_lambda);
-				atomicAdd(&impulse[idx2 * 2 + 1][1], B[4 * tId + 3][1] * delta_lambda);
-				atomicAdd(&impulse[idx2 * 2 + 1][2], B[4 * tId + 3][2] * delta_lambda);
+					atomicAdd(&impulse[idx2 * 2 + 1][0], B[4 * tId + 3][0] * delta_lambda);
+					atomicAdd(&impulse[idx2 * 2 + 1][1], B[4 * tId + 3][1] * delta_lambda);
+					atomicAdd(&impulse[idx2 * 2 + 1][2], B[4 * tId + 3][2] * delta_lambda);
+				}
 			}
 		}
 

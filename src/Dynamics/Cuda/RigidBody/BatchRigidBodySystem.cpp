@@ -5,217 +5,220 @@
 
 namespace dyno
 {
-    template<typename TDataType>
-    BatchRigidBodySystem<TDataType>::BatchRigidBodySystem()
-      : RigidBodySystem<TDataType>()
-    {
-    }
+	template<typename TDataType>
+	BatchRigidBodySystem<TDataType>::BatchRigidBodySystem()
+	    : RigidBodySystem<TDataType>()
+	{
+	}
 
-    template<typename TDataType>
-    BatchRigidBodySystem<TDataType>::~BatchRigidBodySystem()
-    {
-    }
+	template<typename TDataType>
+	BatchRigidBodySystem<TDataType>::~BatchRigidBodySystem()
+	{
+	}
 
-    template<typename TDataType>
-    void BatchRigidBodySystem<TDataType>::addExampleRigidBodies(
-      std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z)
-    {
-        // TODO: load urdf and create rigid bodies accordingly
+	template<typename TDataType>
+	void BatchRigidBodySystem<TDataType>::addExampleRigidBodies(
+	    std::string urdf_fn, Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z)
+	{
+		// TODO: load urdf and create rigid bodies accordingly
 
-        {
-            auto addRigidArm = [&](Vec3f _offset) {
-                MulitBodyChainIndices mb;
+		auto addRigidArm = [&](Vec3f _offset) {
+			MulitBodyChainIndices mb;
 
-                auto* rigid = this;
+			auto* rigid = this;
 
-                float scale = 0.1;
-                BoxInfo box3;
-                box3.halfLength = Vec3f(1, 3, 1) * scale;
-                RigidBodyInfo boxInfo3;
-                boxInfo3.position = Vec3f(7.0, 50.0, 2.0) * scale + _offset;
-                boxInfo3.friction = 0.0;
-                boxInfo3.collisionMask = CT_Disabled;
-                boxInfo3.motionType = Static;
-                auto boxAt3 = rigid->addBox(box3, boxInfo3, 100.0);
-                mb.body_indices.push_back(boxAt3->idx);
+			float scale = 0.1;
+			BoxInfo box3;
+			box3.halfLength = Vec3f(1, 3, 1) * scale;
+			RigidBodyInfo boxInfo3;
+			boxInfo3.position = Vec3f(7.0, 50.0, 2.0) * scale + _offset;
+			boxInfo3.friction = 0.0;
+			boxInfo3.collisionMask = CT_Disabled;
+			boxInfo3.motionType = Static;
+			auto boxAt3 = rigid->addBox(box3, boxInfo3, 100.0);
+			mb.body_indices.push_back(boxAt3->idx);
 
-                auto func = [&](std::shared_ptr<PdActor> lastAct) {
-                    Vec3f last = lastAct->center;
+			auto func = [&](std::shared_ptr<PdActor> lastAct) {
+				Vec3f last = lastAct->center;
 
-                    BoxInfo box1_;
-                    box1_.halfLength = Vec3f(4, 1, 1) * scale;
-                    RigidBodyInfo boxInfo1_;
+				BoxInfo box1_;
+				box1_.halfLength = Vec3f(4, 1, 1) * scale;
+				RigidBodyInfo boxInfo1_;
 
-                    Vec3f offset_1 = Vec3f(5.0, 2.0, 0.0) * scale;
-                    boxInfo1_.position = last + offset_1;
-                    boxInfo1_.friction = 0.0;
-                    boxInfo1_.collisionMask = CT_Disabled;
-                    auto boxAt1_ = rigid->addBox(box1_, boxInfo1_, 100.0);
-                    mb.body_indices.push_back(boxAt1_->idx);
+				Vec3f offset_1 = Vec3f(5.0, 2.0, 0.0) * scale;
+				boxInfo1_.position = last + offset_1;
+				boxInfo1_.friction = 0.0;
+				boxInfo1_.collisionMask = CT_Disabled;
+				auto boxAt1_ = rigid->addBox(box1_, boxInfo1_, 100.0);
+				mb.body_indices.push_back(boxAt1_->idx);
 
-                    BoxInfo box2_;
-                    box2_.halfLength = Vec3f(1, 3, 1) * scale;
-                    RigidBodyInfo boxInfo2_;
+				BoxInfo box2_;
+				box2_.halfLength = Vec3f(1, 3, 1) * scale;
+				RigidBodyInfo boxInfo2_;
 
-                    Vec3f offset_2 = Vec3f(8.0, 4.0, 2.0) * scale;
-                    boxInfo2_.position = last + offset_2;
-                    boxInfo2_.friction = 0.0;
-                    boxInfo2_.collisionMask = CT_Disabled;
-                    auto boxAt2_ = rigid->addBox(box2_, boxInfo2_, 100.0);
-                    mb.body_indices.push_back(boxAt2_->idx);
+				Vec3f offset_2 = Vec3f(8.0, 4.0, 2.0) * scale;
+				boxInfo2_.position = last + offset_2;
+				boxInfo2_.friction = 0.0;
+				boxInfo2_.collisionMask = CT_Disabled;
+				auto boxAt2_ = rigid->addBox(box2_, boxInfo2_, 100.0);
+				mb.body_indices.push_back(boxAt2_->idx);
 
-                    Vec3f offset_3 = Vec3f(1.0, 2.0, 0.0) * scale;
-                    auto& joint_5 = rigid->createHingeJoint(lastAct, boxAt1_);
-                    joint_5.setAnchorPoint(last + offset_3);
-                    joint_5.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
-                    mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
+				Vec3f offset_3 = Vec3f(1.0, 2.0, 0.0) * scale;
+				auto& joint_5 = rigid->createHingeJoint(lastAct, boxAt1_);
+				joint_5.setAnchorPoint(last + offset_3);
+				joint_5.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
+				mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
 
-                    Vec3f offset_4 = Vec3f(8.0, 2.0, 1.0) * scale;
-                    auto& joint_6 = rigid->createHingeJoint(boxAt1_, boxAt2_);
-                    joint_6.setAnchorPoint(last + offset_4);
-                    joint_6.setAxis(Vec3f(0.0f, 0.0f, 1.0f));
-                    joint_6.setRange(-3.14f / 2.0f, 3.14f / 2.0f);
-                    mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
-                    return boxAt2_;
-                };
+				Vec3f offset_4 = Vec3f(8.0, 2.0, 1.0) * scale;
+				auto& joint_6 = rigid->createHingeJoint(boxAt1_, boxAt2_);
+				joint_6.setAnchorPoint(last + offset_4);
+				joint_6.setAxis(Vec3f(0.0f, 0.0f, 1.0f));
+				joint_6.setRange(-3.14f / 2.0f, 3.14f / 2.0f);
+				mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
+				return boxAt2_;
+			};
 
-                auto last_act = func(boxAt3);
-                auto last_act2 = func(last_act);
-                auto last_act3 = func(last_act2);
-                auto last_act4 = func(last_act3);
-                auto last_act5 = func(last_act4);
+			auto last_act = func(boxAt3);
+			auto last_act2 = func(last_act);
+			auto last_act3 = func(last_act2);
+			auto last_act4 = func(last_act3);
+			auto last_act5 = func(last_act4);
 
-                auto func2 = [&](std::shared_ptr<PdActor> lastAct) {
-                    Vec3f last = lastAct->center;
+			auto func2 = [&](std::shared_ptr<PdActor> lastAct) {
+				Vec3f last = lastAct->center;
 
-                    BoxInfo box1_;
-                    box1_.halfLength = Vec3f(4, 1, 1) * scale;
-                    RigidBodyInfo boxInfo1_;
+				BoxInfo box1_;
+				box1_.halfLength = Vec3f(4, 1, 1) * scale;
+				RigidBodyInfo boxInfo1_;
 
-                    Vec3f offset_1 = Vec3f(5.0, 2.0, 0.0) * scale;
-                    boxInfo1_.position = last + offset_1;
-                    boxInfo1_.friction = 0.0;
-                    boxInfo1_.collisionMask = CT_Disabled;
-                    auto boxAt1_ = rigid->addBox(box1_, boxInfo1_, 100.0);
-                    mb.body_indices.push_back(boxAt1_->idx);
+				Vec3f offset_1 = Vec3f(5.0, 2.0, 0.0) * scale;
+				boxInfo1_.position = last + offset_1;
+				boxInfo1_.friction = 0.0;
+				boxInfo1_.collisionMask = CT_Disabled;
+				auto boxAt1_ = rigid->addBox(box1_, boxInfo1_, 100.0);
+				mb.body_indices.push_back(boxAt1_->idx);
 
-                    Vec3f offset_3 = Vec3f(1.0, 2.0, 0.0) * scale;
-                    auto& joint_5 = rigid->createHingeJoint(lastAct, boxAt1_);
-                    joint_5.setAnchorPoint(last + offset_3);
-                    joint_5.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
-                    mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
+				Vec3f offset_3 = Vec3f(1.0, 2.0, 0.0) * scale;
+				auto& joint_5 = rigid->createHingeJoint(lastAct, boxAt1_);
+				joint_5.setAnchorPoint(last + offset_3);
+				joint_5.setAxis(Vec3f(1.0f, 0.0f, 0.0f));
+				mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
 
-                    return boxAt1_;
-                };
+				return boxAt1_;
+			};
 
-                return mb;
-            };
+			return mb;
+		};
 
-            auto addRigidArmExample2 = [&](Vec3f _offset) {
-                MulitBodyChainIndices mb;
+		auto addRigidArmExample2 = [&](Vec3f _offset) {
+			MulitBodyChainIndices mb;
 
-                auto* rigid = this;
+			auto* rigid = this;
 
-                float scale = 0.01;
-                BoxInfo box1;
-                box1.halfLength = Vec3f(4, 1, 1) * scale;
-                RigidBodyInfo boxInfo1;
-                boxInfo1.position = Vec3f(4.0, 50.0, 0.0) * scale + _offset;
-                boxInfo1.friction = 0.0;
-                boxInfo1.motionType = Static;
-                boxInfo1.collisionMask = CT_Disabled;
-                auto boxAt1 = rigid->addBox(box1, boxInfo1, 100000000.0);
-                mb.body_indices.push_back(boxAt1->idx);
+			float scale = 0.05;
+			BoxInfo box1;
+			box1.halfLength = Vec3f(4, 1, 1) * scale;
+			RigidBodyInfo boxInfo1;
+			boxInfo1.position = Vec3f(4.0, 50.0, 0.0) * scale + _offset;
+			boxInfo1.friction = 0.0;
+			boxInfo1.motionType = Static;
+			boxInfo1.collisionMask = CT_Disabled;
+			auto boxAt1 = rigid->addBox(box1, boxInfo1, 10.0);
+			mb.body_indices.push_back(boxAt1->idx);
 
-                auto func = [&](std::shared_ptr<PdActor> lastAct) {
-                    Vec3f last = lastAct->center;
-                    BoxInfo box2_;
-                    box2_.halfLength = Vec3f(4, 1, 1) * scale;
-                    RigidBodyInfo boxInfo2_;
+			auto func = [&](std::shared_ptr<PdActor> lastAct) {
+				Vec3f last = lastAct->center;
+				BoxInfo box2_;
+				box2_.halfLength = Vec3f(4, 1, 1) * scale;
+				RigidBodyInfo boxInfo2_;
 
-                    Vec3f offset_2 = Vec3f(7.0, 0.0, 2.0) * scale;
-                    boxInfo2_.position = last + offset_2 + _offset;
-                    boxInfo2_.friction = 0.0;
-                    boxInfo2_.collisionMask = CT_Disabled;
-                    auto boxAt2_ = rigid->addBox(box2_, boxInfo2_, 100.0);
-                    mb.body_indices.push_back(boxAt2_->idx);
+				Vec3f offset_2 = Vec3f(7.0, 0.0, 2.0) * scale;
+				boxInfo2_.position = last + offset_2 + _offset;
+				boxInfo2_.friction = 0.0;
+				boxInfo2_.collisionMask = CT_Disabled;
+				auto boxAt2_ = rigid->addBox(box2_, boxInfo2_, 1000.0);
+				mb.body_indices.push_back(boxAt2_->idx);
 
-                    Vec3f offset_4 = Vec3f(4.0, 0.0, 1.0) * scale;
-                    auto& joint_6 = rigid->createHingeJoint(boxAt2_, lastAct);
-                    joint_6.setAnchorPoint(last + offset_4 + _offset);
-                    joint_6.setAxis(Vec3f(0.0f, 0.0f, 1.0f));
-                    joint_6.setRange(-3.14f / 2.0f, 3.14f / 2.0f);
-                    mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
-                    return boxAt2_;
-                };
+				Vec3f offset_4 = Vec3f(4.0, 0.0, 1.0) * scale;
+				auto& joint_6 = rigid->createHingeJoint(boxAt2_, lastAct);
+				if (lastAct->idx == boxAt1->idx)
+				{
+					printf("set joint_6 bodyId2 to INVALID\n");
+					joint_6.bodyId2 = INVALID;
+				}
+				joint_6.setAnchorPoint(last + offset_4 + _offset);
+				joint_6.setAxis(Vec3f(0.0f, 0.0f, 1.0f));
+				joint_6.setRange(-3.14f / 2.f, 3.14f / 2.f);
+				mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
+				return boxAt2_;
+			};
 
-                auto last_act = func(boxAt1);
-                auto last_act2 = func(last_act);
-                auto last_act3 = func(last_act2);
-                auto last_act4 = func(last_act3);
-                auto last_act5 = func(last_act4);
+			auto last_act = func(boxAt1);
+			auto last_act2 = func(last_act);
+			auto last_act3 = func(last_act2);
+			auto last_act4 = func(last_act3);
+			auto last_act5 = func(last_act4);
+			auto last_act6 = func(last_act5);
 
-                // auto j = rigid->createUnilateralFixedJoint(boxAt1);
-                // j.setAnchorPoint(boxInfo1.position);
+			// auto j = rigid->createUnilateralFixedJoint(boxAt1);
+			// j.setAnchorPoint(boxInfo1.position);
 
+			return mb;
+		};
 
-                return mb;
-            };
+		auto attachRender = [&]() {
+			auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
+			auto rigid = this;
+			rigid->stateTopology()->connect(mapper->inDiscreteElements());
+			rigid->graphicsPipeline()->pushModule(mapper);
 
-            auto attachRender = [&]() {
-                auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
-                auto rigid = this;
-                rigid->stateTopology()->connect(mapper->inDiscreteElements());
-                rigid->graphicsPipeline()->pushModule(mapper);
+			auto sRender = std::make_shared<GLSurfaceVisualModule>();
+			sRender->setColor(Color(1, 1, 0));
+			sRender->setAlpha(0.5f);
+			mapper->outTriangleSet()->connect(sRender->inTriangleSet());
+			rigid->graphicsPipeline()->pushModule(sRender);
+		};
 
-                auto sRender = std::make_shared<GLSurfaceVisualModule>();
-                sRender->setColor(Color(1, 1, 0));
-                sRender->setAlpha(0.5f);
-                mapper->outTriangleSet()->connect(sRender->inTriangleSet());
-                rigid->graphicsPipeline()->pushModule(sRender);
-            };
+		for (int x = 0; x < num_copies_x; x++)
+		{
+			for (int y = 0; y < num_copies_y; y++)
+			{
+				for (int z = 0; z < num_copies_z; z++)
+				{
+					Vec3f offset = base + Vec3f(x * 10.0f, y * 10.0f, z * 10.0f);
+					// auto mb = addRigidArm(offset);
+					auto mb = addRigidArmExample2(offset);
+					ctrl_mb_chains.push_back(mb);
+				}
+			}
+		}
+		attachRender();
 
-            for (int x = 0; x < num_copies_x; x++)
-            {
-                for (int y = 0; y < num_copies_y; y++)
-                {
-                    for (int z = 0; z < num_copies_z; z++)
-                    {
-                        Vec3f offset = base + Vec3f(x * 10.0f, y * 10.0f, z * 10.0f);
-                        // auto mb = addRigidArm(offset);
-                        auto mb = addRigidArmExample2(offset);
-                        ctrl_mb_chains.push_back(mb);
-                    }
-                }
-            }
-            attachRender();
+		// for (int i = 0; i < multi_body_chains.size(); i++)
+		// {
+		//   auto mb = multi_body_chains[i];
+		//   printf("Multi-body chain %d:\n", i);
+		//   printf("  Body indices: ");
+		//   for (int j = 0; j < mb.body_indices.size(); j++)
+		//   {
+		//     printf("%d ", mb.body_indices[j]);
+		//   }
+		//   printf("\n");
+		//
+		//   printf("  Hinge joint indices: ");
+		//   for (int j = 0; j < mb.hinge_joint_indices.size(); j++)
+		//   {
+		//     printf("%d ", mb.hinge_joint_indices[j]);
+		//   }
+		//   printf("\n");
+		// }
+	}
 
-            // for (int i = 0; i < multi_body_chains.size(); i++)
-            // {
-            //   auto mb = multi_body_chains[i];
-            //   printf("Multi-body chain %d:\n", i);
-            //   printf("  Body indices: ");
-            //   for (int j = 0; j < mb.body_indices.size(); j++)
-            //   {
-            //     printf("%d ", mb.body_indices[j]);
-            //   }
-            //   printf("\n");
-            //
-            //   printf("  Hinge joint indices: ");
-            //   for (int j = 0; j < mb.hinge_joint_indices.size(); j++)
-            //   {
-            //     printf("%d ", mb.hinge_joint_indices[j]);
-            //   }
-            //   printf("\n");
-            // }
-        }
-    }
+	template<typename TDataType>
+	void BatchRigidBodySystem<TDataType>::resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param)
+	{
+	}
 
-    template<typename TDataType>
-    void BatchRigidBodySystem<TDataType>::resetBatchMultiBodies(BatchRigidBodySystemControlParamBase& param)
-    {
-    }
-
-    DEFINE_CLASS(BatchRigidBodySystem);
+	DEFINE_CLASS(BatchRigidBodySystem);
 
 } // namespace dyno

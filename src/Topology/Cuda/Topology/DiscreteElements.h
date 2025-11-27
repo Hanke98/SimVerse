@@ -142,6 +142,8 @@ namespace dyno
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -165,6 +167,8 @@ namespace dyno
 		public:
 		int bodyId1;
 		int bodyId2;
+		int bodyActualId1; // actual id in case of bodyId is set INVALID
+		int bodyActualId2;
 
 		ElementType bodyType1;
 		ElementType bodyType2;
@@ -182,6 +186,8 @@ namespace dyno
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -194,6 +200,9 @@ namespace dyno
 		{
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
+
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
 
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
@@ -225,6 +234,8 @@ namespace dyno
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -237,6 +248,8 @@ namespace dyno
 		{
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
 
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
@@ -304,6 +317,8 @@ namespace dyno
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -316,6 +331,9 @@ namespace dyno
 		{
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
+
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
 
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
@@ -384,6 +402,8 @@ namespace dyno
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -396,6 +416,8 @@ namespace dyno
 		{
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
 
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
@@ -490,6 +512,8 @@ namespace dyno
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -501,6 +525,9 @@ namespace dyno
 		{
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
+
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
 
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;

@@ -2434,6 +2434,9 @@ namespace dyno
 
 		constraints[baseIndex].bodyId1 = idx1;
 		constraints[baseIndex].bodyId2 = idx2;
+		constraints[baseIndex].bodyActualId1 = joints[tId].bodyActualId1;
+		constraints[baseIndex].bodyActualId2 = joints[tId].bodyActualId2;
+
 		constraints[baseIndex].normal1 = r1;
 		constraints[baseIndex].normal2 = r2;
 		constraints[baseIndex].type = ConstraintType::CN_ANCHOR_EQUAL_1;
@@ -2441,6 +2444,9 @@ namespace dyno
 
 		constraints[baseIndex + 1].bodyId1 = idx1;
 		constraints[baseIndex + 1].bodyId2 = idx2;
+		constraints[baseIndex + 1].bodyActualId1 = joints[tId].bodyActualId1;
+		constraints[baseIndex + 1].bodyActualId2 = joints[tId].bodyActualId2;
+
 		constraints[baseIndex + 1].normal1 = r1;
 		constraints[baseIndex + 1].normal2 = r2;
 		constraints[baseIndex + 1].type = ConstraintType::CN_ANCHOR_EQUAL_2;
@@ -2559,6 +2565,8 @@ namespace dyno
 			auto& constraint = constraints[baseIndex + i];
 			constraint.bodyId1 = idx1;
 			constraint.bodyId2 = idx2;
+			constraint.bodyActualId1 = joints[tId].bodyActualId1;
+			constraint.bodyActualId2 = joints[tId].bodyActualId2;
 			constraint.pos1 = r1;
 			constraint.pos2 = r2;
 			constraint.normal1 = n1;
@@ -2628,18 +2636,6 @@ namespace dyno
 
 		Coord a1 = rotMat1 * joints[tId].hingeAxisBody1;
 		Coord a2 = rotMat2 * joints[tId].hingeAxisBody2;
-		printf(
-		    "tid: %3d, a1: (%15.12f, %15.12f, %15.12f), "
-		    "a2: (%15.12f, %15.12f, %15.12f)\n",
-		    tId,
-		    a1[0],
-		    a1[1],
-		    a1[2],
-		    a2[0],
-		    a2[1],
-		    a2[2]);
-		printf(
-		    "tid: %3d, r1: (%15.12f, %15.12f, %15.12f), r2: (%15.12f, %15.12f, %15.12f)\n", tId, r1[0], r1[1], r1[2], r2[0], r2[1], r2[2]);
 
 		// two vector orthogonal to the a1
 		Coord b2, c2;
@@ -2670,19 +2666,6 @@ namespace dyno
 			{
 				theta = -theta;
 			}
-			printf("tid: %3d, theta: %15.12f\n", tId, theta);
-			printf(
-			    "tid: %3d, rot_q1: (%15.12f, %15.12f, %15.12f, %15.12f), rot_q2: (%15.12f, %15.12f, %15.12f, %15.12f)\n",
-			    tId,
-			    rotation_q[idx1].x,
-			    rotation_q[idx1].y,
-			    rotation_q[idx1].z,
-			    rotation_q[idx1].w,
-			    rot_q2.x,
-			    rot_q2.y,
-			    rot_q2.z,
-			    rot_q2.w);
-			printf("----------------\n");
 
 			C_min = theta - joints[tId].d_min;
 			C_max = joints[tId].d_max - theta;
@@ -2720,6 +2703,8 @@ namespace dyno
 		{
 			constraints[baseIndex + i].bodyId1 = idx1;
 			constraints[baseIndex + i].bodyId2 = idx2;
+			constraints[baseIndex + i].bodyActualId1 = joints[tId].bodyActualId1;
+			constraints[baseIndex + i].bodyActualId2 = joints[tId].bodyActualId2;
 			constraints[baseIndex + i].axis = a1;
 			constraints[baseIndex + i].normal1 = r1;
 			constraints[baseIndex + i].normal2 = r2;
@@ -2731,10 +2716,10 @@ namespace dyno
 		}
 		if (idx2 == INVALID)
 		{
-			// TODO: use real pos for static body
-			constraints[baseIndex].pos1 = r2 + pos[0];
-			constraints[baseIndex + 1].pos1 = r2 + pos[0];
-			constraints[baseIndex + 2].pos1 = r2 + pos[0];
+			auto actualId2 = constraints[baseIndex].bodyActualId2;
+			constraints[baseIndex].pos1 = r2 + pos[actualId2];
+			constraints[baseIndex + 1].pos1 = r2 + pos[actualId2];
+			constraints[baseIndex + 2].pos1 = r2 + pos[actualId2];
 		}
 
 		for (int i = 0; i < 5; i++)
@@ -2760,7 +2745,16 @@ namespace dyno
 	    DArray<Quat1f> rotation_q,
 	    int begin_index)
 	{
-		cuExecute(constraints.size(), SF_setUpHingeJointConstraints, constraints, joints, pos, rotMat, rotation_q, begin_index);
+		cuExecute(
+		    /**/
+		    constraints.size(),
+		    SF_setUpHingeJointConstraints,
+		    constraints,
+		    joints,
+		    pos,
+		    rotMat,
+		    rotation_q,
+		    begin_index);
 	}
 
 	/**

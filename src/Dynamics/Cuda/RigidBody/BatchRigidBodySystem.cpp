@@ -133,20 +133,20 @@ namespace dyno
 				RigidBodyInfo boxInfo2_;
 
 				Vec3f offset_2 = Vec3f(7.0, 0.0, 2.0) * scale;
-				boxInfo2_.position = last + offset_2 + _offset;
+				boxInfo2_.position = last + offset_2;
 				boxInfo2_.friction = 0.0;
 				boxInfo2_.collisionMask = CT_Disabled;
 				auto boxAt2_ = rigid->addBox(box2_, boxInfo2_, 1000.0);
 				mb.body_indices.push_back(boxAt2_->idx);
 
-				Vec3f offset_4 = Vec3f(4.0, 0.0, 1.0) * scale;
 				auto& joint_6 = rigid->createHingeJoint(boxAt2_, lastAct);
 				if (lastAct->idx == boxAt1->idx)
 				{
-					printf("set joint_6 bodyId2 to INVALID\n");
 					joint_6.bodyId2 = INVALID;
 				}
-				joint_6.setAnchorPoint(last + offset_4 + _offset);
+
+				Vec3f offset_4 = Vec3f(4.0, 0.0, 1.0) * scale;
+				joint_6.setAnchorPoint(last + offset_4);
 				joint_6.setAxis(Vec3f(0.0f, 0.0f, 1.0f));
 				joint_6.setRange(-3.14f / 2.f, 3.14f / 2.f);
 				mb.hinge_joint_indices.push_back(rigid->getHostHingeJoints().size() - 1);
@@ -160,6 +160,7 @@ namespace dyno
 			auto last_act5 = func(last_act4);
 			auto last_act6 = func(last_act5);
 
+			printf("===\n");
 			// auto j = rigid->createUnilateralFixedJoint(boxAt1);
 			// j.setAnchorPoint(boxInfo1.position);
 

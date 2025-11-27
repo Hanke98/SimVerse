@@ -54,7 +54,6 @@ public:
     struct BatchRigidBodySystemHingeTorqueControlParam: public BatchRigidBodySystemControlParamBase
     {
       std::vector<std::vector<float>> torques;
-      std::vector<std::vector<float>> dampings;
     };
 
     struct BatchRigidBodySystemMassParam: public BatchRigidBodySystemControlParamBase

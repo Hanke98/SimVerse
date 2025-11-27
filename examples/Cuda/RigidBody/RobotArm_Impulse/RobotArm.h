@@ -1,4 +1,3 @@
-// CartPoleSimulator.h
 #pragma once
 
 #include "RigidBody/BatchRigidBodySystem.h"

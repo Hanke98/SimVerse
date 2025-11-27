@@ -318,8 +318,6 @@ int main() {
         param.ids.push_back(1);
         param.torques.push_back(moterVelocities1);
         param.torques.push_back(moterVelocities1);
-        param.dampings.push_back(dampings);
-        param.dampings.push_back(dampings);
         simulator.setHingeTorques(param);
 
         simulator.stepSimulation(true);

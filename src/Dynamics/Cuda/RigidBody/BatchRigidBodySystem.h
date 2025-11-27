@@ -93,8 +93,7 @@ public:
 
     void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, float density, std::vector<Vec3f> targetPosition,
                                int num_copies_x, int num_copies_y, int num_copies_z);
-    void addRobotArmRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, float density, std::vector<Vec3f> targetPosition,
-                               int num_copies_x, int num_copies_y, int num_copies_z);
+    void addRobotArmRigidBodies(std::string urdf_fn, float density, std::vector<Vec3f> targetPosition);
     // ------------------------------------
 
     // ------------------------------------

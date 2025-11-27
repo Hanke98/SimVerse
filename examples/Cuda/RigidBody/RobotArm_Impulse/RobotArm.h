@@ -39,13 +39,8 @@ namespace dyno
         void initBatchSolver();
 
         void addRobotArmRigidBodies(std::string urdf_fn,
-                                    Vec3f base,
-                                    Vec3f offset,
                                     float density = 1000,
-                                    std::vector<Vec3f> target_position = std::vector(1, Vec3f(0.0f)),
-                                    int num_copies_x = 1,
-                                    int num_copies_y = 1,
-                                    int num_copies_z = 1);
+                                    const std::vector<Vec3f> &target_position = {});
 
         void resetStates(ResetParam& param);
 

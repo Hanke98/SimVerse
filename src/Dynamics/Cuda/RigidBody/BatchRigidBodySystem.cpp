@@ -365,9 +365,10 @@ namespace dyno
 
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::addRobotArmRigidBodies(
-        std::string urdf_fn, Vec3f base, Vec3f offset, float density, std::vector<Vec3f> targetPosition, int num_copies_x, int num_copies_y, int num_copies_z) {
-        int robotarmIndex = 0;
+        std::string urdf_fn, float density, std::vector<Vec3f> targetPosition) {
+            int robotarmIndex = 0;
             auto instances = this->varVehiclesTransform()->getValue();
+            auto robotarmSize = instances.size();
 
             auto addRigidArmExample3 = [&](Vec3f _targetPosition)
             -> std::pair<MulitBodyChainIndices, MulitBodyChainIndices>
@@ -426,11 +427,10 @@ namespace dyno
                     BoxInfo box;
                     box.halfLength = (up - down) / 2;
                     if (this->urdfInfo.links[l].isRoot) {
-                        this->bindBox(actor, box, 1000000000);
+                        this->bindBox(actor, box, 10000000000);
                     } else {
                         this->bindBox(actor, box, density);
                     }
-
 
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
 
@@ -483,8 +483,6 @@ namespace dyno
                         auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
                         mb.fixed_joint_indices.push_back(this->getHostFixedJoints().size() - 1);
-
-
                         // std::cout << "JointInfo " << j << ": \n"
                         // << "Joint type: Fixed\n"
                         // << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
@@ -525,16 +523,24 @@ namespace dyno
                 // rigid->graphicsPipeline()->pushModule(sRender);
             };
 
-            for (int x = 0; x < num_copies_x; x++) {
-                for (int y = 0; y < num_copies_y; y++) {
-                    for (int z = 0; z < num_copies_z; z++) {
-                        Vec3f _targetPosition = targetPosition[robotarmIndex];
-                        auto [mb, non_ctrl_mb] = addRigidArmExample3(_targetPosition);
-                        ctrl_mb_chains.push_back(mb);
-                        non_ctrl_mb_chains.push_back(non_ctrl_mb);
-                        robotarmIndex++;
-                    }
-                }
+            // for (int x = 0; x < num_copies_x; x++) {
+            //     for (int y = 0; y < num_copies_y; y++) {
+            //         for (int z = 0; z < num_copies_z; z++) {
+            //             Vec3f _targetPosition = targetPosition[robotarmIndex];
+            //             auto [mb, non_ctrl_mb] = addRigidArmExample3(_targetPosition);
+            //             ctrl_mb_chains.push_back(mb);
+            //             non_ctrl_mb_chains.push_back(non_ctrl_mb);
+            //             robotarmIndex++;
+            //         }
+            //     }
+            // }
+
+            for (size_t i = 0; i < robotarmSize; i++) {
+                Vec3f _targetPosition = targetPosition[robotarmIndex];
+                auto [mb, non_ctrl_mb] = addRigidArmExample3(_targetPosition);
+                ctrl_mb_chains.push_back(mb);
+                non_ctrl_mb_chains.push_back(non_ctrl_mb);
+                robotarmIndex++;
             }
             attachRender();
 

@@ -67,7 +67,7 @@ int main() {
     target_position.push_back(target1);
     int num_copies_x = 2;
     int num_copies_y = 1;
-    int num_copies_z = 1;
+    int num_copies_z = 2;
     std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";
 
     simulator.initBatchSolver();
@@ -76,7 +76,7 @@ int main() {
     simulator.enableFriction(enableFriction);
     simulator.setTransform(base, offset, num_copies_x, num_copies_y, num_copies_z);
     simulator.setAngularDamping(50.0);
-    simulator.addRobotArmRigidBodies(urdf_fn, base, offset, density, target_position, num_copies_x, num_copies_y, num_copies_z);
+    simulator.addRobotArmRigidBodies(urdf_fn, density, target_position);
 
     //
     std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
@@ -292,25 +292,25 @@ int main() {
             }
         }
 
-        // moterVelocities1 = {
-        //     (float)torque[0],
-        //     (float)torque[1],
-        //     (float)torque[2],
-        //     (float)torque[3],
-        //     (float)torque[4],
-        //     (float)torque[5],
-        //     (float)torque[6]
-        // };
-
         moterVelocities1 = {
-            (float)0.0,
-            (float)87,
-            (float)0.0,
-            (float)0.0,
-            (float)0.0,
-            (float)0.0,
-            (float)0.0
+            (float)torque[0],
+            (float)torque[1],
+            (float)torque[2],
+            (float)torque[3],
+            (float)torque[4],
+            (float)torque[5],
+            (float)torque[6]
         };
+
+        // moterVelocities1 = {
+        //     (float)0.0,
+        //     (float)87,
+        //     (float)0.0,
+        //     (float)0.0,
+        //     (float)0.0,
+        //     (float)0.0,
+        //     (float)0.0
+        // };
 
         RobotArmSimulator<DataType3f>::HingeTorqueParam param;
         param.num_bodies = 2;

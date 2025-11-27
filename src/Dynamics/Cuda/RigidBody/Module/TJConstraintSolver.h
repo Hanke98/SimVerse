@@ -106,6 +106,9 @@ namespace dyno
 	private:
 		void initializeJacobian(Real dt);
 
+		void initializeJacobianCompress(Real dt);
+		void constrainCompress();
+
 	private:
 		DArray<Coord> mJ;
 		DArray<Coord> mB;

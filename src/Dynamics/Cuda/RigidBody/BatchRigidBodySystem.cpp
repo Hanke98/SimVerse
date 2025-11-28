@@ -299,19 +299,19 @@ namespace dyno
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
                         joint.setAxis(this->urdfInfo.joints[j].axisWorld);
                         joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
-                        mb.hinge_joint_indices.push_back(this->getHostHingeJoints().size() - 1);
+                        mb.hinge_joint_indices.push_back(j);
                     }
                     if (this->urdfInfo.joints[j].type == PRISMATIC) {
                         auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
                         joint.setAxis(this->urdfInfo.joints[j].axisWorld);
                         joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
-                        mb.slider_joint_indices.push_back(this->getHostSliderJoints().size() - 1);
+                        mb.slider_joint_indices.push_back(j);
                     }
                     if (this->urdfInfo.joints[j].type == FIXED) {
                         auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                        mb.fixed_joint_indices.push_back(this->getHostFixedJoints().size() - 1);
+                        mb.fixed_joint_indices.push_back(j);
                     }
                 }
 
@@ -416,7 +416,7 @@ namespace dyno
         std::vector<Vec3f> systemTorque(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
 
         for (int i = 0; i < torque_param.num_bodies; i++) {
-            auto& mb_chain = ctrl_mb_chains[torque_param.ids[torque_param.ids[i]]];
+            auto& mb_chain = ctrl_mb_chains[torque_param.ids[i]];
             for (int j = 0; j < mb_chain.hinge_joint_indices.size(); ++j) {
                 auto& joint = this->urdfInfo.joints[j];
                 auto parentId_local = joint.parentLinkId;

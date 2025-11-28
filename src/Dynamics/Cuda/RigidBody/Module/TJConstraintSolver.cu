@@ -260,7 +260,6 @@ namespace dyno
 
 		Real dt = this->inTimeStep()->getData();
 
-
 		if (!this->inContacts()->isEmpty() || topo->totalJointSize() > 0)
 		{
 			this->inContacts()->clear();

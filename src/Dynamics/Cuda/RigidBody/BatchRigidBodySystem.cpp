@@ -2,6 +2,7 @@
 #include "BasicShapes/PlaneModel.h"
 #include "GLSurfaceVisualModule.h"
 #include "Mapping/DiscreteElementsToTriangleSet.h"
+#include "Mapping/DiscreteSpheresToTriangleSet.h"
 
 namespace dyno
 {
@@ -334,7 +335,7 @@ namespace dyno
             };
 
             auto attachRender = [&]() {
-                auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
+                auto mapper = std::make_shared<DiscreteSpheresToTriangleSet<DataType3f>>();
                 auto rigid = this;
                 rigid->stateTopology()->connect(mapper->inDiscreteElements());
                 rigid->graphicsPipeline()->pushModule(mapper);

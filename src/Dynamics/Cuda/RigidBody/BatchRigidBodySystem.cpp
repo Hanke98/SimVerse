@@ -418,7 +418,7 @@ namespace dyno
         for (int i = 0; i < torque_param.num_bodies; i++) {
             auto& mb_chain = ctrl_mb_chains[torque_param.ids[i]];
             for (int j = 0; j < mb_chain.hinge_joint_indices.size(); ++j) {
-                auto& joint = this->urdfInfo.joints[j];
+                auto& joint = this->urdfInfo.joints[mb_chain.hinge_joint_indices[j]];
                 auto parentId_local = joint.parentLinkId;
                 auto childId_local = joint.childLinkId;
                 auto parentId_global = mb_chain.body_indices[parentId_local];

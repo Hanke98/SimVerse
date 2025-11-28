@@ -119,7 +119,6 @@ int main() {
             Vec3f newTarget{ 0.5f, 1.0f, 0.5f };
             param.targetPosition.push_back(newTarget);
             param.targetPosition.push_back(newTarget);
-            std::cout << "size of targePosition" << param.targetPosition.size() << std::endl;
             simulator.resetStates(param);
         }
 

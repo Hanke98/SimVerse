@@ -90,7 +90,7 @@ public:
 
     void setInertia(BatchRigidBodySystemInertiaParam& inertia_param);
 
-    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, float density, std::vector<Vec3f> targetPosition,
+    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, float density,
                                int num_copies_x, int num_copies_y, int num_copies_z);
     void addRobotArmRigidBodies(std::string urdf_fn, float density, std::vector<Vec3f> targetPosition, bool renderBoundingBox);
     // ------------------------------------
@@ -100,7 +100,6 @@ public:
     // void setDt(Real dt)
     // {
     // }
-
     void setGravityEnabled(bool enabled)
     {
       this->varGravityEnabled()->setValue(enabled);
@@ -120,7 +119,6 @@ public:
     std::vector<Vec3f> getVelocitiesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Vec3f> getCentersByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<float> getMassByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
-
     // ------------------------------------
 
 protected:

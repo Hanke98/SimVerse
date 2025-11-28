@@ -6,7 +6,6 @@
 #include "RobotArm.h"
 #include "DataTypes.h"
 #include "UrdfParser.h"
-// #include "Matrix3x3.h"
 #include "../../../../src/Core/Matrix/Transform3x3.h"
 
 namespace py = pybind11;

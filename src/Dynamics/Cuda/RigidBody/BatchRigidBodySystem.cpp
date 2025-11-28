@@ -19,7 +19,7 @@ namespace dyno
 
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::addExampleRigidBodies(
-      std::string urdf_fn, Vec3f base, Vec3f offset, float density, std::vector<Vec3f> targetPosition, int num_copies_x, int num_copies_y, int num_copies_z)
+      std::string urdf_fn, Vec3f base, Vec3f offset, float density, int num_copies_x, int num_copies_y, int num_copies_z)
     {
         // TODO: load urdf and create rigid bodies accordingly
 
@@ -161,156 +161,17 @@ namespace dyno
             int robotarmIndex = 0;
             auto instances = this->varVehiclesTransform()->getValue();
 
-            auto addRigidArmExample3 = [&](Vec3f _offset, Vec3f _targetPosition)
-            -> std::pair<MulitBodyChainIndices, MulitBodyChainIndices>
-            {
-
-                MulitBodyChainIndices mb;
-                MulitBodyChainIndices non_ctrl_mb;
-
-                std::string filename = getAssetPath() + urdf_fn;
-
-                // std::string filename = getAssetPath() + "../asset/franka_description/robots/franka_panda_custom.urdf";
-                // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka.urdf";
-                // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka_allegro_touch_sensor.urdf";
-
-		        if (this->varFilePath()->getValue() != filename)
-		        {
-			        this->varFilePath()->setValue(FilePath(filename));
-		        } else {
-                    std::cout << "Robot: Skip loading file" << std::endl;
-                }
-
-                RigidBodyInfo rigidbody;
-                rigidbody.bodyId = robotarmIndex;
-
-                auto texMesh = this->stateTextureMesh()->constDataPtr();
-                std::map<int, std::shared_ptr<PdActor>> actors;
-                std::unordered_map<std::string, int> linkNameToActorIndex;
-
-                std::unordered_map<std::string, std::shared_ptr<PdActor>> linkNameToActor;
-
-                for (int l = 0; l < this->urdfInfo.links.size(); ++l) {
-
-                    auto it = this->urdfInfo.links[l].shapeId;
-
-                    auto up = texMesh->shapes()[it]->boundingBox.v1;
-                    auto down = texMesh->shapes()[it]->boundingBox.v0;
-
-                    // rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + _offset;
-                    rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + instances[robotarmIndex].translation();
-                    // rigidbody.angle = Quat1f(instances[robotarmIndex].rotation());
-
-                    initialPositions.push_back(rigidbody.position);
-                    initialQuats.push_back(rigidbody.angle);
-                    initialRotations.push_back(rigidbody.angle.toMatrix3x3());
-
-                    if (this->urdfInfo.links[l].isRoot) {
-                        rigidbody.motionType = BodyType::Static;
-                    } else {
-                        rigidbody.motionType = BodyType::Dynamic;
-                    }
-
-                    auto actor = this->createRigidBody(rigidbody);
-                    actors[it] = actor;
-
-                    BoxInfo box;
-
-                    box.halfLength = (up - down) / 2;
-
-                    this->bindBox(actor, box, density);
-
-                    this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
-
-                    mb.body_indices.push_back(actor->idx);
-
-                    // std::cout << "BoxInfo " << l << ": \n"
-                    //           << "Position: " << rigidbody.position << "\n"
-                    //           << "halfLength: " << box.halfLength << "\n"<< std::endl;
-                }
-
-                for (int j = 0; j < this->urdfInfo.joints.size(); ++j) {
-                    auto parentName = this->urdfInfo.joints[j].parentLink;
-                    auto childName = this->urdfInfo.joints[j].childLink;
-
-                    auto parentId = this->urdfInfo.joints[j].parentLinkId;
-                    auto childId = this->urdfInfo.joints[j].childLinkId;
-
-                    if (this->urdfInfo.joints[j].type == REVOLUTE) {
-                        auto &joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
-                        // joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + _offset);
-                        joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                        joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-                        joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
-                        mb.hinge_joint_indices.push_back(this->getHostHingeJoints().size() - 1);
-                        // std::cout << "JointInfo " << j << ": \n"
-                        // << "Joint type: Hinge\n"
-                        // << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
-                        // << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
-                        // << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
-                        // << "Axis: " << this->urdfInfo.joints[j].axisWorld << "\n"
-                        // << "Hinge range: (" << this->urdfInfo.joints[j].limits.lower << ", " << this->urdfInfo.joints[j].limits.upper << ")\n"
-                        // << std::endl;
-                    }
-                    if (this->urdfInfo.joints[j].type == PRISMATIC) {
-                        auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
-                        joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                        joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-                        joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
-                        mb.slider_joint_indices.push_back(this->getHostSliderJoints().size() - 1);
-                        // std::cout << "JointInfo " << j << ": \n"
-                        // << "Joint type: Slider\n"
-                        // << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
-                        // << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
-                        // << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
-                        // << "Axis: " << this->urdfInfo.joints[j].axisWorld << "\n"
-                        // << "Slider range: (" << this->urdfInfo.joints[j].limits.lower << ", " << this->urdfInfo.joints[j].limits.upper << ")\n"
-                        // << std::endl;
-                    }
-                    if (this->urdfInfo.joints[j].type == FIXED) {
-                        auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
-                        joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                        mb.fixed_joint_indices.push_back(this->getHostFixedJoints().size() - 1);
-
-
-                        // std::cout << "JointInfo " << j << ": \n"
-                        // << "Joint type: Fixed\n"
-                        // << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
-                        // << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
-                        // << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
-                        // << std::endl;
-                    }
-                }
-
-                // create target
-                SphereInfo target;
-                target.radius = 0.05f;
-
-                RigidBodyInfo target_rb;
-                target_rb.position = instances[robotarmIndex].translation() + _targetPosition;
-                target_rb.motionType = BodyType::Static;
-                target_rb.collisionMask = CT_Disabled;
-                auto target_actor = this->addSphere(target, target_rb);
-
-                initialPositions.push_back(target_rb.position);
-                initialQuats.push_back(target_rb.angle);
-                initialRotations.push_back(target_rb.angle.toMatrix3x3());
-                non_ctrl_mb.body_indices.push_back(target_actor->idx);
-
-                return {mb, non_ctrl_mb};
-            };
-
             auto attachRender = [&]() {
                 auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
                 auto rigid = this;
                 rigid->stateTopology()->connect(mapper->inDiscreteElements());
                 rigid->graphicsPipeline()->pushModule(mapper);
 
-                // auto sRender = std::make_shared<GLSurfaceVisualModule>();
-                // sRender->setColor(Color(1, 1, 0));
-                // sRender->setAlpha(0.5f);
-                // mapper->outTriangleSet()->connect(sRender->inTriangleSet());
-                // rigid->graphicsPipeline()->pushModule(sRender);
+                auto sRender = std::make_shared<GLSurfaceVisualModule>();
+                sRender->setColor(Color(1, 1, 0));
+                sRender->setAlpha(0.5f);
+                mapper->outTriangleSet()->connect(sRender->inTriangleSet());
+                rigid->graphicsPipeline()->pushModule(sRender);
             };
 
             for (int x = 0; x < num_copies_x; x++)
@@ -320,11 +181,8 @@ namespace dyno
                     for (int z = 0; z < num_copies_z; z++)
                     {
                         Vec3f _offset = base + Vec3f(x * offset.x, y * offset.y, z * offset.z);
-                        // auto mb = addRigidArm(offset);
-                        Vec3f _targetPosition = targetPosition[robotarmIndex];
-                        auto [mb, non_ctrl_mb] = addRigidArmExample3(_offset, _targetPosition);
+                        auto mb = addRigidArmExample2(_offset);
                         ctrl_mb_chains.push_back(mb);
-                        non_ctrl_mb_chains.push_back(non_ctrl_mb);
                         robotarmIndex++;
                     }
                 }
@@ -369,25 +227,21 @@ namespace dyno
             auto instances = this->varVehiclesTransform()->getValue();
             auto robotarmSize = instances.size();
 
-            auto addRigidArmExample3 = [&](Vec3f _targetPosition)
+            std::string filename = getAssetPath() + urdf_fn;
+
+            if (this->varFilePath()->getValue() != filename)
+            {
+                this->varFilePath()->setValue(FilePath(filename));
+            } else {
+                std::cout << "Robot: Skip loading file" << std::endl;
+            }
+
+            auto addRigidArmExample = [&](const Vec3f& _targetPosition)
             -> std::pair<MulitBodyChainIndices, MulitBodyChainIndices>
             {
 
                 MulitBodyChainIndices mb;
                 MulitBodyChainIndices non_ctrl_mb;
-
-                std::string filename = getAssetPath() + urdf_fn;
-
-                // std::string filename = getAssetPath() + "../asset/franka_description/robots/franka_panda_custom.urdf";
-                // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka.urdf";
-                // std::string filename = getAssetPath() + "../asset/kuka_allegro_description/kuka_allegro_touch_sensor.urdf";
-
-		        if (this->varFilePath()->getValue() != filename)
-		        {
-			        this->varFilePath()->setValue(FilePath(filename));
-		        } else {
-                    std::cout << "Robot: Skip loading file" << std::endl;
-                }
 
                 RigidBodyInfo rigidbody;
                 rigidbody.bodyId = robotarmIndex;
@@ -405,9 +259,7 @@ namespace dyno
                     auto up = texMesh->shapes()[it]->boundingBox.v1;
                     auto down = texMesh->shapes()[it]->boundingBox.v0;
 
-                    // rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + _offset;
                     rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + instances[robotarmIndex].translation();
-                    // rigidbody.angle = Quat1f(instances[robotarmIndex].rotation());
 
                     initialPositions.push_back(rigidbody.position);
                     initialQuats.push_back(rigidbody.angle);
@@ -425,7 +277,7 @@ namespace dyno
                     BoxInfo box;
                     box.halfLength = (up - down) / 2;
                     if (this->urdfInfo.links[l].isRoot) {
-                        this->bindBox(actor, box, 10000000000);
+                        this->bindBox(actor, box, 1000000000000);
                     } else {
                         this->bindBox(actor, box, density);
                     }
@@ -433,10 +285,6 @@ namespace dyno
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
 
                     mb.body_indices.push_back(actor->idx);
-
-                    // std::cout << "BoxInfo " << l << ": \n"
-                    //           << "Position: " << rigidbody.position << "\n"
-                    //           << "halfLength: " << box.halfLength << "\n"<< std::endl;
                 }
 
                 for (int j = 0; j < this->urdfInfo.joints.size(); ++j) {
@@ -448,19 +296,10 @@ namespace dyno
 
                     if (this->urdfInfo.joints[j].type == REVOLUTE) {
                         auto &joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
-                        // joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + _offset);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
                         joint.setAxis(this->urdfInfo.joints[j].axisWorld);
                         joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
                         mb.hinge_joint_indices.push_back(this->getHostHingeJoints().size() - 1);
-                        // std::cout << "JointInfo " << j << ": \n"
-                        // << "Joint type: Hinge\n"
-                        // << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
-                        // << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
-                        // << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
-                        // << "Axis: " << this->urdfInfo.joints[j].axisWorld << "\n"
-                        // << "Hinge range: (" << this->urdfInfo.joints[j].limits.lower << ", " << this->urdfInfo.joints[j].limits.upper << ")\n"
-                        // << std::endl;
                     }
                     if (this->urdfInfo.joints[j].type == PRISMATIC) {
                         auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
@@ -468,25 +307,11 @@ namespace dyno
                         joint.setAxis(this->urdfInfo.joints[j].axisWorld);
                         joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
                         mb.slider_joint_indices.push_back(this->getHostSliderJoints().size() - 1);
-                        // std::cout << "JointInfo " << j << ": \n"
-                        // << "Joint type: Slider\n"
-                        // << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
-                        // << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
-                        // << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
-                        // << "Axis: " << this->urdfInfo.joints[j].axisWorld << "\n"
-                        // << "Slider range: (" << this->urdfInfo.joints[j].limits.lower << ", " << this->urdfInfo.joints[j].limits.upper << ")\n"
-                        // << std::endl;
                     }
                     if (this->urdfInfo.joints[j].type == FIXED) {
                         auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
                         joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
                         mb.fixed_joint_indices.push_back(this->getHostFixedJoints().size() - 1);
-                        // std::cout << "JointInfo " << j << ": \n"
-                        // << "Joint type: Fixed\n"
-                        // << "Parent box id: " << this->urdfInfo.joints[j].parentLinkId << " \n"
-                        // << "Child box id: " << this->urdfInfo.joints[j].childLinkId << "\n"
-                        // << "Anchor point: " << this->urdfInfo.joints[j].originWorld.translation() << "\n"
-                        // << std::endl;
                     }
                 }
 
@@ -523,55 +348,15 @@ namespace dyno
                 }
             };
 
-            // for (int x = 0; x < num_copies_x; x++) {
-            //     for (int y = 0; y < num_copies_y; y++) {
-            //         for (int z = 0; z < num_copies_z; z++) {
-            //             Vec3f _targetPosition = targetPosition[robotarmIndex];
-            //             auto [mb, non_ctrl_mb] = addRigidArmExample3(_targetPosition);
-            //             ctrl_mb_chains.push_back(mb);
-            //             non_ctrl_mb_chains.push_back(non_ctrl_mb);
-            //             robotarmIndex++;
-            //         }
-            //     }
-            // }
-
             for (size_t i = 0; i < robotarmSize; i++) {
-                Vec3f _targetPosition = targetPosition[robotarmIndex];
-                auto [mb, non_ctrl_mb] = addRigidArmExample3(_targetPosition);
+                const Vec3f& _targetPosition = targetPosition[robotarmIndex];
+                auto [mb, non_ctrl_mb]
+                    = addRigidArmExample(_targetPosition);
                 ctrl_mb_chains.push_back(mb);
                 non_ctrl_mb_chains.push_back(non_ctrl_mb);
                 robotarmIndex++;
             }
             attachRender();
-
-            // for (int i = 0; i < ctrl_mb_chains.size(); i++)
-            // {
-            //     auto mb = ctrl_mb_chains[i];
-            //     printf("Multi-body chain %d:\n", i);
-            //     printf("  Body indices: ");
-            //     for (int j = 0; j < mb.body_indices.size(); j++)
-            //     {
-            //     printf("%d ", mb.body_indices[j]);
-            //     }
-            //     printf("\n");
-            //
-            //     printf("  Hinge joint indices: ");
-            //     for (int j = 0; j < mb.hinge_joint_indices.size(); j++)
-            //     {
-            //     printf("%d ", mb.hinge_joint_indices[j]);
-            //     }
-            //     printf("\n");
-            // }
-            // for (int i = 0; i < non_ctrl_mb_chains.size(); i++) {
-            //     auto mb = non_ctrl_mb_chains[i];
-            //     printf("Non-control multi-body chain %d:\n", i);
-            //     printf("  Body indices: ");
-            //     for (int j = 0; j < mb.body_indices.size(); j++)
-            //     {
-            //         printf("%d ", mb.body_indices[j]);
-            //     }
-            //     printf("\n");
-            // }
     }
 
     template<typename TDataType>
@@ -626,11 +411,6 @@ namespace dyno
 
         // Array<Vec3f, DeviceType::CPU> systemTorque;
         // systemTorque.assign(*this->stateExternalTorque()->getDataPtr());
-        Array<Vec3f, DeviceType::CPU> systemAngularVelocities;
-        systemAngularVelocities.assign(*this->stateAngularVelocity()->getDataPtr());
-
-        Array<TQuat, DeviceType::CPU> systemAngles;
-        systemAngles.assign(*this->stateQuaternion()->getDataPtr());
 
         int rigidbodys = this->stateExternalTorque()->size();
         std::vector<Vec3f> systemTorque(rigidbodys, Vec3f(0.0f, 0.0f, 0.0f));
@@ -646,23 +426,9 @@ namespace dyno
 
                 auto jointAxisLocal = joint.axisWorld;
                 auto hingeTorque = torque_param.torques[i][j] * jointAxisLocal;
-                // std::cout << "Hinge torque is : " << hingeTorque << std::endl;
-
-                auto angularVelocityParent = systemAngularVelocities[parentId_global];
-                auto angularVelocityChild = systemAngularVelocities[childId_global];
-                auto angularVelocityRel = angularVelocityChild - angularVelocityParent;
-                auto axisWorld = systemAngles[parentId_global].rotate(jointAxisLocal);
-                axisWorld.normalize();
-                // float hingeVelocity = angularVelocityRel.dot(axisWorld);
-                // std::cout << "hingeVelocity = " << hingeVelocity << std::endl;
-
-                // auto dampingTorque =  torque_param.dampings[i][j] * hingeVelocity * jointAxisLocal;
-                // std::cout << "Damping torque is : " << dampingTorque << std::endl;
 
                 systemTorque[parentId_global] -= hingeTorque;
                 systemTorque[childId_global] += hingeTorque;
-                // systemTorque[parentId_global] -= hingeTorque + dampingTorque;
-                // systemTorque[childId_global] += hingeTorque + dampingTorque;
             }
         }
         this->stateExternalTorque()->assign(systemTorque);

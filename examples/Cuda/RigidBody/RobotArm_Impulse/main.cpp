@@ -6,29 +6,7 @@
 using namespace dyno;
 
 int main() {
-    // getchar();
     Real scale = 1.0f;
-    // Real kp[7] = {
-    //     12 * scale,
-    //     20 * scale,
-    //     10 * scale,
-    //     30 * scale,
-    //     7 * scale, // joint 4
-    //     10 * scale,
-    //     3 * scale,
-    // };
-
-    // Real kv = 2 * scale;
-    // Real kd[7] = {
-    //     5 * scale,
-    //     30 * scale,
-    //     2 * scale,
-    //     40 * scale,
-    //     2 * scale,  //joint 4
-    //     2 * scale,
-    //     2 * scale,
-    // };
-
     Real kp[7] = {
         100 * scale,
         100 * scale,
@@ -132,23 +110,6 @@ int main() {
     int best_idx = 0;
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
-        // if (i == 100) {
-        //     RobotArmSimulator<DataType3f>::ResetParam param;
-        //     param.num_bodies = 1;
-        //     param.ids.push_back(0);
-        //     Vec3f newTarget{ 0.5f, 1.0f, 0.5f };
-        //     param.targetPosition.push_back(newTarget);
-        //     simulator.resetStates(param);
-        // }
-        //
-        // if (i == 200) {
-        //     RobotArmSimulator<DataType3f>::ResetParam param;
-        //     param.num_bodies = 1;
-        //     param.ids.push_back(1);
-        //     Vec3f newTarget{ 0.5f, 1.0f, 0.5f };
-        //     param.targetPosition.push_back(newTarget);
-        //     simulator.resetStates(param);
-        // }
 
         if (i == 500) {
             RobotArmSimulator<DataType3f>::ResetParam param;
@@ -171,8 +132,6 @@ int main() {
         }
         auto quat = simulator.getAnglesByLocalIndex(local_param);
         auto angularVelocity = simulator.getAngularVelocitiesByLocalIndex(local_param);
-        // auto mass = simulator.getMassByLocalIndex(local_param);
-        // std::cout << "Mass: \n" << mass[7] << std::endl;
 
         auto unwrapAngle = [](Real angle, Real prevAngle) -> Real
         {
@@ -240,12 +199,8 @@ int main() {
 
             // PD 控制
             Real e  = targetAngle[j] - hingeAngle;
-            Real de = hingeAngle - hingeAngle_old[j];
-            // torque[j] = kp * e - kv * de / dt ;
             torque[j] = kp[j] * e - kd[j] * hingeVelocity ;
             torque[j] = std::max(-effortLimit[j]/1, std::min(effortLimit[j]/1, torque[j]));
-
-            // std::cout << "torque of joint " << j << " is: " << torque[j] << std::endl;
 
             // 更新上一帧角度
             hingeAngle_old[j] = hingeAngle;
@@ -254,16 +209,7 @@ int main() {
                 error[j] = e;
             }
 
-            // if (j == 1 || j == 3) {
-            //     std::cout << "err of joint " << j << " is: " << targetAngle[j] - hingeAngle << std::endl;
-            // }
-
             if (i % checkFrequancy == 0 && j == 6) {
-                // std::cout << "The max error of joint " << j
-                // << " from " << (i / 100) * 100 - 100 << " to " << (i / 100) * 100 << " steps is "
-                // << error[j] << std::endl;
-
-
                 float best_val = error[0];
                 best_idx = 0;
                 for (int idx = 1; idx < error.size(); ++idx) {
@@ -302,16 +248,6 @@ int main() {
             (float)torque[5],
             (float)torque[6]
         };
-
-        // moterVelocities1 = {
-        //     (float)0.0,
-        //     (float)87,
-        //     (float)0.0,
-        //     (float)0.0,
-        //     (float)0.0,
-        //     (float)0.0,
-        //     (float)0.0
-        // };
 
         RobotArmSimulator<DataType3f>::HingeTorqueParam param;
         param.num_bodies = 2;

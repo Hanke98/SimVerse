@@ -100,6 +100,16 @@ namespace dyno
     }
 
     template<typename TDataType>
+    std::vector<Transform3f> RobotArmSimulator<TDataType>::getTransform(CtrlParam& param) {
+        std::vector<Transform3f> transforms;
+        auto instances = batchSolver->varVehiclesTransform()->getValue();
+        for (int i = 0; i < param.num_bodies; i++) {
+            transforms.push_back(instances[param.ids[i]]);
+        }
+        return transforms;
+    }
+
+    template<typename TDataType>
     void RobotArmSimulator<TDataType>::createScene() {
         scn = std::make_shared<SceneGraph>();
     }

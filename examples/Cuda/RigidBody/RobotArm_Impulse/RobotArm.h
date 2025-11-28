@@ -62,6 +62,7 @@ namespace dyno
         std::vector<Vec3f> getAngularVelocitiesByLocalIndex(LocalIndexParam& param);
         std::vector<Real> getMassByLocalIndex(LocalIndexParam& param);
         UrdfInformation getKinematicsChainInfo();
+        std::vector<Transform3f> getTransform(CtrlParam& tran_param);
 
         // -------------setters---------------
         void setAngularDamping(Real damping);

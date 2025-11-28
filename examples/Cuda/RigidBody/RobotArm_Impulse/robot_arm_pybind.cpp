@@ -372,6 +372,11 @@ void bindRobotArmSimulator(py::module_ &m) {
              &RobotArm::getKinematicsChainInfo,
              "获取 URDF 运动学链信息（UrdfInformation）")
 
+        .def("getTransform",
+             &RobotArm::getTransform,
+             py::arg("param"),
+             "获取 URDF 运动学链信息（UrdfInformation）")
+
 
         // ---------- Setters / 控制接口 ----------
         .def("setAngularDamping",

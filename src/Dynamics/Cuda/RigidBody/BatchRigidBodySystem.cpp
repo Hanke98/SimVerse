@@ -19,7 +19,7 @@ namespace dyno
 
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::addExampleRigidBodies(
-      std::string urdf_fn, Vec3f base, Vec3f offset, float density, int num_copies_x, int num_copies_y, int num_copies_z)
+      std::string urdf_fn, Vec3f base, Vec3f offset, Real density, int num_copies_x, int num_copies_y, int num_copies_z)
     {
         // TODO: load urdf and create rigid bodies accordingly
 
@@ -29,7 +29,7 @@ namespace dyno
 
                 auto* rigid = this;
 
-                float scale = 0.1;
+                Real scale = 0.1;
                 BoxInfo box3;
                 box3.halfLength = Vec3f(1, 3, 1) * scale;
                 RigidBodyInfo boxInfo3;
@@ -117,7 +117,7 @@ namespace dyno
 
                 auto* rigid = this;
 
-                float scale = 0.1;
+                Real scale = 0.1;
                 BoxInfo box1;
                 box1.halfLength = Vec3f(4, 1, 1) * scale;
                 RigidBodyInfo boxInfo1;
@@ -222,7 +222,7 @@ namespace dyno
 
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::addRobotArmRigidBodies(
-        std::string urdf_fn, float density, std::vector<Vec3f> targetPosition, bool renderBoundingBox) {
+        std::string urdf_fn, Real density, std::vector<Vec3f> targetPosition, bool renderBoundingBox) {
             int robotarmIndex = 0;
             auto instances = this->varVehiclesTransform()->getValue();
             auto robotarmSize = instances.size();
@@ -505,9 +505,9 @@ namespace dyno
     }
 
     template<typename TDataType>
-    Array<float, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethMass()
+    Array<typename BatchRigidBodySystem<TDataType>::Real, DeviceType::CPU> BatchRigidBodySystem<TDataType>::gethMass()
     {
-        Array<float, DeviceType::CPU> hMass;
+        Array<Real, DeviceType::CPU> hMass;
         hMass.assign(*this->stateMass()->getDataPtr());
         return hMass;
     }
@@ -581,10 +581,10 @@ namespace dyno
     }
 
     template<typename TDataType>
-    std::vector<float> BatchRigidBodySystem<TDataType>::getMassByLocalIndex(
-        BatchRigidBodySystemLocalIndexParam& param) {
-        Array<float, DeviceType::CPU> hMass = gethMass();
-        std::vector<float> returnMass;
+    std::vector<typename BatchRigidBodySystem<TDataType>::Real> BatchRigidBodySystem<TDataType>::getMassByLocalIndex(
+        BatchRigidBodySystemLocalIndexParam &param) {
+        Array<Real, DeviceType::CPU> hMass = gethMass();
+        std::vector<Real> returnMass;
         for (int i : param.ids) {
             auto mb = ctrl_mb_chains[i];
             for (int j : param.localRigidBodyid) {

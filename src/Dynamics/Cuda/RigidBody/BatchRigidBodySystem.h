@@ -53,12 +53,12 @@ public:
 
     struct BatchRigidBodySystemHingeTorqueControlParam: public BatchRigidBodySystemControlParamBase
     {
-      std::vector<std::vector<float>> torques;
+      std::vector<std::vector<Real>> torques;
     };
 
     struct BatchRigidBodySystemMassParam: public BatchRigidBodySystemControlParamBase
     {
-      std::vector<std::vector<float>> mass;
+      std::vector<std::vector<Real>> mass;
     };
 
     struct BatchRigidBodySystemInertiaParam: public BatchRigidBodySystemControlParamBase
@@ -90,9 +90,9 @@ public:
 
     void setInertia(BatchRigidBodySystemInertiaParam& inertia_param);
 
-    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, float density,
+    void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, Real density,
                                int num_copies_x, int num_copies_y, int num_copies_z);
-    void addRobotArmRigidBodies(std::string urdf_fn, float density, std::vector<Vec3f> targetPosition, bool renderBoundingBox);
+    void addRobotArmRigidBodies(std::string urdf_fn, Real density, std::vector<Vec3f> targetPosition, bool renderBoundingBox);
     // ------------------------------------
 
     // ------------------------------------
@@ -111,14 +111,14 @@ public:
     Array<Vec3f, DeviceType::CPU> gethAngularVelocities();
     Array<Mat3f, DeviceType::CPU> gethRotationMatrix();
 
-    Array<float, DeviceType::CPU> gethMass();
+    Array<Real, DeviceType::CPU> gethMass();
     Array<Mat3f, DeviceType::CPU> gethInertia();
 
     std::vector<TQuat> getAnglesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Vec3f> getAngularVelocitiesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Vec3f> getVelocitiesByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Vec3f> getCentersByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
-    std::vector<float> getMassByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
+    std::vector<Real> getMassByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     // ------------------------------------
 
 protected:

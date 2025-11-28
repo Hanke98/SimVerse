@@ -54,7 +54,7 @@ namespace dyno
 
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::addRobotArmRigidBodies(std::string urdf_fn,
-                                                              float density,
+                                                              Real density,
                                                               const std::vector<Vec3f> &target_position,
                                                               bool render_boundingbox) {
         batchSolver->addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox);
@@ -110,7 +110,7 @@ namespace dyno
     }
 
     template<typename TDataType>
-    void RobotArmSimulator<TDataType>::initialize(int width, int height, float scale) {
+    void RobotArmSimulator<TDataType>::initialize(int width, int height, Real scale) {
         app.initialize(width, height);
         app.renderWindow()->getCamera()->setUnitScale(scale);
         std::cout << "Initializing..." << std::endl;
@@ -209,10 +209,11 @@ namespace dyno
     }
 
     template<typename TDataType>
-    std::vector<std::vector<float>> RobotArmSimulator<TDataType>::getAnglesVectorByLocalIndex(
-        LocalIndexParam& param) {
+    std::vector<std::vector<typename RobotArmSimulator<TDataType>::Real> > RobotArmSimulator<
+        TDataType>::getAnglesVectorByLocalIndex(
+        LocalIndexParam &param) {
         auto angles = batchSolver->getAnglesByLocalIndex(param);
-        std::vector<std::vector<float>> angles_quat_vector;
+        std::vector<std::vector<Real>> angles_quat_vector;
         for (int i = 0; i < angles.size(); ++i) {
             angles_quat_vector.push_back(std::vector{angles[i].x, angles[i].y, angles[i].z, angles[i].w});
         }
@@ -232,8 +233,8 @@ namespace dyno
     }
 
     template<typename TDataType>
-    std::vector<float> RobotArmSimulator<TDataType>::getMassByLocalIndex(
-        LocalIndexParam& param) {
+    std::vector<typename RobotArmSimulator<TDataType>::Real> RobotArmSimulator<TDataType>::getMassByLocalIndex(
+        LocalIndexParam &param) {
         return batchSolver->getMassByLocalIndex(param);
     }
 

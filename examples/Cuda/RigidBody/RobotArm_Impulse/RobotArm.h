@@ -38,7 +38,7 @@ namespace dyno
         void initBatchSolver();
 
         void addRobotArmRigidBodies(std::string urdf_fn,
-                                    float density = 1000,
+                                    Real density = 1000,
                                     const std::vector<Vec3f> &target_position = {},
                                     bool render_boundingBox = true);
 
@@ -49,7 +49,7 @@ namespace dyno
 
         // 仿真控制接口
         void setupSceneGraph();
-        void initialize(int width = 1280, int height = 768, float scale = 1.0f);
+        void initialize(int width = 1280, int height = 768, Real scale = 1.0f);
         void stepSimulation(bool enableRendering = true);
         void terminateSimulation();
 
@@ -58,9 +58,9 @@ namespace dyno
         std::vector<Vec3f> getCentersByLocalIndex(LocalIndexParam& param);
         std::vector<Vec3f> getVelocitiesByLocalIndex(LocalIndexParam& param);
         std::vector<TQuat> getAnglesByLocalIndex(LocalIndexParam& param);
-        std::vector<std::vector<float>> getAnglesVectorByLocalIndex(LocalIndexParam& param);
+        std::vector<std::vector<Real>> getAnglesVectorByLocalIndex(LocalIndexParam& param);
         std::vector<Vec3f> getAngularVelocitiesByLocalIndex(LocalIndexParam& param);
-        std::vector<float> getMassByLocalIndex(LocalIndexParam& param);
+        std::vector<Real> getMassByLocalIndex(LocalIndexParam& param);
         UrdfInformation getKinematicsChainInfo();
 
         // -------------setters---------------

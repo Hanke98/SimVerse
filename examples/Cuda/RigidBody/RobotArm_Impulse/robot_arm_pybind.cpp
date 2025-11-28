@@ -305,6 +305,7 @@ void bindRobotArmSimulator(py::module_ &m) {
              py::arg("urdf_fn"),
              py::arg("density")         = 1000.0f,
              py::arg("target_position") = std::vector<Vec3>{},
+             py::arg("render_boundingbox") = true,
              "从 URDF 文件添加机械臂刚体系统")
 
         .def("resetStates",

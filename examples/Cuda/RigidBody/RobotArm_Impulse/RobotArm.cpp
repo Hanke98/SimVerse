@@ -55,8 +55,9 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::addRobotArmRigidBodies(std::string urdf_fn,
                                                               float density,
-                                                              const std::vector<Vec3f> &target_position) {
-        batchSolver->addRobotArmRigidBodies(urdf_fn, density, target_position);
+                                                              const std::vector<Vec3f> &target_position,
+                                                              bool render_boundingbox) {
+        batchSolver->addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox);
     }
 
     template<typename TDataType>

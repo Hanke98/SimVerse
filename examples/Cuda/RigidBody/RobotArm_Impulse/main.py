@@ -88,6 +88,8 @@ def main():
     urdf_fn = os.path.normpath(urdf_fn)
     print("使用 URDF:", urdf_fn)
 
+    render_boundingbox = False;
+
     # ==========================
     # 1. 创建仿真器 & 场景
     # ==========================
@@ -102,7 +104,7 @@ def main():
     sim.enableFriction(enable_friction)
     sim.setTransform(base, offset, num_copies_x, num_copies_y, num_copies_z)
     sim.setAngularDamping(50.0)
-    sim.addRobotArmRigidBodies(urdf_fn, density, target_position)
+    sim.addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox)
 
     sim.setupSceneGraph()
     print("初始化窗口")

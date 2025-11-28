@@ -69,6 +69,7 @@ int main() {
     int num_copies_y = 1;
     int num_copies_z = 2;
     std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";
+    bool render_boundingbox = false;
 
     simulator.initBatchSolver();
     simulator.setDt(dt);
@@ -76,7 +77,7 @@ int main() {
     simulator.enableFriction(enableFriction);
     simulator.setTransform(base, offset, num_copies_x, num_copies_y, num_copies_z);
     simulator.setAngularDamping(50.0);
-    simulator.addRobotArmRigidBodies(urdf_fn, density, target_position);
+    simulator.addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox);
 
     //
     std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};

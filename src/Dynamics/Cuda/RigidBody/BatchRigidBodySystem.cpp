@@ -365,7 +365,7 @@ namespace dyno
 
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::addRobotArmRigidBodies(
-        std::string urdf_fn, float density, std::vector<Vec3f> targetPosition) {
+        std::string urdf_fn, float density, std::vector<Vec3f> targetPosition, bool renderBoundingBox) {
             int robotarmIndex = 0;
             auto instances = this->varVehiclesTransform()->getValue();
             auto robotarmSize = instances.size();
@@ -516,11 +516,13 @@ namespace dyno
                 rigid->stateTopology()->connect(mapper->inDiscreteElements());
                 rigid->graphicsPipeline()->pushModule(mapper);
 
-                // auto sRender = std::make_shared<GLSurfaceVisualModule>();
-                // sRender->setColor(Color(1, 1, 0));
-                // sRender->setAlpha(0.5f);
-                // mapper->outTriangleSet()->connect(sRender->inTriangleSet());
-                // rigid->graphicsPipeline()->pushModule(sRender);
+                if (renderBoundingBox) {
+                    auto sRender = std::make_shared<GLSurfaceVisualModule>();
+                    sRender->setColor(Color(1, 1, 0));
+                    sRender->setAlpha(0.5f);
+                    mapper->outTriangleSet()->connect(sRender->inTriangleSet());
+                    rigid->graphicsPipeline()->pushModule(sRender);
+                }
             };
 
             // for (int x = 0; x < num_copies_x; x++) {

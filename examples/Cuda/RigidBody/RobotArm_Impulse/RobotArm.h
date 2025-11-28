@@ -39,7 +39,8 @@ namespace dyno
 
         void addRobotArmRigidBodies(std::string urdf_fn,
                                     float density = 1000,
-                                    const std::vector<Vec3f> &target_position = {});
+                                    const std::vector<Vec3f> &target_position = {},
+                                    bool render_boundingBox = true);
 
         void resetStates(ResetParam& param);
 

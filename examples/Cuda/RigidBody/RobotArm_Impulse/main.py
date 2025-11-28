@@ -1,6 +1,6 @@
 import os
 import math
-import RobotArm as ra  # 你的 pybind 模块名
+import RobotArm_pybind as ra  # 你的 pybind 模块名
 
 def vec_sub(a, b):
     return ra.Vec3f(a.x - b.x, a.y - b.y, a.z - b.z)

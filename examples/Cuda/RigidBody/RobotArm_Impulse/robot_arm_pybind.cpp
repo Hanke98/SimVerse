@@ -424,7 +424,7 @@ void bindRobotArmSimulator(py::module_ &m) {
 // 模块入口
 // =====================================================
 
-PYBIND11_MODULE(RobotArm, m) {
+PYBIND11_MODULE(RobotArm_pybind, m) {
     m.doc() = "RobotArmSimulator (DataType3f) pybind11 bindings";
 
     bindVec3(m);

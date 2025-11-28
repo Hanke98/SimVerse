@@ -148,6 +148,9 @@ if("${PERIDYNO_GPU_BACKEND}" STREQUAL "CUDA")
 	add_subdirectory(external/glad-4.6)
 	add_subdirectory(external/imgui)
 
+	#	newly add pybind11
+	add_subdirectory(external/pybind11)
+
 	if(PERIDYNO_PLUGIN_ALL)
 		option(PERIDYNO_PLUGIN_ALEMBIC "Enable binding the abc exporter library" OFF)
 		option(PERIDYNO_PLUGIN_GMSH "Enable binding the Gmsh library" OFF)

@@ -117,12 +117,6 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::setupSceneGraph() {
         app.setSceneGraph(scn);
-    }
-
-    template<typename TDataType>
-    void RobotArmSimulator<TDataType>::initialize(int width, int height, Real scale) {
-        app.initialize(width, height);
-        app.renderWindow()->getCamera()->setUnitScale(scale);
         std::cout << "Initializing..." << std::endl;
         isInitialized = true;
         activeScene = SceneGraphFactory::instance()->active();
@@ -132,16 +126,31 @@ namespace dyno
     }
 
     template<typename TDataType>
+    void RobotArmSimulator<TDataType>::initialize(int width, int height, Real scale) {
+        app.initialize(width, height);
+        app.renderWindow()->getCamera()->setUnitScale(scale);
+        // std::cout << "Initializing..." << std::endl;
+        // isInitialized = true;
+        // activeScene = SceneGraphFactory::instance()->active();
+        // std::cout << "resetting scene..." << std::endl;
+        // activeScene->reset();
+        // std::cout << "Initialization Done!" << std::endl;
+    }
+
+    template<typename TDataType>
     void RobotArmSimulator<TDataType>::stepSimulation(bool enableRendering) {
         if (!isInitialized) return;
 
         if (activeScene) {
-
             activeScene->takeOneFrame();
-            activeScene->updateGraphicsContext();
         }
         
         if (enableRendering) {
+
+            if (activeScene) {
+                activeScene->updateGraphicsContext();
+            }
+
             // 处理事件
             glfwPollEvents();
 

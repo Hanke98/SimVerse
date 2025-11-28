@@ -28,7 +28,7 @@ int main() {
 
     // 创建机械臂仿真器实例
     RobotArmSimulator<DataType3f> simulator;
-    
+
     // 1. 创建场景
     simulator.createScene();
     std::cout << "场景创建完成" << std::endl;
@@ -37,6 +37,7 @@ int main() {
     float density = 2500.0f;
     bool enableGravity = false;
     bool enableFriction = false;
+    bool enableRendering = false;
     Vec3f base{ -0.0f, -0.0f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
     std::vector<Vec3f> target_position;
@@ -64,7 +65,9 @@ int main() {
     //
     simulator.setupSceneGraph();
     std::cout << "初始化窗口" << std::endl;
-    simulator.initialize(1280, 768, 1.5);
+    if (enableRendering) {
+        simulator.initialize(1280, 768, 1.5);
+    }
     std::cout << "仿真环境初始化完成" << std::endl;
     UrdfInformation chainInfo = simulator.getKinematicsChainInfo();
     
@@ -256,9 +259,7 @@ int main() {
         param.torques.push_back(moterVelocities1);
         simulator.setHingeTorques(param);
 
-        simulator.stepSimulation(true);
-        // 处理窗口事件
-        glfwPollEvents();
+        simulator.stepSimulation(enableRendering);
 
         i++;
     }

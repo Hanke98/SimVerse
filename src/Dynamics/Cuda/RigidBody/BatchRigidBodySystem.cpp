@@ -206,7 +206,6 @@ namespace dyno
                     initialRotations.push_back(rigidbody.angle.toMatrix3x3());
 
                     if (this->urdfInfo.links[l].isRoot) {
-                        // TODO: change the Static motion type to fixed joint!
                         rigidbody.motionType = BodyType::Static;
                     } else {
                         rigidbody.motionType = BodyType::Dynamic;
@@ -415,7 +414,6 @@ namespace dyno
                     initialRotations.push_back(rigidbody.angle.toMatrix3x3());
 
                     if (this->urdfInfo.links[l].isRoot) {
-                        // TODO: change the Static motion type to fixed joint!
                         rigidbody.motionType = BodyType::Static;
                     } else {
                         rigidbody.motionType = BodyType::Dynamic;

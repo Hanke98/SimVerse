@@ -335,12 +335,23 @@ namespace dyno
             };
 
             auto attachRender = [&]() {
-                auto mapper = std::make_shared<DiscreteSpheresToTriangleSet<DataType3f>>();
-                auto rigid = this;
-                rigid->stateTopology()->connect(mapper->inDiscreteElements());
-                rigid->graphicsPipeline()->pushModule(mapper);
-
                 if (renderBoundingBox) {
+                    auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
+                    auto rigid = this;
+                    rigid->stateTopology()->connect(mapper->inDiscreteElements());
+                    rigid->graphicsPipeline()->pushModule(mapper);
+
+                    auto sRender = std::make_shared<GLSurfaceVisualModule>();
+                    sRender->setColor(Color(1, 1, 0));
+                    sRender->setAlpha(0.5f);
+                    mapper->outTriangleSet()->connect(sRender->inTriangleSet());
+                    rigid->graphicsPipeline()->pushModule(sRender);
+                } else {
+                    auto mapper = std::make_shared<DiscreteSpheresToTriangleSet<DataType3f>>();
+                    auto rigid = this;
+                    rigid->stateTopology()->connect(mapper->inDiscreteElements());
+                    rigid->graphicsPipeline()->pushModule(mapper);
+
                     auto sRender = std::make_shared<GLSurfaceVisualModule>();
                     sRender->setColor(Color(1, 1, 0));
                     sRender->setAlpha(0.5f);

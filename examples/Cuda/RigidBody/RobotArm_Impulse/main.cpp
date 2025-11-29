@@ -37,7 +37,7 @@ int main() {
     float density = 2500.0f;
     bool enableGravity = false;
     bool enableFriction = false;
-    bool enableRendering = true;
+    bool enableRendering = false;
     Vec3f base{ -0.0f, -0.0f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
     std::vector<Vec3f> target_position;
@@ -48,7 +48,7 @@ int main() {
     int num_copies_y = 1;
     int num_copies_z = 2;
     std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";
-    bool render_boundingbox = true;
+    bool render_boundingbox = false;
 
     simulator.initBatchSolver();
     simulator.setDt(dt);

@@ -260,7 +260,6 @@ namespace dyno
 
 		Real dt = this->inTimeStep()->getData();
 
-
 		if (!this->inContacts()->isEmpty() || topo->totalJointSize() > 0)
 		{
 			this->inContacts()->clear();
@@ -279,6 +278,8 @@ namespace dyno
 
 			for (int i = 0; i < this->varSubStepping()->getValue(); i++)
 			{
+				mImpulseExt.reset();
+
 				if (this->varGravityEnabled()->getValue())
 				{
 					setUpGravity(
@@ -377,6 +378,8 @@ namespace dyno
 
 		else
 		{
+			mImpulseExt.reset();
+
 			if (this->varGravityEnabled()->getValue())
 			{
 				setUpGravity(

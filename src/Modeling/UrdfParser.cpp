@@ -238,9 +238,6 @@ namespace dyno
 
             joint.parentLinkId = pIt->second;
             joint.childLinkId  = cIt->second;
-
-            // std::cout << "name of joint parent: " << joint.parentLink.c_str() <<" index of parent: " << pIt->second << std::endl;
-            // std::cout << "name of joint child: " << joint.childLink.c_str() <<" index of child: " << cIt->second << std::endl;
         }
 
         // 找 root link：出现在 links 中，但不在 childLinks 中
@@ -343,10 +340,6 @@ namespace dyno
                                         const std::unordered_map<std::string, std::vector<int>>& linkChildJoints,
                                         UrdfInformation& urdfInfo)
     {
-        // 初始化 root link 世界变换为单位变换
-        // Transform3f T_world_root;
-
-
         SquareMatrix<Real, 3> R_zUpToYUp {0, 1, 0, 0, 0, 1, 1, 0, 0};
 
         Vec3f t(0, 0, 0);
@@ -382,6 +375,7 @@ namespace dyno
 
             // joint.originWorld = T_world_parent * originLocal
             joint.originWorld = composeTransform(T_world_link, joint.originLocal);
+            joint.axisWorld = joint.originWorld.rotation() * joint.axis;
 
             // 若你在 link 里还有额外的 <origin> (例如视觉/碰撞)，可以再乘一次
             const std::string& childName = joint.childLink;

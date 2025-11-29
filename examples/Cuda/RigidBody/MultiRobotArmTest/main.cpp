@@ -36,8 +36,8 @@ std::shared_ptr<SceneGraph> creatCar()
 {
 	std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
 
-	auto multiRobotArm = scn->addNode(std::make_shared<UAV<DataType3f>>());
-	// multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/CartPoleUrdf/cartpole.urdf");
+	auto multiRobotArm = scn->addNode(std::make_shared<ArticulatedBody<DataType3f>>());
+	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/franka_description/robots/franka_panda.urdf");
 
 	std::vector<Transform3f> vehiclesTransform;
 	Transform3f Transform0(Vec3f(0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
@@ -49,35 +49,35 @@ std::shared_ptr<SceneGraph> creatCar()
 	auto instances = multiRobotArm->varVehiclesTransform()->getValue();
 	auto texMesh = multiRobotArm->stateTextureMesh()->constDataPtr();
 
-	// std::map<int, std::shared_ptr<PdActor>> actors;
-	//
-	// std::cout << texMesh->shapes().size() << std::endl;
-	// std::cout << instances.size() << std::endl;
-	// for (int i = 0; i < instances.size(); i++) {
-	// 	for (int it = 0; it < texMesh->shapes().size(); it++) {
-	// 		RigidBodyInfo rigidbody;
-	//
-	// 		auto up = texMesh->shapes()[it]->boundingBox.v1;
-	// 		auto down = texMesh->shapes()[it]->boundingBox.v0;
-	//
-	// 		rigidbody.position = Quat1f(instances[i].rotation()).rotate(texMesh->shapes()[it]->boundingTransform.translation())
-	// 							+ instances[i].translation();
-	//
-	// 		rigidbody.angle = Quat1f(instances[i].rotation());
-	// 		rigidbody.motionType = BodyType::Dynamic;
-	//
-	// 		auto actor = multiRobotArm->createRigidBody(rigidbody);
-	// 		actors[it] = actor;
-	//
-	// 		BoxInfo box;
-	//
-	// 		box.halfLength = (up - down) / 2;
-	//
-	// 		multiRobotArm->bindBox(actor, box);
-	//
-	// 		multiRobotArm->bindShape(actor, Pair<uint, uint>(it, i));
-	// 	}
-	// }
+	std::map<int, std::shared_ptr<PdActor>> actors;
+
+	std::cout << texMesh->shapes().size() << std::endl;
+	std::cout << instances.size() << std::endl;
+	for (int i = 0; i < instances.size(); i++) {
+		for (int it = 0; it < texMesh->shapes().size(); it++) {
+			RigidBodyInfo rigidbody;
+
+			auto up = texMesh->shapes()[it]->boundingBox.v1;
+			auto down = texMesh->shapes()[it]->boundingBox.v0;
+
+			rigidbody.position = Quat1f(instances[i].rotation()).rotate(texMesh->shapes()[it]->boundingTransform.translation())
+								+ instances[i].translation();
+
+			rigidbody.angle = Quat1f(instances[i].rotation());
+			rigidbody.motionType = BodyType::Dynamic;
+
+			auto actor = multiRobotArm->createRigidBody(rigidbody);
+			actors[it] = actor;
+
+			BoxInfo box;
+
+			box.halfLength = (up - down) / 2;
+
+			multiRobotArm->bindBox(actor, box);
+
+			multiRobotArm->bindShape(actor, Pair<uint, uint>(it, i));
+		}
+	}
 
 
 	auto multibody = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());

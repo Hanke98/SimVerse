@@ -66,6 +66,7 @@ namespace dyno
 			// Damping
 			/*velocity[tId] *= 1.0f / (1.0f + dt * linearDamping);
 			angular_velocity[tId] *= 1.0f / (1.0f + dt * angularDamping);*/
+			angular_velocity[tId] *= (1.0f - dt * angularDamping);
 		}
 	}
 
@@ -4557,12 +4558,42 @@ namespace dyno
 	}
 
 	/**
-	 * Set up Gravity
-	 * @param impulse_ext
-	 * @param g
-	 * @param dt
-	 * This function set up gravity
-	 */
+	* Initial external impulse
+	* @param impulse_ext
+	* @param g
+	* @param dt
+	* This function set up gravity
+	*/
+	template<typename Coord>
+	__global__ void SF_initExtImpulse(
+		DArray<Coord> impulse_ext
+	)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= impulse_ext.size() / 2)
+	  		return;
+
+		impulse_ext[2 * tId] = Coord(0);
+		impulse_ext[2 * tId + 1] = Coord(0);
+	}
+
+	void initExtImpulse(
+		DArray<Vec3f> impulse_ext
+	)
+	{
+	  	cuExecute(impulse_ext.size() / 2,
+			  SF_initExtImpulse,
+			  impulse_ext
+		);
+	}
+
+	/**
+	* Set up Gravity
+	* @param impulse_ext
+	* @param g
+	* @param dt
+	* This function set up gravity
+	*/
 	template<typename Coord>
 	__global__ void SF_setUpGravity(DArray<Coord> impulse_ext, Real g, Real dt)
 	{
@@ -4570,8 +4601,8 @@ namespace dyno
 		if (tId >= impulse_ext.size() / 2)
 			return;
 
-		impulse_ext[2 * tId] = Coord(0, -g, 0) * dt;
-		impulse_ext[2 * tId + 1] = Coord(0);
+		impulse_ext[2 * tId] += Coord(0, -g, 0) * dt;
+		impulse_ext[2 * tId + 1] += Coord(0);
 	}
 
 	void setUpGravity(DArray<Vec3f> impulse_ext, float g, float dt)
@@ -4598,24 +4629,7 @@ namespace dyno
 		Vec3f torque_world = rotMat[tId] * externalTorque[tId]; // tau_world = R * tau_local
 
 		impulse_ext[2 * tId] += force_world / mass[tId] * dt;
-		impulse_ext[2 * tId + 1] += inertia[tId].inverse() * torque_world * dt;
-		// printf("torque impulse [%d] = %f %f %f \n", tId, impulse_ext[2 * tId + 1].x, impulse_ext[2 * tId + 1].y, impulse_ext[2 * tId +
-		// 1].z); printf("torque impulse [%d] = %f %f %f \n", tId, impulse_ext[2 * tId + 1].x, impulse_ext[2 * tId + 1].y, impulse_ext[2 *
-		// tId + 1].z);
-
-		// impulse_ext[2 * tId] += externalForce[tId] / mass[tId] * dt;
-		// impulse_ext[2 * tId + 1] += inertia[tId].inverse() * externalTorque[tId] * dt;
-		//  	impulse_ext[2 * tId + 1] += inertia[tId].inverse() * torque_world *
-		//  	Vec3f LinearVelocityStar;
-		//
-		//  	Vec3f AngularVelocityStar;
-		// AngularVelocityStar = AngularVelocity[tId] + inertia[tId].inverse() * (
-		// 						externalTorque[tId] - AngularVelocity[tId].cross(inertia[tId] * AngularVelocity[tId])) * dt;
-		// Vec3f angularVelocityMid = (AngularVelocity[tId] + AngularVelocityStar) / 2;
-		//  	impulse_ext[2 * tId + 1] += (inertia[tId].inverse() * (externalTorque[tId] - angularVelocityMid.cross(
-		//                                                           inertia[tId] * angularVelocityMid))) * dt;
-		// impulse_ext[2 * tId + 1] += inertia[tId].inverse()*(externalTorque[tId] -
-		// AngularVelocity[tId].cross(inertia[tId]*AngularVelocity[tId]))* dt;
+	  	impulse_ext[2 * tId + 1] += inertia[tId].inverse() * torque_world * dt;
 	}
 
 	void setUpExternalForce(

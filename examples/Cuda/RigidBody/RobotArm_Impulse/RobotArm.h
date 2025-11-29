@@ -1,4 +1,3 @@
-// CartPoleSimulator.h
 #pragma once
 
 #include "RigidBody/BatchRigidBodySystem.h"
@@ -22,92 +21,63 @@ namespace dyno
         DECLARE_TCLASS(RobotArmSimulator, TDataType)
     public:
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemControlParamBase CtrlParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemHingeTorqueControlParam HingeTorqueParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemLocalIndexParam LocalIndexParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemMassParam MassParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemInertiaParam InertiaParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemResetParam ResetParam;
+
 
         typedef typename TDataType::Real Real;
         typedef typename TDataType::Coord Coord;
         typedef typename dyno::Quat<Real> TQuat;
 
-        DEF_VAR_OUT(bool, Reset, "Reset");
-
         RobotArmSimulator();
         ~RobotArmSimulator();
 
         void initBatchSolver();
-        void resetStates(CtrlParam& param);
-        void resetStates() override;
+
+        void addRobotArmRigidBodies(std::string urdf_fn,
+                                    Real density = 1000,
+                                    const std::vector<Vec3f> &target_position = {},
+                                    bool render_boundingBox = true);
+
+        void resetStates(ResetParam& param);
+
         // 场景创建相关接口
         void createScene();
-        int addRigidSystem(const Vec3f& offset, Vec3f& targetPosition, float denstiy); // 返回新创建的rigidID
-        int addMultiBoydSystem();
-        void reset(int rigidIDs, Vec3f& targetPosition); // -1表示重置所有
 
         // 仿真控制接口
         void setupSceneGraph();
-        void initialize(int width = 1280, int height = 768, float scale = 1.0f);
-        // void stepSimulation(const std::vector<float>& forces, bool enableRendering = true);
-        void stepSimulation(std::vector<std::vector<float>>& moterVelocities, bool enableRendering = true);
+        void initialize(int width = 1280, int height = 768, Real scale = 1.0f);
+        void stepSimulation(bool enableRendering = true);
         void terminateSimulation();
 
-        void setMoters(std::vector<std::vector<float>>& moterImpulses);
-
-        void applyImpulse(std::vector<std::vector<float>>& moterImpulses);
-
         std::shared_ptr<SceneGraph> activeScene;
-        int getRigidSystemCount() const
-        {
-            return rigidSystems.size();
-        }
+        // -------------getters---------------
+        std::vector<Vec3f> getCentersByLocalIndex(LocalIndexParam& param);
+        std::vector<Vec3f> getVelocitiesByLocalIndex(LocalIndexParam& param);
+        std::vector<TQuat> getAnglesByLocalIndex(LocalIndexParam& param);
+        std::vector<std::vector<Real>> getAnglesVectorByLocalIndex(LocalIndexParam& param);
+        std::vector<Vec3f> getAngularVelocitiesByLocalIndex(LocalIndexParam& param);
+        std::vector<Real> getMassByLocalIndex(LocalIndexParam& param);
+        UrdfInformation getKinematicsChainInfo();
+        std::vector<Transform3f> getTransform(CtrlParam& tran_param);
 
-        // void resetState(int rigidID);
-        void resetStatesBak();
-
-        Mat3f parallelAxisTheoremWorld(const Mat3f& I_world_about_ref, Real mass, const Vec3f& com_world, const Vec3f& pointO_world);
-        float computeHingeEffectiveInertiaWorld(int rigidID, const HingeJoint<Real>& joint, const Vec3f& jointPositionWorld);
-        void computeJointInitia(int rigidID);
-
-        Vec3f fingerPosition(int rigidID);
-        Vec3f rigidPosition(int systemID, int rigidID);
-        TQuat rigidRotation(int systemID, int rigidID);
-        Vec3f rigidVelocity(int systemID, int rigidID);
-        Vec3f rigidAngularVelocity(int systemID, int rigidID);
-
-    public:
-        DEF_VAR(Coord, TargetCenter, 0, "Target center");
-        // DEF_VAR(Coord, FingerCenter, 0, "Finger center");
-        DEF_VAR(Real, Density, 1000.0f, "Density of the rigid body");
+        // -------------setters---------------
+        void setAngularDamping(Real damping);
+        void setDt(Real dt);
+        void enableGravity(bool flag);
+        void enableFriction(bool flag);
+        void setHingeTorques(HingeTorqueParam& hingetorque_param);
+        void setMass(MassParam& mass_param);
+        void setInertia(InertiaParam& inertia_param);
+        void setTransform(Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
 
     private:
         std::shared_ptr<BatchRigidBodySystem<TDataType>> batchSolver;
-        struct RigidSystemData
-        {
-            std::shared_ptr<MultibodySystem<DataType3f>> system;
-            std::shared_ptr<RobotArmSimulator<DataType3f>> robot;
-        };
-
         std::shared_ptr<SceneGraph> scn;
-        std::unordered_map<int, RigidSystemData> rigidSystems;
-        int nextRigidID = 0;
-
-        std::shared_ptr<MultibodySystem<DataType3f>> mbSystem;
         UbiApp app;
         bool isInitialized = false;
-
-        // 辅助方法
-        int generateRigidID();
-        RigidSystemData createSingleRigidSystem(int index, const Vec3f& offset, Vec3f& targetPosition, float density);
-        void resetSingleRigidSystem(int index, const Vec3f& offset, const Vec3f& targetPosition);
-
-        // SphereModel<DataType3f>> target;
-
-        Vec3f m_offset = Vec3f(0.0f, 0.0f, 0.0f);
-
-        std::vector<std::vector<float>> jointsInitia;
-
-        std::vector<std::vector<float>> motersVelocity;
-
-        std::vector<float> hingeJointsMinAngles{ -2.8973, -1.7628, -2.8973, -0.087, -2.8973, -3.7525, -2.8973 };
-        std::vector<float> hingeJointsMaxAngles{ 2.8973, 1.7628, 2.8973, 3.0, 2.8973, 0.0175, 2.8973 };
-
-        std::vector<int> Link_main = { 8, 12, 13, 14, 19, 24, 25, 49, 53, 55, 57 };
     };
 } // namespace dyno

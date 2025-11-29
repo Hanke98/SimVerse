@@ -53,4 +53,4 @@ log*
 asset
 tmp
 
-examples/Cuda/RigidBody/RobotArm_Impulse/*.so
+*.so

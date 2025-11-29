@@ -544,9 +544,8 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         std::vector<Vec3f> colVertices;
         std::vector<TopologyModule::Triangle> colIndices;
 
-        // 1. 提取所有顶点并应用局部变换 (link.meshTransform)
-        // 注意：我们必须先应用变换，再计算惯量，这样惯量才是基于 Link 坐标系的分布计算的
-        // 这里的 meshTransform 对应 URDF 中的 <collision><origin>
+        // 提取所有顶点并应用局部变换 (link.meshTransform)
+        // TODO: 这里的meshTransform应该要对应URDF中的 <collision><origin>
         colVertices.resize(attrib.vertices.size() / 3);
         for (size_t i = 0; i < attrib.vertices.size(); i += 3) {
             Vec3f p(attrib.vertices[i + 0], attrib.vertices[i + 1], attrib.vertices[i + 2]);
@@ -554,7 +553,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             colVertices[i / 3] = link.meshTransform * p;
         }
 
-        // 2. 提取所有 Shape 的面索引
+        // 提取所有 Shape 的面索引
         for (const auto& shape : shapes) {
             const auto& mesh = shape.mesh;
             for (size_t f = 0; f < mesh.indices.size(); f += 3) {
@@ -567,20 +566,20 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             }
         }
 
-        // 3. 计算物理属性
+        // 计算物理属性
         Real vol = 0;
         Vec3f com(0);
         Mat3f inertia(0);
 
         computeMeshPhysicalProperties(colVertices, colIndices, vol, com, inertia);
 
-        // 4. 存储结果
+        // 存储结果
         link.volume = vol;
         link.localInertia = inertia;
 
-        // 可选：打印调试信息
-        std::cout << "Link: " << link.name << " | Vol: " << link.volume << std::endl;
-        std::cout << "Inertia: \n" << link.localInertia << std::endl;
+        // 打印调试信息
+        // std::cout << "Link: " << link.name << " | Vol: " << link.volume << std::endl;
+        // std::cout << "Inertia: \n" << link.localInertia << std::endl;
     }
 
     return true;

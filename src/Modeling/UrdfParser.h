@@ -24,10 +24,11 @@ namespace dyno
     struct UrdfLink
     {
         std::string name;
-        std::string visualMeshPath;  // 视觉网格路径(.dae)
-        Transform3f T_mesh;          // 原点变换
-        std::string collisionMeshPath; // collision mesh path
-        Transform3f T_world; // world transform
+        std::string visualMeshPath;     // 视觉网格路径(.dae)
+        std::string collisionMeshPath;  // collision mesh path
+        Transform3f T_mesh;             // mesh transform
+        Transform3f T_world;            // world transform
+        Transform3f T_local;            // local transform
         uint shapeId;
         bool isRoot = false;
         Real volume;

@@ -346,6 +346,13 @@ namespace dyno
         Vec3f s(1, 1, 1);
         Transform3f T_world_root(t, R_zUpToYUp, s);
 
+        auto itRoot = linkIndex.find(rootLinkName);
+        if (itRoot != linkIndex.end()) {
+            UrdfLink& rootLink = urdfInfo.links[itRoot->second];
+            Transform3f T_local_root;
+            rootLink.T_local = T_local_root;
+        }
+
         // 递归下去
         computeWorldTransformsRecursive(rootLinkName, T_world_root, linkIndex, linkChildJoints, urdfInfo);
     }
@@ -377,8 +384,15 @@ namespace dyno
             joint.originWorld = composeTransform(T_world_link, joint.originLocal);
             joint.axisWorld = joint.originWorld.rotation() * joint.axis;
 
-            // 若你在 link 里还有额外的 <origin> (例如视觉/碰撞)，可以再乘一次
             const std::string& childName = joint.childLink;
+
+            int childId = joint.childLinkId;
+            UrdfLink& childLink = urdfInfo.links[childId];
+            childLink.T_local = joint.originLocal;
+            std::cout << "Name of link: " << childLink.name << "\n"
+                      << "Rotation: " << childLink.T_local.rotation() << "\n"
+                      << "Translation: " << childLink.T_local.translation() << "\n"
+                      << std::endl;
             Transform3f T_world_child = joint.originWorld;  // world -> child
 
             // 递归子 link

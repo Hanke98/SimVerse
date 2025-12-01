@@ -387,6 +387,7 @@ namespace dyno
 		if constexpr (ENABLE_POST_STAB)
 		{
 			mImpulseC.reset();
+			mLambda.reset();
 			initializeJacobian(dt);
 			DArray<Real> tempErrors;
 			auto before_err = PostStablizationErrorValidate(

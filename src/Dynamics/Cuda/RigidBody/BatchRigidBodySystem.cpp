@@ -375,6 +375,23 @@ namespace dyno
     void BatchRigidBodySystem<TDataType>::resetBatchMultiBodies(BatchRigidBodySystemResetParam& reset_param)
     {
         Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
+
+        auto instances = this->varVehiclesTransform()->getValue();
+
+        for (int i = 0; i < reset_param.num_bodies; i++) {
+            auto it = reset_param.ids[i];
+            for (auto index : non_ctrl_mb_chains[it].body_indices) {
+                hCenters[index] = reset_param.targetPosition[i] + instances[it].translation();
+            }
+        }
+
+        this->stateCenter()->assign(hCenters);
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::resetBatchNonCtrlBodies(BatchRigidBodySystemResetParam& reset_param)
+    {
+        Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
         Array<TQuat, CPU> hAngels = gethAngles();
         Array<Vec3f, DeviceType::CPU> hVelocities = gethVelocities();
         Array<Vec3f, CPU> hAngularVelocities = gethAngularVelocities();

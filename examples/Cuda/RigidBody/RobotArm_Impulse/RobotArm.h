@@ -43,6 +43,7 @@ namespace dyno
                                     bool render_boundingBox = true);
 
         void resetStates(ResetParam& param);
+        void resetTargets(ResetParam& param);
 
         // 场景创建相关接口
         void createScene();

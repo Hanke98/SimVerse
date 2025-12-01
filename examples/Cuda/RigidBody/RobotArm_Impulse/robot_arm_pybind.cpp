@@ -312,6 +312,11 @@ void bindRobotArmSimulator(py::module_ &m) {
              py::arg("param"),
              "通过 ResetParam 重置状态")
 
+        .def("resetTargets",
+                 &RobotArm::resetTargets,
+                 py::arg("param"),
+                 "通过 ResetParam 重置状态")
+
         .def("createScene",
              &RobotArm::createScene,
              "创建场景")

@@ -97,10 +97,6 @@ public:
 
     // ------------------------------------
     // Setters and Getters
-    void setDt(Real dt)
-    {
-      this->stateTimeStep()->setValue(dt);
-    }
 
     void setGravityEnabled(bool enabled)
     {

@@ -32,7 +32,7 @@ cmake -B build -S . -G "Ninja Multi-Config" \
 # --fresh
 
 target=RobotArm_Impulse
-target=TestInertial
+# target=TestInertial
 case $run_arg in
 rel)
   cmake --build build --config Release -j32 --target $target

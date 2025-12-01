@@ -257,7 +257,7 @@ void bindUrdf(py::module_ &m) {
         .def(py::init<>())
         .def_readwrite("name",             &UrdfLink::name)
         .def_readwrite("visualMeshPath",   &UrdfLink::visualMeshPath)
-        .def_readwrite("meshTransform",    &UrdfLink::meshTransform)  // Transform3f
+        .def_readwrite("meshTransform",    &UrdfLink::T_mesh)  // Transform3f
         .def_readwrite("collisionMeshPath",&UrdfLink::collisionMeshPath)
         .def_readwrite("T_world",          &UrdfLink::T_world)        // Transform3f
         .def_readwrite("shapeId",          &UrdfLink::shapeId)

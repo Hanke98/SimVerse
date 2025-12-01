@@ -25,7 +25,7 @@ namespace dyno
     {
         std::string name;
         std::string visualMeshPath;  // 视觉网格路径(.dae)
-        Transform3f meshTransform;          // 原点变换
+        Transform3f T_mesh;          // 原点变换
         std::string collisionMeshPath; // collision mesh path
         Transform3f T_world; // world transform
         uint shapeId;

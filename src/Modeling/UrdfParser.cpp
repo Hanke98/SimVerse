@@ -94,12 +94,12 @@ namespace dyno
 
                 if (originElem)
                 {
-                    link.meshTransform = parseOrigin(originElem);
+                    link.T_mesh = parseOrigin(originElem);
                     // meshTransform  = origin * (yUpToZUp * p_meshYup)
-                    link.meshTransform = composeTransform(link.meshTransform, meshTransform);
+                    link.T_mesh = composeTransform(link.T_mesh, meshTransform);
                 } else {
                     // meshTransform = origin * (yUpToZUp)
-                    link.meshTransform = meshTransform;
+                    link.T_mesh = meshTransform;
                 }
 
                 // 解析几何信息

@@ -335,6 +335,8 @@ void bindRobotArmSimulator(py::module_ &m) {
         .def("stepSimulation",
              &RobotArm::stepSimulation,
              py::arg("enableRendering") = true,
+             py::arg("enableSaveScreen") = false,
+             py::arg("savePath") = nullptr,
              "执行一步仿真（可选是否渲染）")
 
         .def("terminateSimulation",

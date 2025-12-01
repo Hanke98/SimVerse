@@ -66,6 +66,11 @@ namespace dyno
     }
 
     template<typename TDataType>
+    void RobotArmSimulator<TDataType>::resetTargets(ResetParam& param) {
+        batchSolver->resetBatchNonCtrlBodies(param);
+    }
+
+    template<typename TDataType>
     void RobotArmSimulator<TDataType>::setHingeTorques(HingeTorqueParam& hingetorque_param) {
         batchSolver->applyHingeTorqueControl(hingetorque_param);
     }

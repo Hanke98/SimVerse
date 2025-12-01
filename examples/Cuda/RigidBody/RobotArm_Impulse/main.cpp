@@ -37,7 +37,7 @@ int main() {
     float density = 2500.0f;
     bool enableGravity = false;
     bool enableFriction = false;
-    bool enableRendering = true;
+    bool enableRendering = false;
     Vec3f base{ -0.0f, -0.0f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
     std::vector<Vec3f> target_position;

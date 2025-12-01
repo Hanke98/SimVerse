@@ -97,9 +97,7 @@ public:
 
     // ------------------------------------
     // Setters and Getters
-    // void setDt(Real dt)
-    // {
-    // }
+
     void setGravityEnabled(bool enabled)
     {
       this->varGravityEnabled()->setValue(enabled);

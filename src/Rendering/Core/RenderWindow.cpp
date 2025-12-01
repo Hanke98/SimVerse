@@ -36,7 +36,6 @@ void dyno::RenderWindow::saveScreen(unsigned int frame)
 		std::string index_str;
 		adaptor >> index_str;
 		std::string file_name = mScreenRecordingPath + std::string("screen_capture_") + index_str + std::string(".bmp");
-		std::cout << file_name << std::endl;
 
 		this->onSaveScreen(file_name);
 	}

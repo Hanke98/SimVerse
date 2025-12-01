@@ -392,32 +392,17 @@ namespace dyno
     void BatchRigidBodySystem<TDataType>::resetBatchNonCtrlBodies(BatchRigidBodySystemResetParam& reset_param)
     {
         Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
-        Array<TQuat, CPU> hAngels = gethAngles();
-        Array<Vec3f, DeviceType::CPU> hVelocities = gethVelocities();
-        Array<Vec3f, CPU> hAngularVelocities = gethAngularVelocities();
-        Array<Mat3f, CPU> hRotations = gethRotationMatrix();
 
         auto instances = this->varVehiclesTransform()->getValue();
 
         for (int i = 0; i < reset_param.num_bodies; i++) {
             auto it = reset_param.ids[i];
-            for (auto index : ctrl_mb_chains[it].body_indices) {
-                hCenters[index] = initialPositions[index];
-                hAngels[index] = initialQuats[index];
-                hRotations[index] = initialRotations[index];
-                hVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
-                hAngularVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
-            }
             for (auto index : non_ctrl_mb_chains[it].body_indices) {
                 hCenters[index] = reset_param.targetPosition[i] + instances[it].translation();
             }
         }
 
         this->stateCenter()->assign(hCenters);
-        this->stateQuaternion()->assign(hAngels);
-        this->stateRotationMatrix()->assign(hRotations);
-        this->stateVelocity()->assign(hVelocities);
-        this->stateAngularVelocity()->assign(hAngularVelocities);
     }
 
     template<typename TDataType>

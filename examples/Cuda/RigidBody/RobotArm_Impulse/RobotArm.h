@@ -51,7 +51,7 @@ namespace dyno
         // 仿真控制接口
         void setupSceneGraph();
         void initialize(int width = 1280, int height = 768, Real scale = 1.0f);
-        void stepSimulation(bool enableRendering = true);
+        void stepSimulation(bool enableRendering = true, bool enableSaveScreen = false, std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/");
         void terminateSimulation();
 
         std::shared_ptr<SceneGraph> activeScene;

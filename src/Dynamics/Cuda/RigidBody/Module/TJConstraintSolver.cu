@@ -310,6 +310,7 @@ namespace dyno
 						    this->varGravityValue()->getData(),
 						    dh);
 					}
+					cudaDeviceSynchronize();
 				}
 
 				// {
@@ -517,6 +518,7 @@ namespace dyno
 
 			// getchar();
 		}
+		cudaDeviceSynchronize();
 	}
 
 	DEFINE_CLASS(TJConstraintSolver);

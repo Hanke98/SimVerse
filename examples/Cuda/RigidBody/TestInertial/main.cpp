@@ -122,10 +122,11 @@ std::shared_ptr<SceneGraph> demoBatchRigidSystem()
   batch_rigid->setDt(1 / 100.0f);
   batch_rigid->varGravityEnabled()->setValue(true);
   batch_rigid->varFrictionEnabled()->setValue(false);
+  batch_rigid->varAngularDamping()->setValue(0.1f);
   // Vec3f base{ -20.0f, -0.0f, -20.0f };
   Vec3f base{ -0.0f, -0.0f, -0.0f };
   Vec3f offset{ 10.0f, 10.0f, 10.0f };
-  batch_rigid->addExampleRigidBodies("", base, offset, 1000.0f, 2, 2, 2);
+  batch_rigid->addExampleRigidBodies("", base, offset, 1000.0f, 30, 30, 30);
   // batch_rigid->addRigidBodies("", base, offset, 1, 1, 1);
 
   return scn;

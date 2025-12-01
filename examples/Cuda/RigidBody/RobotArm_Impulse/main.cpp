@@ -38,7 +38,7 @@ int main() {
     bool enableGravity = false;
     bool enableFriction = false;
     bool enableRendering = true;
-    bool enableSaveScreen = true;
+    bool enableSaveScreen = false;
     std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/";
     Vec3f base{ -0.0f, -0.0f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
@@ -73,7 +73,7 @@ int main() {
     std::cout << "仿真环境初始化完成" << std::endl;
     UrdfInformation chainInfo = simulator.getKinematicsChainInfo();
     
-    // 4. 主仿真循环
+    // 主仿真循环
     std::cout << "开始仿真循环（按ESC退出）" << std::endl;
     int i = 0;
 

@@ -308,7 +308,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         std::vector<TopologyModule::Triangle> normalIndex;
         std::vector<TopologyModule::Triangle> texCoordIndex;
 
-        Transform3f T_world_mesh = composeTransform(link.T_world, link.meshTransform);
+        Transform3f T_world_mesh = composeTransform(link.T_world, link.T_mesh);
         Vec3f lo( REAL_MAX);
         Vec3f hi(-REAL_MAX);
 
@@ -547,7 +547,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         // 提取所有顶点并应用局部变换 (link.meshTransform)
         // TODO: 这里的meshTransform应该要对应URDF中的 <collision><origin>
 
-        Transform3f T_world_mesh = composeTransform(link.T_world, link.meshTransform);
+        Transform3f T_world_mesh = composeTransform(link.T_world, link.T_mesh);
         colVertices.resize(attrib.vertices.size() / 3);
         for (size_t i = 0; i < attrib.vertices.size(); i += 3) {
             Vec3f p(attrib.vertices[i + 0], attrib.vertices[i + 1], attrib.vertices[i + 2]);

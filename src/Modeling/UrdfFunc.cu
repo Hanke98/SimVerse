@@ -512,7 +512,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     }
 
     // -------------------------------------------------------------------------
-    // 新增：处理 Collision Mesh 并计算体积和转动惯量
+    // 处理 Collision Mesh 并计算体积和转动惯量
     // -------------------------------------------------------------------------
     for (auto& link : links) {
         if (link.collisionMeshPath.empty()) {
@@ -546,11 +546,13 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
 
         // 提取所有顶点并应用局部变换 (link.meshTransform)
         // TODO: 这里的meshTransform应该要对应URDF中的 <collision><origin>
+
+        Transform3f T_world_mesh = composeTransform(link.T_world, link.meshTransform);
         colVertices.resize(attrib.vertices.size() / 3);
         for (size_t i = 0; i < attrib.vertices.size(); i += 3) {
             Vec3f p(attrib.vertices[i + 0], attrib.vertices[i + 1], attrib.vertices[i + 2]);
             // 变换到 Link 坐标系
-            colVertices[i / 3] = link.meshTransform * p;
+            colVertices[i / 3] = T_world_mesh * p;
         }
 
         // 提取所有 Shape 的面索引
@@ -578,8 +580,8 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         link.localInertia = inertia;
 
         // 打印调试信息
-        // std::cout << "Link: " << link.name << " | Vol: " << link.volume << std::endl;
-        // std::cout << "Inertia: \n" << link.localInertia << std::endl;
+        std::cout << "Link: " << link.name << " | Vol: " << link.volume << std::endl;
+        std::cout << "Inertia: \n" << link.localInertia << std::endl;
     }
 
     return true;

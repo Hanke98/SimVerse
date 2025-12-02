@@ -257,7 +257,7 @@ void bindUrdf(py::module_ &m) {
         .def(py::init<>())
         .def_readwrite("name",             &UrdfLink::name)
         .def_readwrite("visualMeshPath",   &UrdfLink::visualMeshPath)
-        .def_readwrite("meshTransform",    &UrdfLink::meshTransform)  // Transform3f
+        .def_readwrite("meshTransform",    &UrdfLink::T_mesh)  // Transform3f
         .def_readwrite("collisionMeshPath",&UrdfLink::collisionMeshPath)
         .def_readwrite("T_world",          &UrdfLink::T_world)        // Transform3f
         .def_readwrite("shapeId",          &UrdfLink::shapeId)
@@ -312,6 +312,11 @@ void bindRobotArmSimulator(py::module_ &m) {
              py::arg("param"),
              "通过 ResetParam 重置状态")
 
+        .def("resetTargets",
+                 &RobotArm::resetTargets,
+                 py::arg("param"),
+                 "通过 ResetParam 重置状态")
+
         .def("createScene",
              &RobotArm::createScene,
              "创建场景")
@@ -330,6 +335,8 @@ void bindRobotArmSimulator(py::module_ &m) {
         .def("stepSimulation",
              &RobotArm::stepSimulation,
              py::arg("enableRendering") = true,
+             py::arg("enableSaveScreen") = false,
+             py::arg("savePath") = nullptr,
              "执行一步仿真（可选是否渲染）")
 
         .def("terminateSimulation",

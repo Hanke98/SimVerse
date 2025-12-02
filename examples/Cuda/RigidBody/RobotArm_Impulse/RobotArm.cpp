@@ -13,7 +13,8 @@
 #include <imgui_impl_opengl3.h>
 #include "../../../../src/Rendering/GUI/GlfwGUI/GlfwRenderWindow.h"
 #include "RigidBody/Vehicle.h"
-#include <SceneGraphFactory.h> 
+#include <SceneGraphFactory.h>
+#include "RenderWindow.h"
 
 #include <BasicShapes/PlaneModel.h>
 
@@ -63,6 +64,11 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::resetStates(ResetParam& param) {
         batchSolver->resetBatchMultiBodies(param);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::resetTargets(ResetParam& param) {
+        batchSolver->resetBatchNonCtrlBodies(param);
     }
 
     template<typename TDataType>
@@ -132,7 +138,7 @@ namespace dyno
     }
 
     template<typename TDataType>
-    void RobotArmSimulator<TDataType>::stepSimulation(bool enableRendering) {
+    void RobotArmSimulator<TDataType>::stepSimulation(bool enableRendering, bool enableSaveScreen, std::string savePath) {
         if (!isInitialized) return;
 
         if (activeScene) {
@@ -141,6 +147,15 @@ namespace dyno
         
         if (enableRendering) {
 
+            // 获取渲染窗口
+            GlfwRenderWindow* renderWindow = dynamic_cast<GlfwRenderWindow*>(app.renderWindow());
+            if (!renderWindow) return;
+
+            if (enableSaveScreen) {
+                renderWindow->setScreenRecordingPath(savePath);
+                renderWindow->saveScreen(activeScene->getFrameNumber());
+            }
+
             if (activeScene) {
                 activeScene->updateGraphicsContext();
             }
@@ -148,10 +163,6 @@ namespace dyno
             // 处理事件
             glfwPollEvents();
 
-            // 获取渲染窗口
-            GlfwRenderWindow* renderWindow = dynamic_cast<GlfwRenderWindow*>(app.renderWindow());
-            if (!renderWindow) return;
-            
             // 获取相机
             auto camera = renderWindow->getCamera();
             if (!camera) return;

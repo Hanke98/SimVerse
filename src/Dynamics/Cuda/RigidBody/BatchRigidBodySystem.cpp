@@ -356,13 +356,26 @@ namespace dyno
 		};
 
 		auto attachRender = [&]() {
-			auto mapper = std::make_shared<DiscreteSpheresToTriangleSet<DataType3f>>();
-			auto rigid = this;
-			rigid->stateTopology()->connect(mapper->inDiscreteElements());
-			rigid->graphicsPipeline()->pushModule(mapper);
-
 			if (renderBoundingBox)
 			{
+				auto mapper = std::make_shared<DiscreteElementsToTriangleSet<DataType3f>>();
+				auto rigid = this;
+				rigid->stateTopology()->connect(mapper->inDiscreteElements());
+				rigid->graphicsPipeline()->pushModule(mapper);
+
+				auto sRender = std::make_shared<GLSurfaceVisualModule>();
+				sRender->setColor(Color(1, 1, 0));
+				sRender->setAlpha(0.5f);
+				mapper->outTriangleSet()->connect(sRender->inTriangleSet());
+				rigid->graphicsPipeline()->pushModule(sRender);
+			}
+			else
+			{
+				auto mapper = std::make_shared<DiscreteSpheresToTriangleSet<DataType3f>>();
+				auto rigid = this;
+				rigid->stateTopology()->connect(mapper->inDiscreteElements());
+				rigid->graphicsPipeline()->pushModule(mapper);
+
 				auto sRender = std::make_shared<GLSurfaceVisualModule>();
 				sRender->setColor(Color(1, 1, 0));
 				sRender->setAlpha(0.5f);
@@ -418,6 +431,25 @@ namespace dyno
 	}
 
 	template<typename TDataType>
+	void BatchRigidBodySystem<TDataType>::resetBatchNonCtrlBodies(BatchRigidBodySystemResetParam& reset_param)
+	{
+		Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
+
+		auto instances = this->varVehiclesTransform()->getValue();
+
+		for (int i = 0; i < reset_param.num_bodies; i++)
+		{
+			auto it = reset_param.ids[i];
+			for (auto index : non_ctrl_mb_chains[it].body_indices)
+			{
+				hCenters[index] = reset_param.targetPosition[i] + instances[it].translation();
+			}
+		}
+
+		this->stateCenter()->assign(hCenters);
+	}
+
+	template<typename TDataType>
 	void BatchRigidBodySystem<TDataType>::resetOneMultiBodies(int mb_id)
 	{
 	}
@@ -450,6 +482,20 @@ namespace dyno
 				auto childId_local = joint.childLinkId;
 				auto parentId_global = mb_chain.body_indices[parentId_local];
 				auto childId_global = mb_chain.body_indices[childId_local];
+
+				// for (int i = 0; i < torque_param.num_bodies; i++) {
+				// auto& mb_chain = ctrl_mb_chains[torque_param.ids[i]];
+				// for (int j = 0; j < mb_chain.hinge_joint_indices.size(); ++j) {
+				//     auto& joint = this->urdfInfo.joints[mb_chain.hinge_joint_indices[j]];
+				//     auto parentId_local = joint.parentLinkId;
+				//     auto childId_local = joint.childLinkId;
+				//     auto parentId_global = mb_chain.body_indices[parentId_local];
+				//     auto childId_global = mb_chain.body_indices[childId_local];
+
+				// std::cout << "Parent local id: " << parentId_local << std::endl;
+				// std::cout << "Child local id: " << childId_local << std::endl;
+				// std::cout << "Parent global id: " << parentId_global << std::endl;
+				// std::cout << "Child global id: " << childId_global << std::endl;
 
 				auto jointAxisLocal = joint.axisWorld;
 				auto hingeTorque = torque_param.torques[i][j] * jointAxisLocal;

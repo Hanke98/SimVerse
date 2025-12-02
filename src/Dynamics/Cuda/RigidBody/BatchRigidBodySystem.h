@@ -81,6 +81,8 @@ public:
 	  void createBatchMultiBodies(Coord base, Coord offset, int num_x, int num_y, int num_z);
 
     void resetBatchMultiBodies(BatchRigidBodySystemResetParam& reset_param);
+
+    void resetBatchNonCtrlBodies(BatchRigidBodySystemResetParam& reset_param);
   
     void applyTorqueControl(BatchRigidBodySystemTorqueControlParam& torque_param);
 

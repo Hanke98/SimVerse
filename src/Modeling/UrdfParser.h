@@ -24,21 +24,24 @@ namespace dyno
     struct UrdfLink
     {
         std::string name;
-        std::string visualMeshPath;  // 视觉网格路径(.dae)
-        Transform3f meshTransform;          // 原点变换
-        std::string collisionMeshPath; // collision mesh path
-        Transform3f T_world; // world transform
+        std::string visualMeshPath;     // 视觉网格路径(.dae)
+        std::string collisionMeshPath;  // collision mesh path
+        Transform3f T_mesh;             // mesh transform
+        Transform3f T_world;            // world transform
+        Transform3f T_local;            // local transform
         uint shapeId;
         bool isRoot = false;
+        Real volume;
+        Mat3f localInertia;
     };
 
     // 关节限制信息
     struct UrdfJointLimits
     {
-        float lower;     // 下限
-        float upper;     // 上限
-        float effort;    // 力限制
-        float velocity;  // 速度限制
+        Real lower;     // 下限
+        Real upper;     // 上限
+        Real effort;    // 力限制
+        Real velocity;  // 速度限制
     };
 
     // 关节信息结构体
@@ -55,7 +58,7 @@ namespace dyno
         Transform3f originLocal;  // 原点变换
         Transform3f originWorld;
         UrdfJointLimits limits;   // 关节限制
-        float damping;            // 阻尼系数
+        Real damping;            // 阻尼系数
     };
 
     // TODO: Refactor this to `KinematicsChainInfo`

@@ -37,7 +37,9 @@ int main() {
     float density = 2500.0f;
     bool enableGravity = false;
     bool enableFriction = false;
-    bool enableRendering = false;
+    bool enableRendering = true;
+    bool enableSaveScreen = false;
+    std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/";
     Vec3f base{ -0.0f, -0.0f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
     std::vector<Vec3f> target_position;
@@ -48,7 +50,7 @@ int main() {
     int num_copies_y = 1;
     int num_copies_z = 2;
     std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";
-    bool render_boundingbox = true;
+    bool render_boundingbox = false;
 
     simulator.initBatchSolver();
     simulator.setDt(dt);
@@ -71,7 +73,7 @@ int main() {
     std::cout << "仿真环境初始化完成" << std::endl;
     UrdfInformation chainInfo = simulator.getKinematicsChainInfo();
     
-    // 4. 主仿真循环
+    // 主仿真循环
     std::cout << "开始仿真循环（按ESC退出）" << std::endl;
     int i = 0;
 
@@ -259,7 +261,7 @@ int main() {
         param.torques.push_back(moterVelocities1);
         simulator.setHingeTorques(param);
 
-        simulator.stepSimulation(enableRendering);
+        simulator.stepSimulation(enableRendering, enableSaveScreen, savePath);
 
         i++;
     }

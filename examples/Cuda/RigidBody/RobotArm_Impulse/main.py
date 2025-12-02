@@ -2,7 +2,7 @@ import os
 import math
 import RobotArm_pybind as ra  # 你的 pybind 模块名
 import numpy as np
-
+import argparse
 
 def quaternion_conjugate(q):
     return np.array([-q[0], -q[1], -q[2], q[3]])
@@ -116,6 +116,12 @@ def main():
     # ==========================
     # 0. 控制参数（照抄 C++）
     # ==========================
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--save_path", type=str, default="")
+    args = parser.parse_args()
+
+    save_path = args.save_path
+
     scale = 1.0
 
     kp = [
@@ -141,6 +147,8 @@ def main():
     density = 2500.0
     enable_gravity = False
     enable_friction = False
+    enable_render = True
+    enable_record = True
 
     base = ra.Vec3f(-0.0, -0.0, -0.0)
     offset = ra.Vec3f(1.5, 0.0, 1.5)
@@ -179,7 +187,8 @@ def main():
 
     sim.setupSceneGraph()
     print("初始化窗口")
-    sim.initialize(1280, 768, 1.5)
+    if enable_render:
+        sim.initialize(1280, 768, 1.5)
     print("仿真环境初始化完成")
 
     chain_info = sim.getKinematicsChainInfo()
@@ -355,7 +364,7 @@ def main():
         # -------------------------
         # 单步仿真 & 渲染
         # -------------------------
-        sim.stepSimulation(True, True, "/home/zhen/SimVerse-1/save_picture/")
+        sim.stepSimulation(enable_render, enable_record, save_path)
 
     print("仿真结束")
 

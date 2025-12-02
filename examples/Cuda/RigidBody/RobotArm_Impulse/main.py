@@ -1,6 +1,77 @@
 import os
 import math
 import RobotArm_pybind as ra  # 你的 pybind 模块名
+import numpy as np
+
+
+def quaternion_conjugate(q):
+    return np.array([-q[0], -q[1], -q[2], q[3]])
+
+def quaternion_multiply(q1, q2):
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
+    return np.array([
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        ])
+
+def quaternion_to_axis_angle(q):
+    q = q / np.linalg.norm(q)
+    x, y, z, w = q
+
+    theta = 2 * np.arccos(w)
+
+    sin_half_theta = np.sqrt(x**2 + y**2 + z**2)
+    if sin_half_theta < 1e-6:
+        axis = np.array([1.0, 0.0, 0.0])
+    else:
+        axis = np.array([x, y, z]) / sin_half_theta
+
+    return axis, theta
+
+def calculate_link_relative_angle(q_A, q_B):
+    qA = np.array([q_A.x, q_A.y, q_A.z, q_A.w])
+    qB = np.array([q_B.x, q_B.y, q_B.z, q_B.w])
+    q_A_inv = quaternion_conjugate(qA)
+    q_rel = quaternion_multiply(q_A_inv, qB)
+
+    relative_axis, relative_angle = quaternion_to_axis_angle(q_rel)
+
+    return relative_angle, relative_axis, q_rel
+
+def signed_angle_from_quaternion(q, axis):
+    # q: [x, y, z, w]
+    # axis: [ax, ay, az], must be normalized
+    x = q.x
+    y = q.y
+    z = q.z
+    w = q.w
+    ax, ay, az = axis
+
+    # dot product between quaternion vector part and axis
+    v_dot_a = x * ax + y * ay + z * az
+
+    # signed angle
+    angle = 2.0 * np.arctan2(v_dot_a, w)
+    return angle
+
+def signed_angle_from_qua(q, axis):
+    # q: [x, y, z, w]
+    # axis: [ax, ay, az], must be normalized
+    x, y, z, w = q
+    ax = axis.x
+    ay = axis.y
+    az = axis.z
+
+    # dot product between quaternion vector part and axis
+    v_dot_a = x * ax + y * ay + z * az
+
+    # signed angle
+    angle = 2.0 * np.arctan2(v_dot_a, w)
+    return angle
+import RobotArm_pybind as ra  # 你的 pybind 模块名
 
 def vec_sub(a, b):
     return ra.Vec3f(a.x - b.x, a.y - b.y, a.z - b.z)
@@ -88,7 +159,7 @@ def main():
     urdf_fn = os.path.normpath(urdf_fn)
     print("使用 URDF:", urdf_fn)
 
-    render_boundingbox = False;
+    render_boundingbox = False
 
     # ==========================
     # 1. 创建仿真器 & 场景
@@ -123,12 +194,19 @@ def main():
         joint_axis_local.append(joint.axisWorld)
         effort_limit.append(joint.limits.effort)
 
+    # for idx, vec in enumerate(chain_info.links):
+    #     print("link index: ", idx, " link name: ", vec.name)
+
+    for idx, vec in enumerate(chain_info.joints):
+        print("joint index: ", idx, " joint name: ", vec.name)
+        print("parent_id: ", vec.parentLinkId, " child_id: ", vec.childLinkId)
+
     target_angle = [
-        1.0,   # joint 0
-        1.3,   # joint 1
+        0.7,   # joint 0
+        -1.0,   # joint 1
         0.3,   # joint 2
-        -0.3,  # joint 3
-        0.3,   # joint 4
+        -1.3,  # joint 3
+        1.7,   # joint 4
         1.8,   # joint 5
         0.1,   # joint 6
     ]
@@ -146,14 +224,14 @@ def main():
         # -------------------------
         # 重置：step == 500
         # -------------------------
-        if step == 500:
+        if step == 200:
             reset = ra.ResetParam()
             reset.num_bodies = 2
             reset.ids = [0, 1]
             new_target = ra.Vec3f(0.5, 1.0, 0.5)
             reset.targetPosition = [new_target, new_target]
             print("调用 resetStates, targetPosition size =", len(reset.targetPosition))
-            sim.resetStates(reset)
+            sim.resetTargets(reset)
 
         # -------------------------
         # 构造 LocalIndexParam
@@ -179,23 +257,25 @@ def main():
             quat_child = quats[child_id]
 
             # 相对旋转：qRel = qParent^{-1} * qChild
-            q_rel = quat_parent.inverse() * quat_child
-            q_rel.normalize()
-
-            # 铰链轴在 world 坐标系下的方向
+            rel_angle, rel_axis, rel_q = calculate_link_relative_angle(quat_parent, quat_child)
+            rel_sign_angle = signed_angle_from_qua(rel_q, joint_axis_local[j])
+            # q_rel = quat_parent.inverse() * quat_child
+            # q_rel.normalize()
+            #
+            # # 铰链轴在 world 坐标系下的方向
             axis_world = quat_parent.rotate(joint_axis_local[j])
             axis_world = vec_normalize(axis_world)
-
-            # qRel -> 轴角
-            rot, axis_rel = q_rel.to_rotation_axis()
-            axis_rel = vec_normalize(axis_rel)
-
-            # 点积决定正负
-            sign = 1.0 if vec_dot(axis_rel, axis_world) > 0.0 else -1.0
-            raw_angle = sign * rot
-
-            # 连续关节角
-            hinge_angle = unwrap_angle(raw_angle, hinge_angle_old[j])
+            #
+            # # qRel -> 轴角
+            # rot, axis_rel = q_rel.to_rotation_axis()
+            # axis_rel = vec_normalize(axis_rel)
+            #
+            # # 点积决定正负
+            # sign = 1.0 if vec_dot(axis_rel, axis_world) > 0.0 else -1.0
+            # raw_angle = sign * rot
+            #
+            # # 连续关节角
+            # hinge_angle = unwrap_angle(raw_angle, hinge_angle_old[j])
 
             # 相对角速度
             ang_v_parent = ang_vel[parent_id]
@@ -204,7 +284,7 @@ def main():
             hinge_velocity = vec_dot(ang_v_rel, axis_world)
 
             # PD 控制
-            e = target_angle[j] - hinge_angle
+            e = target_angle[j] - rel_sign_angle
             torque = kp[j] * e - kd[j] * hinge_velocity
 
             limit = effort_limit[j] if effort_limit[j] > 0 else 1e6
@@ -213,8 +293,18 @@ def main():
             if torque < -limit:
                 torque = -limit
 
-            torques[j] = float(torque)
-            hinge_angle_old[j] = hinge_angle
+            # if j == 4:
+            #     print(torque)
+            # if j == 1:
+            #     torques[0] = torque
+            # if j == 3:
+            #     torques[1] = torque
+            # if j == 4:
+            #     torques[2] = torque
+            # if j == 4:
+            #     print(torque[j])
+            torques[j] = torque
+            hinge_angle_old[j] = rel_sign_angle
 
             # 误差最大值记录
             if abs(e) > abs(error[j]):
@@ -254,16 +344,18 @@ def main():
         hinge_param = ra.HingeTorqueParam()
         hinge_param.num_bodies = 2
         hinge_param.ids = [0, 1]
+
         hinge_param.torques = [
             torques[:],  # 对 arm0
             torques[:],  # 对 arm1
         ]
+        print(hinge_param.torques)
         sim.setHingeTorques(hinge_param)
 
         # -------------------------
         # 单步仿真 & 渲染
         # -------------------------
-        sim.stepSimulation(True)
+        sim.stepSimulation(True, True, "/home/zhen/SimVerse-1/save_picture/")
 
     print("仿真结束")
 

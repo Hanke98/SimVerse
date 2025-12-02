@@ -453,6 +453,11 @@ namespace dyno
                 auto parentId_global = mb_chain.body_indices[parentId_local];
                 auto childId_global = mb_chain.body_indices[childId_local];
 
+                // std::cout << "Parent local id: " << parentId_local << std::endl;
+                // std::cout << "Child local id: " << childId_local << std::endl;
+                // std::cout << "Parent global id: " << parentId_global << std::endl;
+                // std::cout << "Child global id: " << childId_global << std::endl;
+
                 auto jointAxisLocal = joint.axisWorld;
                 auto hingeTorque = torque_param.torques[i][j] * jointAxisLocal;
 

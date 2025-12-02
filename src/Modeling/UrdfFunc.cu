@@ -404,6 +404,12 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         mergedShape->boundingBox       = TAlignedBox3D<Real>(lo, hi);
         mergedShape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
 
+        link.T_center_local.translation() = shapeCenter - T_world_mesh.translation();
+        link.T_center_local.scale() = Vec3f(1);
+        link.T_center_local.rotation() = Mat3f::identityMatrix();
+
+        link.T_center_world = composeTransform(link.T_center_local, T_world_mesh);
+
         reShapes.push_back(mergedShape);
         link.shapeId = globalShapeId;
         globalShapeId++;

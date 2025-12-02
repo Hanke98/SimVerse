@@ -263,7 +263,7 @@ def main():
         # -------------------------
         # 单步仿真 & 渲染
         # -------------------------
-        sim.stepSimulation(True)
+        sim.stepSimulation(True, False, "")
 
     print("仿真结束")
 

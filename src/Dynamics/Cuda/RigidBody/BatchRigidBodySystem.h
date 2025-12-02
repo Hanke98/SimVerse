@@ -71,6 +71,11 @@ public:
       std::vector<int> localRigidBodyid;
     };
 
+    struct BatchRigidBodySystemHingeInitGestureParam: public BatchRigidBodySystemControlParamBase
+    {
+      std::vector<std::vector<Real>> theta;
+    };
+
     BatchRigidBodySystem();
     ~BatchRigidBodySystem() override;
 
@@ -91,6 +96,8 @@ public:
     void setMass(BatchRigidBodySystemMassParam& mass_param);
 
     void setInertia(BatchRigidBodySystemInertiaParam& inertia_param);
+
+    void setInitGesture(BatchRigidBodySystemHingeInitGestureParam& hinge_param);
 
     void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, Real density,
                                int num_copies_x, int num_copies_y, int num_copies_z);

@@ -260,7 +260,8 @@ namespace dyno
                     auto up = texMesh->shapes()[it]->boundingBox.v1;
                     auto down = texMesh->shapes()[it]->boundingBox.v0;
 
-                    rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + instances[robotarmIndex].translation();
+                    // rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + instances[robotarmIndex].translation();
+                    rigidbody.position = this->urdfInfo.links[l].T_center_world.translation() + instances[robotarmIndex].translation();
 
                     initialPositions.push_back(rigidbody.position);
                     initialQuats.push_back(rigidbody.angle);
@@ -369,6 +370,11 @@ namespace dyno
                 robotarmIndex++;
             }
             attachRender();
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::setInitGesture(BatchRigidBodySystemHingeInitGestureParam& hinge_param) {
+
     }
 
     template<typename TDataType>

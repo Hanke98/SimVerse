@@ -29,6 +29,8 @@ namespace dyno
         Transform3f T_mesh;             // mesh transform
         Transform3f T_world;            // world transform
         Transform3f T_local;            // local transform
+        Transform3f T_center_local;
+        Transform3f T_center_world;
         uint shapeId;
         bool isRoot = false;
         Real volume;

@@ -257,9 +257,12 @@ void bindUrdf(py::module_ &m) {
         .def(py::init<>())
         .def_readwrite("name",             &UrdfLink::name)
         .def_readwrite("visualMeshPath",   &UrdfLink::visualMeshPath)
-        .def_readwrite("meshTransform",    &UrdfLink::T_mesh)  // Transform3f
         .def_readwrite("collisionMeshPath",&UrdfLink::collisionMeshPath)
-        .def_readwrite("T_world",          &UrdfLink::T_world)        // Transform3f
+        .def_readwrite("T_mesh",           &UrdfLink::T_mesh)
+        .def_readwrite("T_world",          &UrdfLink::T_world)
+        .def_readwrite("T_local",          &UrdfLink::T_local)
+        .def_readwrite("T_center_world",   &UrdfLink::T_center_world)
+        .def_readwrite("T_center_local",   &UrdfLink::T_center_local)
         .def_readwrite("shapeId",          &UrdfLink::shapeId)
         .def_readwrite("isRoot",           &UrdfLink::isRoot);
 

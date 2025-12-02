@@ -46,7 +46,7 @@ int main() {
     Vec3f target1{0.5f, 0.5f, 0.5f};
     target_position.push_back(target1);
     target_position.push_back(target1);
-    int num_copies_x = 2;
+    int num_copies_x = 3;
     int num_copies_y = 1;
     int num_copies_z = 2;
     std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";

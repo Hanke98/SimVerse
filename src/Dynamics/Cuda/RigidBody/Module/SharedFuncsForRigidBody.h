@@ -245,6 +245,30 @@ namespace dyno
 		DArray<float> CFM
 	);
 
+	float PostStablizationErrorValidate(
+		DArray<float> error_out,
+		DArray<Vec3f> dp,
+		DArray<Vec3f> J,
+		DArray<float> error_in,
+		DArray<TConstraintPair<float>> constraints
+	);
+
+	void PostStablization(
+		DArray<float> lambda,
+		DArray<Vec3f> dp,
+		DArray<Vec3f> J,
+		DArray<Vec3f> B,
+		DArray<float> error,
+		DArray<TConstraintPair<float>> constraints,
+		DArray<int> nbq,
+		DArray<float> K_1,
+		DArray<Mat2f> K_2,
+		DArray<Mat3f> K_3,
+		DArray<float> mass,
+		DArray<float> fricCoeffs,
+		float mu,
+		float g
+	);
 
 	void JacobiIteration(
 		DArray<float> lambda,
@@ -380,7 +404,6 @@ namespace dyno
 		const std::string& filename
 	);
 
-
 	void calculateEtaVectorForRelaxation(
 		DArray<float> eta,
 		DArray<Vec3f> J,
@@ -392,8 +415,6 @@ namespace dyno
 	double checkOutErrors(
 		DArray<float> errors
 	);
-	
-
 
 	void calculateMatrixA(
 		DArray<Vec3f> &J,

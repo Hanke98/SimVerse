@@ -19,34 +19,54 @@ namespace dyno
 
 	struct ElementOffset
 	{
-	public:
-		DYN_FUNC inline uint sphereIndex() { return sphereStart; }
-		DYN_FUNC inline uint boxIndex() { return boxStart; }
-		DYN_FUNC inline uint tetIndex() { return tetStart; }
-		DYN_FUNC inline uint capsuleIndex() { return capStart; }
-		DYN_FUNC inline uint triangleIndex() { return triStart; }
+		public:
+		DYN_FUNC inline uint sphereIndex()
+		{
+			return sphereStart;
+		}
+		DYN_FUNC inline uint boxIndex()
+		{
+			return boxStart;
+		}
+		DYN_FUNC inline uint tetIndex()
+		{
+			return tetStart;
+		}
+		DYN_FUNC inline uint capsuleIndex()
+		{
+			return capStart;
+		}
+		DYN_FUNC inline uint triangleIndex()
+		{
+			return triStart;
+		}
 
-		DYN_FUNC inline void setSphereRange(uint startIndex, uint endIndex) { 
+		DYN_FUNC inline void setSphereRange(uint startIndex, uint endIndex)
+		{
 			sphereStart = startIndex;
 			sphereEnd = endIndex;
 		}
 
-		DYN_FUNC inline void setBoxRange(uint startIndex, uint endIndex) {
+		DYN_FUNC inline void setBoxRange(uint startIndex, uint endIndex)
+		{
 			boxStart = startIndex;
 			boxEnd = endIndex;
 		}
 
-		DYN_FUNC inline void setTetRange(uint startIndex, uint endIndex) {
+		DYN_FUNC inline void setTetRange(uint startIndex, uint endIndex)
+		{
 			tetStart = startIndex;
 			tetEnd = endIndex;
 		}
 
-		DYN_FUNC inline void setCapsuleRange(uint startIndex, uint endIndex) {
+		DYN_FUNC inline void setCapsuleRange(uint startIndex, uint endIndex)
+		{
 			capStart = startIndex;
 			capEnd = endIndex;
 		}
 
-		DYN_FUNC inline void setTriangleRange(uint startIndex, uint endIndex) {
+		DYN_FUNC inline void setTriangleRange(uint startIndex, uint endIndex)
+		{
 			triStart = startIndex;
 			triEnd = endIndex;
 		}
@@ -89,7 +109,7 @@ namespace dyno
 				return ET_TRI;
 		}
 
-	private:
+		private:
 		uint sphereStart;
 		uint sphereEnd;
 		uint boxStart;
@@ -104,12 +124,10 @@ namespace dyno
 
 	class PdActor
 	{
-	public:
+		public:
 		int idx = INVALID;
 
 		ElementType shapeType = ET_Other;
-
-		
 
 		Vec3f center;
 
@@ -119,11 +137,13 @@ namespace dyno
 	template<typename Real>
 	class Joint
 	{
-	public:
+		public:
 		DYN_FUNC Joint()
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -144,27 +164,30 @@ namespace dyno
 			this->actor2 = a2;
 		}
 
-	public:
+		public:
 		int bodyId1;
 		int bodyId2;
+		int bodyActualId1; // actual id in case of bodyId is set INVALID
+		int bodyActualId2;
 
 		ElementType bodyType1;
 		ElementType bodyType2;
 
-		//The following two pointers should only be visited from host codes.
+		// The following two pointers should only be visited from host codes.
 		PdActor* actor1 = nullptr;
 		PdActor* actor2 = nullptr;
 	};
 
-
 	template<typename Real>
 	class BallAndSocketJoint : public Joint<Real>
 	{
-	public:
+		public:
 		DYN_FUNC BallAndSocketJoint()
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -178,6 +201,9 @@ namespace dyno
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
 
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
+
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
 
@@ -185,7 +211,7 @@ namespace dyno
 			this->actor2 = a2;
 		}
 
-		void setAnchorPoint(Vector<Real, 3>anchor_point)
+		void setAnchorPoint(Vector<Real, 3> anchor_point)
 		{
 			Mat3f rotMat1 = this->actor1->rot.toMatrix3x3();
 			Mat3f rotMat2 = this->actor2->rot.toMatrix3x3();
@@ -193,7 +219,7 @@ namespace dyno
 			this->r2 = rotMat2.inverse() * (anchor_point - this->actor2->center);
 		}
 
-	public:
+		public:
 		// anchor point in body1 local space
 		Vector<Real, 3> r1;
 		// anchor point in body2 local space
@@ -203,11 +229,13 @@ namespace dyno
 	template<typename Real>
 	class SliderJoint : public Joint<Real>
 	{
-	public:
+		public:
 		DYN_FUNC SliderJoint()
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -220,6 +248,8 @@ namespace dyno
 		{
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
 
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
@@ -228,7 +258,7 @@ namespace dyno
 			this->actor2 = a2;
 		}
 
-		void setAnchorPoint(Vector<Real, 3>anchor_point)
+		void setAnchorPoint(Vector<Real, 3> anchor_point)
 		{
 			Mat3f rotMat1 = this->actor1->rot.toMatrix3x3();
 			this->r1 = rotMat1.inverse() * (anchor_point - this->actor1->center);
@@ -263,8 +293,7 @@ namespace dyno
 			this->useRange = true;
 		}
 
-
-	public:
+		public:
 		bool useRange = false;
 		bool useMoter = false;
 		// motion range
@@ -280,15 +309,16 @@ namespace dyno
 		Quat1f q_init;
 	};
 
-
 	template<typename Real>
 	class HingeJoint : public Joint<Real>
 	{
-	public:
+		public:
 		DYN_FUNC HingeJoint()
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -302,6 +332,9 @@ namespace dyno
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
 
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
+
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
 
@@ -309,7 +342,7 @@ namespace dyno
 			this->actor2 = a2;
 		}
 
-		void setAnchorPoint(Vector<Real, 3>anchor_point)
+		void setAnchorPoint(Vector<Real, 3> anchor_point)
 		{
 			Mat3f rotMat1 = this->actor1->rot.toMatrix3x3();
 			Mat3f rotMat2 = this->actor2->rot.toMatrix3x3();
@@ -338,7 +371,13 @@ namespace dyno
 			this->useMoter = true;
 		}
 
-	public:
+		void setBody2Invalid()
+		{
+			this->bodyId2 = INVALID;
+			this->bodyType2 = ET_Other;
+		}
+
+		public:
 		// motion range
 		Real d_min;
 		Real d_max;
@@ -358,11 +397,13 @@ namespace dyno
 	template<typename Real>
 	class FixedJoint : public Joint<Real>
 	{
-	public:
+		public:
 		DYN_FUNC FixedJoint()
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -375,6 +416,8 @@ namespace dyno
 		{
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
 
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
@@ -395,7 +438,7 @@ namespace dyno
 			this->actor2 = nullptr;
 		}
 
-		void setAnchorPoint(Vector<Real, 3>anchor_point)
+		void setAnchorPoint(Vector<Real, 3> anchor_point)
 		{
 			Mat3f rotMat1 = this->actor1->rot.toMatrix3x3();
 			this->r1 = rotMat1.inverse() * (anchor_point - this->actor1->center);
@@ -412,9 +455,12 @@ namespace dyno
 			}
 		}
 
-		void setAnchorAngle(Quat<Real> quat) { q = quat; }
+		void setAnchorAngle(Quat<Real> quat)
+		{
+			q = quat;
+		}
 
-	public:
+		public:
 		// anchor point position in body1 and body2 local space
 		Vector<Real, 3> r1;
 		Vector<Real, 3> r2;
@@ -423,12 +469,10 @@ namespace dyno
 		Quat<Real> q_init;
 	};
 
-
-
 	template<typename Real>
 	class PointJoint : public Joint<Real>
 	{
-	public:
+		public:
 		PointJoint()
 		{
 			this->bodyId1 = INVALID;
@@ -456,19 +500,20 @@ namespace dyno
 			this->anchorPoint = point;
 		}
 
-	public:
+		public:
 		Vector<Real, 3> anchorPoint;
-
 	};
 
 	template<typename Real>
 	class DistanceJoint : public Joint<Real>
 	{
-	public:
+		public:
 		DistanceJoint()
 		{
 			this->bodyId1 = INVALID;
 			this->bodyId2 = INVALID;
+			this->bodyActualId1 = INVALID;
+			this->bodyActualId2 = INVALID;
 
 			this->bodyType1 = ET_Other;
 			this->bodyType2 = ET_Other;
@@ -480,6 +525,9 @@ namespace dyno
 		{
 			this->bodyId1 = a1->idx;
 			this->bodyId2 = a2->idx;
+
+			this->bodyActualId1 = a1->idx;
+			this->bodyActualId2 = a2->idx;
 
 			this->bodyType1 = a1->shapeType;
 			this->bodyType2 = a2->shapeType;
@@ -493,7 +541,8 @@ namespace dyno
 			this->r2 = r2;
 			this->distance = distance;
 		}
-	public:
+
+		public:
 		// anchor point position in body1 and body2 local space
 		Vector<Real, 3> r1;
 		Vector<Real, 3> r2;
@@ -507,7 +556,7 @@ namespace dyno
 	class DiscreteElements : public TopologyModule
 	{
 		DECLARE_TCLASS(DiscreteElements, TDataType)
-	public:
+		public:
 		typedef typename TDataType::Real Real;
 		typedef typename TDataType::Coord Coord;
 		typedef typename TDataType::Matrix Matrix;
@@ -540,7 +589,7 @@ namespace dyno
 
 		ElementOffset calculateElementOffset();
 
-		//Set basic shapes in local frame
+		// Set basic shapes in local frame
 		void setSpheres(DArray<Sphere3D>& spheres);
 		void setBoxes(DArray<Box3D>& boxes);
 		void setTets(DArray<Tet3D>& tets);
@@ -548,50 +597,122 @@ namespace dyno
 		void setTriangles(DArray<Triangle3D>& triangles);
 		void setTetSDF(DArray<Real>& sdf);
 
-		DArray<Sphere3D>&	spheresInLocal() { return mSpheresInLocal; }
-		DArray<Box3D>&		boxesInLocal() { return mBoxesInLocal; }
-		DArray<Tet3D>&		tetsInLocal() { return mTetsInLocal; }
-		DArray<Capsule3D>&	capsulesInLocal() { return mCapsulesInLocal; }
-		DArray<Triangle3D>&	trianglesInLocal() { return mTrianglesInLocal; }
+		DArray<Sphere3D>& spheresInLocal()
+		{
+			return mSpheresInLocal;
+		}
+		DArray<Box3D>& boxesInLocal()
+		{
+			return mBoxesInLocal;
+		}
+		DArray<Tet3D>& tetsInLocal()
+		{
+			return mTetsInLocal;
+		}
+		DArray<Capsule3D>& capsulesInLocal()
+		{
+			return mCapsulesInLocal;
+		}
+		DArray<Triangle3D>& trianglesInLocal()
+		{
+			return mTrianglesInLocal;
+		}
 
-		DArray<Sphere3D>&	spheresInGlobal() { return mSphereInGlobal; }
-		DArray<Box3D>&		boxesInGlobal() { return mBoxInGlobal; }
-		DArray<Tet3D>&		tetsInGlobal() { return mTetInGlobal; }
-		DArray<Capsule3D>&	capsulesInGlobal() { return mCapsuleInGlobal; }
-		DArray<Triangle3D>& trianglesInGlobal() { return mTriangleInGlobal; }
+		DArray<Sphere3D>& spheresInGlobal()
+		{
+			return mSphereInGlobal;
+		}
+		DArray<Box3D>& boxesInGlobal()
+		{
+			return mBoxInGlobal;
+		}
+		DArray<Tet3D>& tetsInGlobal()
+		{
+			return mTetInGlobal;
+		}
+		DArray<Capsule3D>& capsulesInGlobal()
+		{
+			return mCapsuleInGlobal;
+		}
+		DArray<Triangle3D>& trianglesInGlobal()
+		{
+			return mTriangleInGlobal;
+		}
 
-		DArray<Pair<uint, uint>>& shape2RigidBodyMapping() { return mShape2RigidBody; };
+		DArray<Pair<uint, uint>>& shape2RigidBodyMapping()
+		{
+			return mShape2RigidBody;
+		};
 
-		DArray<Coord>& position() { return mPosition; }
-		DArray<Matrix>& rotation() { return mRotation; }
+		DArray<Coord>& position()
+		{
+			return mPosition;
+		}
+		DArray<Matrix>& rotation()
+		{
+			return mRotation;
+		}
 
-		void setPosition(const DArray<Coord>& pos) { mPosition.assign(pos); }
-		void setRotation(const DArray<Matrix>& rot) { mRotation.assign(rot); }
+		void setPosition(const DArray<Coord>& pos)
+		{
+			mPosition.assign(pos);
+		}
+		void setRotation(const DArray<Matrix>& rot)
+		{
+			mRotation.assign(rot);
+		}
 
-		DArray<BallAndSocketJoint>& ballAndSocketJoints() { return mBallAndSocketJoints; };
-		DArray<SliderJoint>& sliderJoints() { return mSliderJoints; };
-		DArray<HingeJoint>& hingeJoints() { return mHingeJoints; };
-		DArray<FixedJoint>& fixedJoints() { return mFixedJoints; };
-		DArray<PointJoint>& pointJoints() { return mPointJoints; };
-		DArray<DistanceJoint>& distanceJoints() { return mDistanceJoints; };
+		DArray<BallAndSocketJoint>& ballAndSocketJoints()
+		{
+			return mBallAndSocketJoints;
+		};
+		DArray<SliderJoint>& sliderJoints()
+		{
+			return mSliderJoints;
+		};
+		DArray<HingeJoint>& hingeJoints()
+		{
+			return mHingeJoints;
+		};
+		DArray<FixedJoint>& fixedJoints()
+		{
+			return mFixedJoints;
+		};
+		DArray<PointJoint>& pointJoints()
+		{
+			return mPointJoints;
+		};
+		DArray<DistanceJoint>& distanceJoints()
+		{
+			return mDistanceJoints;
+		};
 
 		void setTetBodyId(DArray<int>& body_id);
 		void setTetElementId(DArray<TopologyModule::Tetrahedron>& element_id);
 
-		DArray<Real>&		getTetSDF() { return m_tet_sdf; }
-		DArray<int>&		getTetBodyMapping() { return m_tet_body_mapping; }
-		DArray<TopologyModule::Tetrahedron>& getTetElementMapping() { return m_tet_element_id; }
+		DArray<Real>& getTetSDF()
+		{
+			return m_tet_sdf;
+		}
+		DArray<int>& getTetBodyMapping()
+		{
+			return m_tet_body_mapping;
+		}
+		DArray<TopologyModule::Tetrahedron>& getTetElementMapping()
+		{
+			return m_tet_element_id;
+		}
 
 		void copyFrom(DiscreteElements<TDataType>& de);
 
 		void merge(CArray<std::shared_ptr<DiscreteElements<TDataType>>>& topos);
 
 		void requestDiscreteElementsInGlobal(
-			DArray<Box3D>& boxInGlobal,
-			DArray<Sphere3D>& sphereInGlobal,
-			DArray<Tet3D>& tetInGlobal,
-			DArray<Capsule3D>& capInGlobal,
-			DArray<Triangle3D>& triInGlobal);
+		    DArray<Box3D>& boxInGlobal,
+		    DArray<Sphere3D>& sphereInGlobal,
+		    DArray<Tet3D>& tetInGlobal,
+		    DArray<Capsule3D>& capInGlobal,
+		    DArray<Triangle3D>& triInGlobal);
 
 		void requestBoxInGlobal(DArray<Box3D>& boxInGlobal);
 		void requestSphereInGlobal(DArray<Sphere3D>& sphereInGlobal);
@@ -599,10 +720,10 @@ namespace dyno
 		void requestCapsuleInGlobal(DArray<Capsule3D>& capInGlobal);
 		void requestTriangleInGlobal(DArray<Triangle3D>& triInGlobal);
 
-	protected:
+		protected:
 		void updateTopology() override;
 
-	protected:
+		protected:
 		DArray<Sphere3D> mSpheresInLocal;
 		DArray<Box3D> mBoxesInLocal;
 		DArray<Tet3D> mTetsInLocal;
@@ -631,5 +752,4 @@ namespace dyno
 		DArray<int> m_tet_body_mapping;
 		DArray<TopologyModule::Tetrahedron> m_tet_element_id;
 	};
-}
-
+} // namespace dyno

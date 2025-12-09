@@ -26,6 +26,7 @@ namespace dyno
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemMassParam MassParam;
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemInertiaParam InertiaParam;
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemResetParam ResetParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemHingeInitGestureParam InitHingeParam;
 
 
         typedef typename TDataType::Real Real;
@@ -40,7 +41,10 @@ namespace dyno
         void addRobotArmRigidBodies(std::string urdf_fn,
                                     Real density = 1000,
                                     const std::vector<Vec3f> &target_position = {},
-                                    bool render_boundingBox = true);
+                                    bool render_boundingBox = true,
+                                    bool visual_or_collision = true);
+
+        void loadUrdf(std::string urdf_fn);
 
         void resetStates(ResetParam& param);
         void resetTargets(ResetParam& param);
@@ -74,6 +78,8 @@ namespace dyno
         void setMass(MassParam& mass_param);
         void setInertia(InertiaParam& inertia_param);
         void setTransform(Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
+        void setInitGesture(InitHingeParam& hinge_param);
+        void isObjYUp(bool objYUp);
 
     private:
         std::shared_ptr<BatchRigidBodySystem<TDataType>> batchSolver;

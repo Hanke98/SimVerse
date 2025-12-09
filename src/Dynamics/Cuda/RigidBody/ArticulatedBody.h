@@ -43,6 +43,7 @@ namespace dyno
 		void bindShape(std::shared_ptr<PdActor> actor, Pair<uint, uint> shapeId);
 
 		UrdfInformation urdfInfo;
+		std::vector<UrdfInformation> initialGesture;
 
 	public:
 		DEF_VAR(FilePath, FilePath, "", "");
@@ -53,6 +54,8 @@ namespace dyno
 		DEF_VAR(std::vector<Transform3f>, VehiclesTransform, std::vector<Transform3f>{Transform3f()}, "");
 
 		DEF_INSTANCE_STATE(TextureMesh, TextureMesh, "Texture mesh of the vechicle");
+
+		DEF_VAR(Bool, ObjYUp, false, "The Obj is Y up ");
 
 	public:
 		DEF_ARRAYLIST_STATE(Transform3f, InstanceTransform, DeviceType::GPU, "Instance transforms");

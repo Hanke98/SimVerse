@@ -57,8 +57,14 @@ namespace dyno
     void RobotArmSimulator<TDataType>::addRobotArmRigidBodies(std::string urdf_fn,
                                                               Real density,
                                                               const std::vector<Vec3f> &target_position,
-                                                              bool render_boundingbox) {
-        batchSolver->addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox);
+                                                              bool render_boundingbox,
+                                                              bool visual_or_collision) {
+        batchSolver->addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox, visual_or_collision);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::loadUrdf(std::string urdf_fn) {
+        batchSolver->loadUrdf(urdf_fn);
     }
 
     template<typename TDataType>
@@ -270,6 +276,16 @@ namespace dyno
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::setAngularDamping(Real damping) {
         batchSolver->varAngularDamping()->setValue(damping);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setInitGesture(InitHingeParam& hinge_param) {
+        batchSolver->setInitGesture(hinge_param);
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::isObjYUp(bool objYUp) {
+        batchSolver->varObjYUp()->setValue(objYUp);
     }
 
     DEFINE_CLASS(RobotArmSimulator);

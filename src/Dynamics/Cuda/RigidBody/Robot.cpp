@@ -70,9 +70,9 @@ namespace dyno
 
             for (int l = 0; l < this->urdfInfo.links.size(); ++l) {
 
-                auto it = this->urdfInfo.links[l].shapeId;
+                auto it = this->urdfInfo.links[l].visualShapeId;
                 linkIndex[this->urdfInfo.links[l].name] = it;
-                std::cout << "name of link: " << this->urdfInfo.links[l].name << " | shapeId of link: " << this->urdfInfo.links[l].shapeId << std::endl;
+                std::cout << "name of link: " << this->urdfInfo.links[l].name << " | shapeId of link: " << this->urdfInfo.links[l].visualShapeId << std::endl;
                 auto up = texMesh->shapes()[it]->boundingBox.v1;
                 auto down = texMesh->shapes()[it]->boundingBox.v0;
 
@@ -105,19 +105,19 @@ namespace dyno
 
                 if (this->urdfInfo.joints[j].type == REVOLUTE) {
                     // auto &joint = this->createHingeJoint(actors[linkIndex[parentName]], actors[linkIndex[childName]]);
-                    auto &joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
+                    auto &joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
                     joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[i].translation());
                     joint.setAxis(this->urdfInfo.joints[j].originWorld.rotation() * this->urdfInfo.joints[j].axis);
                     joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
                 }
                 if (this->urdfInfo.joints[j].type == PRISMATIC) {
-                    auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
+                    auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
                     joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[i].translation());
                     joint.setAxis(this->urdfInfo.joints[j].originWorld.rotation() * this->urdfInfo.joints[j].axis);
                     joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
                 }
                 if (this->urdfInfo.joints[j].type == FIXED) {
-                    auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
+                    auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
                     joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[i].translation());
                 }
                 std::cout << j + 1 << " joint parent: "<< parentName.c_str() << " | actorId:" << linkIndex[parentName] << std::endl;

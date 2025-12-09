@@ -18,10 +18,10 @@ int main() {
     };
     Real kd[7] = {
         20 * scale,
-        10 * scale,
+        10 * scale, // 10
         2 * scale,
-        10 * scale,
-        2 * scale,  //joint 4
+        10 * scale,  // 10
+        2 * scale,  // 2
         8 * scale,
         1 * scale,
     };
@@ -33,32 +33,44 @@ int main() {
     simulator.createScene();
     std::cout << "场景创建完成" << std::endl;
 
-    float dt = 0.01;
-    float density = 2500.0f;
+    float dt = 0.002;
+    float density = 2000.0f;
+    float damping = 250.0f;
     bool enableGravity = false;
     bool enableFriction = false;
     bool enableRendering = true;
     bool enableSaveScreen = false;
+    bool render_collision = false;
     std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/";
     Vec3f base{ -0.0f, -0.0f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
     std::vector<Vec3f> target_position;
     Vec3f target1{0.5f, 0.5f, 0.5f};
     target_position.push_back(target1);
-    target_position.push_back(target1);
-    int num_copies_x = 3;
+    // target_position.push_back(target1);
+    int num_copies_x = 1;
     int num_copies_y = 1;
-    int num_copies_z = 2;
+    int num_copies_z = 1;
     std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";
     bool render_boundingbox = false;
+    RobotArmSimulator<DataType3f>::InitHingeParam hinge_param;
+    hinge_param.num_bodies = 1;
+    hinge_param.ids.push_back(0);
+    // hinge_param.ids.push_back(1);
+    std::vector<float> theta{0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    hinge_param.theta.push_back(theta);
+    // hinge_param.theta.push_back(theta);
+
 
     simulator.initBatchSolver();
     simulator.setDt(dt);
     simulator.enableGravity(enableGravity);
     simulator.enableFriction(enableFriction);
     simulator.setTransform(base, offset, num_copies_x, num_copies_y, num_copies_z);
-    simulator.setAngularDamping(50.0);
-    simulator.addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox);
+    simulator.setAngularDamping(damping);
+    simulator.isObjYUp(!render_collision);
+    simulator.addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox, render_collision);
+    // simulator.setInitGesture(hinge_param);
 
     //
     std::vector<float> moterVelocities1{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
@@ -68,7 +80,7 @@ int main() {
     simulator.setupSceneGraph();
     std::cout << "初始化窗口" << std::endl;
     if (enableRendering) {
-        simulator.initialize(1280, 768, 1.5);
+        simulator.initialize(1920, 1080, 1.0);
     }
     std::cout << "仿真环境初始化完成" << std::endl;
     UrdfInformation chainInfo = simulator.getKinematicsChainInfo();
@@ -102,13 +114,13 @@ int main() {
     };
 
     Real targetAngle[7] = {
-        Real(1.0),    // joint 0
-        Real(1.3),    // joint 1
-        Real(0.3),    // joint 2
-        Real(-0.3),    // joint 3
+        Real(0.3),    // joint 0
+        Real(1.0),    // joint 1
+        Real(0),    // joint 2
+        Real(-0.6),    // joint 3
         Real(0.3),    // joint 4
         Real(1.8),    // joint 5
-        Real(0.1)     // joint 6
+        Real(0.3)     // joint 6
     };
 
     int checkFrequancy = 100;
@@ -116,21 +128,21 @@ int main() {
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
 
-        if (i == 500) {
-            RobotArmSimulator<DataType3f>::ResetParam param;
-            param.num_bodies = 2;
-            param.ids.push_back(0);
-            param.ids.push_back(1);
-            Vec3f newTarget{ 0.5f, 1.0f, 0.5f };
-            param.targetPosition.push_back(newTarget);
-            param.targetPosition.push_back(newTarget);
-            simulator.resetStates(param);
-        }
+        // if (i == 500) {
+        //     RobotArmSimulator<DataType3f>::ResetParam param;
+        //     param.num_bodies = 1;
+        //     param.ids.push_back(0);
+        //     // param.ids.push_back(1);
+        //     Vec3f newTarget{ 0.5f, 1.0f, 0.5f };
+        //     param.targetPosition.push_back(newTarget);
+        //     // param.targetPosition.push_back(newTarget);
+        //     simulator.resetStates(param);
+        // }
 
         RobotArmSimulator<DataType3f>::LocalIndexParam local_param;
-        local_param.num_bodies = 2;
+        local_param.num_bodies = 1;
         local_param.ids.push_back(0);
-        local_param.ids.push_back(1);
+        // local_param.ids.push_back(1);
         for (int i = 0; i <= 7; ++i) {
             local_param.localRigidBodyid.push_back(i);
         }
@@ -205,6 +217,8 @@ int main() {
             Real e  = targetAngle[j] - hingeAngle;
             torque[j] = kp[j] * e - kd[j] * hingeVelocity ;
             torque[j] = std::max(-effortLimit[j]/1, std::min(effortLimit[j]/1, torque[j]));
+            torque[j] -= dampings[j] * hingeVelocity * (1 - damping * dt);
+            // torque[j] -= dampings[j] * hingeVelocity;
 
             // 更新上一帧角度
             hingeAngle_old[j] = hingeAngle;
@@ -243,25 +257,27 @@ int main() {
             }
         }
 
-        moterVelocities1 = {
-            (float)torque[0],
-            (float)torque[1],
-            (float)torque[2],
-            (float)torque[3],
-            (float)torque[4],
-            (float)torque[5],
-            (float)torque[6]
-        };
+        // moterVelocities1 = {
+        //     (float)torque[0],
+        //     (float)torque[1],
+        //     (float)torque[2],
+        //     (float)torque[3],
+        //     (float)torque[4],
+        //     (float)torque[5],
+        //     (float)torque[6]
+        // };
 
         RobotArmSimulator<DataType3f>::HingeTorqueParam param;
-        param.num_bodies = 2;
+        param.num_bodies = 1;
         param.ids.push_back(0);
-        param.ids.push_back(1);
+        // param.ids.push_back(1);
         param.torques.push_back(moterVelocities1);
-        param.torques.push_back(moterVelocities1);
+        // param.torques.push_back(moterVelocities1);
         simulator.setHingeTorques(param);
-
         simulator.stepSimulation(enableRendering, enableSaveScreen, savePath);
+        if (i == 0) {
+            simulator.setInitGesture(hinge_param);
+        }
 
         i++;
     }

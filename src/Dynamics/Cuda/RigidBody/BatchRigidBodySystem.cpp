@@ -3,6 +3,7 @@
 #include "GLSurfaceVisualModule.h"
 #include "Mapping/DiscreteElementsToTriangleSet.h"
 #include "Mapping/DiscreteSpheresToTriangleSet.h"
+// #include "UrdfFunc.h"
 
 namespace dyno
 {
@@ -222,8 +223,19 @@ namespace dyno
     }
 
     template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::loadUrdf(std::string urdf_fn) {
+        std::string filename = getAssetPath() + urdf_fn;
+        if (this->varFilePath()->getValue() != filename)
+        {
+            this->varFilePath()->setValue(FilePath(filename));
+        } else {
+            std::cout << "Robot: Skip loading file" << std::endl;
+        }
+    }
+
+    template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::addRobotArmRigidBodies(
-        std::string urdf_fn, Real density, std::vector<Vec3f> targetPosition, bool renderBoundingBox) {
+        std::string urdf_fn, Real density, std::vector<Vec3f> targetPosition, bool renderBoundingBox, bool visual_or_collision) {
             int robotarmIndex = 0;
             auto instances = this->varVehiclesTransform()->getValue();
             auto robotarmSize = instances.size();
@@ -235,6 +247,51 @@ namespace dyno
                 this->varFilePath()->setValue(FilePath(filename));
             } else {
                 std::cout << "Robot: Skip loading file" << std::endl;
+            }
+
+            this->varVisualOrCollision()->setValue(visual_or_collision);
+
+            for (int j = 0; j < this->urdfInfo.joints.size(); ++j) {
+                auto parentId = this->urdfInfo.joints[j].parentLinkId;
+                auto childId = this->urdfInfo.joints[j].childLinkId;
+
+                // 获取 Parent Joint 的世界旋转矩阵 (R_PJ)
+                Mat3f R_PJ = this->urdfInfo.joints[j].originWorld.rotation();
+                // 获取 Bounding Box 的世界旋转矩阵 (R_BB)
+                Mat3f R_BB = this->urdfInfo.links[childId].T_visual_bb_world.rotation();
+                // if (!visual_or_collision) {
+                //     R_BB = this->urdfInfo.links[childId].T_visual_bb_world.rotation();
+                // }
+                // else {
+                //     R_BB = this->urdfInfo.links[childId].T_collision_bb_world.rotation();
+                // }
+                // 计算相对旋转 (R_PJ_to_BB = R_PJ_transpose * R_BB)
+                Mat3f relativeRotation = R_PJ.transpose() * R_BB;
+
+                // 获取世界坐标系下的相对平移向量 (t_BB - t_PJ)
+                Vec3f worldDeltaTranslation = this->urdfInfo.links[childId].T_visual_bb_world.translation() - this->urdfInfo.joints[j].originWorld.translation();
+                // if (!visual_or_collision) {
+                //     worldDeltaTranslation = this->urdfInfo.links[childId].T_visual_bb_world.translation() - this->urdfInfo.joints[j].originWorld.translation();
+                // }
+                // else {
+                //     worldDeltaTranslation = this->urdfInfo.links[childId].T_collision_bb_world.translation() - this->urdfInfo.joints[j].originWorld.translation();
+                // }
+
+                // 获取 Parent Joint 的世界旋转矩阵转置 (R_PJ_transpose)
+                Mat3f R_PJ_transpose = this->urdfInfo.joints[j].originWorld.rotation().transpose();
+                // 计算相对平移
+                Vec3f relativeTranslation = R_PJ_transpose * worldDeltaTranslation;
+                this->urdfInfo.links[childId].T_visual_bb_local.translation() = relativeTranslation;
+                this->urdfInfo.links[childId].T_visual_bb_local.rotation() = relativeRotation;
+                // if (!visual_or_collision) {
+                //     this->urdfInfo.links[childId].T_visual_bb_local.translation() = relativeTranslation;
+                //     this->urdfInfo.links[childId].T_visual_bb_local.rotation() = relativeRotation;
+                // }
+                // else {
+                //     this->urdfInfo.links[childId].T_collision_bb_local.translation() = relativeTranslation;
+                //     this->urdfInfo.links[childId].T_collision_bb_local.rotation() = relativeRotation;
+                // }
+
             }
 
             auto addRigidArmExample = [&](const Vec3f& _targetPosition)
@@ -255,13 +312,18 @@ namespace dyno
 
                 for (int l = 0; l < this->urdfInfo.links.size(); ++l) {
 
-                    auto it = this->urdfInfo.links[l].shapeId;
+                    uint it;
+
+                    if (!visual_or_collision) {
+                        it = this->urdfInfo.links[l].visualShapeId;
+                    } else {
+                        it = this->urdfInfo.links[l].collisionShapeId;
+                    }
 
                     auto up = texMesh->shapes()[it]->boundingBox.v1;
                     auto down = texMesh->shapes()[it]->boundingBox.v0;
 
-                    // rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + instances[robotarmIndex].translation();
-                    rigidbody.position = this->urdfInfo.links[l].T_center_world.translation() + instances[robotarmIndex].translation();
+                    rigidbody.position = texMesh->shapes()[it]->boundingTransform.translation() + instances[robotarmIndex].translation();
 
                     initialPositions.push_back(rigidbody.position);
                     initialQuats.push_back(rigidbody.angle);
@@ -281,11 +343,13 @@ namespace dyno
                     if (this->urdfInfo.links[l].isRoot) {
                         this->bindBox(actor, box, 1000000000000);
                     } else {
-                        this->bindBox(actor, box, density);
+                        if (!visual_or_collision) {
+                            this->bindBox(actor, box, density);
+                        } else {
+                            this->bindBox(actor, box, this->urdfInfo.links[l].volume, this->urdfInfo.links[l].localInertia, density);
+                        }
                     }
-
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
-
                     mb.body_indices.push_back(actor->idx);
                 }
 
@@ -297,22 +361,42 @@ namespace dyno
                     auto childId = this->urdfInfo.joints[j].childLinkId;
 
                     if (this->urdfInfo.joints[j].type == REVOLUTE) {
-                        auto &joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
-                        joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                        joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-                        joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                        if (!visual_or_collision) {
+                            auto& joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
+                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                            joint.setAxis(this->urdfInfo.joints[j].axisWorld);
+                            joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                        } else {
+                            auto& joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].collisionShapeId], actors[this->urdfInfo.links[childId].collisionShapeId]);
+                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                            joint.setAxis(this->urdfInfo.joints[j].axisWorld);
+                            joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                        }
+
                         mb.hinge_joint_indices.push_back(j);
                     }
                     if (this->urdfInfo.joints[j].type == PRISMATIC) {
-                        auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
-                        joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                        joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-                        joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                        if (!visual_or_collision) {
+                            auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
+                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                            joint.setAxis(this->urdfInfo.joints[j].axisWorld);
+                            joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                        } else {
+                            auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].collisionShapeId], actors[this->urdfInfo.links[childId].collisionShapeId]);
+                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                            joint.setAxis(this->urdfInfo.joints[j].axisWorld);
+                            joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                        }
                         mb.slider_joint_indices.push_back(j);
                     }
                     if (this->urdfInfo.joints[j].type == FIXED) {
-                        auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].shapeId], actors[this->urdfInfo.links[childId].shapeId]);
-                        joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                        if (!visual_or_collision) {
+                            auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
+                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                        } else {
+                            auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].collisionShapeId], actors[this->urdfInfo.links[childId].collisionShapeId]);
+                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                        }
                         mb.fixed_joint_indices.push_back(j);
                     }
                 }
@@ -373,11 +457,6 @@ namespace dyno
     }
 
     template<typename TDataType>
-    void BatchRigidBodySystem<TDataType>::setInitGesture(BatchRigidBodySystemHingeInitGestureParam& hinge_param) {
-
-    }
-
-    template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::resetBatchMultiBodies(BatchRigidBodySystemResetParam& reset_param)
     {
         Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
@@ -404,6 +483,150 @@ namespace dyno
 
         this->stateCenter()->assign(hCenters);
         this->stateQuaternion()->assign(hAngels);
+        this->stateRotationMatrix()->assign(hRotations);
+        this->stateVelocity()->assign(hVelocities);
+        this->stateAngularVelocity()->assign(hAngularVelocities);
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::setInitGesture(BatchRigidBodySystemHingeInitGestureParam& hinge_param) {
+        this->initialGesture.clear();
+        for (int i = 0; i < ctrl_mb_chains.size(); i++) {
+            this->initialGesture.push_back(this->urdfInfo); // 复制零位姿态
+        }
+
+        std::vector<std::vector<int>> linkChildJoints(this->urdfInfo.links.size());
+        int rootLinkIndex = -1;
+
+        for (int i = 0; i < this->urdfInfo.joints.size(); ++i) {
+            int pId = this->urdfInfo.joints[i].parentLinkId;
+            linkChildJoints[pId].push_back(i);
+        }
+
+        // 寻找根节点 (isRoot 为 true 的 link)
+        for (int i = 0; i < this->urdfInfo.links.size(); ++i) {
+            if (this->urdfInfo.links[i].isRoot) {
+                rootLinkIndex = i;
+                break;
+            }
+        }
+
+        // 对每个铰链关节进行处理
+        for (size_t i = 0; i < hinge_param.num_bodies; i++) {
+            for (auto it : hinge_param.ids) {
+                if(it >= ctrl_mb_chains.size()) continue;
+                auto& initialGesture = this->initialGesture[it];
+
+                for (int j = 0; j < ctrl_mb_chains[it].hinge_joint_indices.size(); j++) {
+                    auto jointIndex = ctrl_mb_chains[it].hinge_joint_indices[j];
+
+                    // 引用原始数据 (R_original)
+                    auto& originalJoint = this->urdfInfo.joints[jointIndex];
+                    auto& originalLink = this->urdfInfo.links[originalJoint.childLinkId];
+                    auto& originalParentLink = this->urdfInfo.links[originalJoint.parentLinkId];
+
+                    // 引用正在修改的姿态数据 (R_current)
+                    auto& currentJointGesture = initialGesture.joints[jointIndex];
+                    auto& currentLinkGesture = initialGesture.links[originalJoint.childLinkId];
+
+                    if (originalJoint.type == REVOLUTE) {
+                        const auto& theta = hinge_param.theta[i][j];
+                        // std::cout << "theta: " << i << ", " << j << ", " << theta << std::endl;
+                        // 轴在 Parent Link Frame 下的表示（来自原始零位姿态）
+                        // Vec3f axisParent = originalJoint.originLocal.rotation() * originalJoint.axis;
+                        Vec3f axisParent = originalParentLink.T_world.rotation().inverse() * originalJoint.axisWorld;
+                        // if (i == 0 && j == 1) {
+                        //     std::cout << "axisParent: " << i << ", " << j << ", " << axisParent << std::endl;
+                        // }
+                        // std::cout << "axisParent: " << axisParent.x << ", " << axisParent.y << ", " << axisParent.z << std::endl;
+                        axisParent.normalize();
+                        TQuat thetaQuat(theta, axisParent);
+                        Mat3f rotationMatrix = thetaQuat.toMatrix3x3();
+
+                        currentJointGesture.originLocal.rotation() = rotationMatrix * originalJoint.originLocal.rotation();
+
+                        currentLinkGesture.T_visual_bb_local.rotation() = originalLink.T_visual_bb_local.rotation();
+                        currentLinkGesture.T_collision_bb_local.rotation() = originalLink.T_collision_bb_local.rotation();
+
+                        currentLinkGesture.T_local.rotation() = rotationMatrix * originalLink.T_local.rotation();
+                    }
+                }
+                // 定义递归 Lambda 函数
+                std::function<void(int, const Transform3f&)> updateWorldRecursive =
+                [&](int currentLinkIdx, const Transform3f& parentTWorld)
+                {
+                    UrdfLink& currentLink = initialGesture.links[currentLinkIdx];
+
+                    currentLink.T_world = parentTWorld;
+                    currentLink.T_visual_bb_world = composeTransform(currentLink.T_world, currentLink.T_visual_bb_local);
+                    currentLink.T_collision_bb_world = composeTransform(currentLink.T_world, currentLink.T_collision_bb_local);
+
+                    for (int jointIdx : linkChildJoints[currentLinkIdx]) {
+                        UrdfJoint& childJoint = initialGesture.joints[jointIdx];
+
+                        // JointWorld = ParentLinkWorld * JointLocal
+                        childJoint.originWorld = composeTransform(currentLink.T_world, childJoint.originLocal);
+
+                        // 计算关节轴的世界方向 (轴由 Joint 的世界旋转旋转)
+                        childJoint.axisWorld = childJoint.originWorld.rotation() * this->urdfInfo.joints[jointIdx].axis; // 轴本身不变，但世界方向会变
+
+                        updateWorldRecursive(childJoint.childLinkId, childJoint.originWorld);
+                    }
+                };
+
+                if (rootLinkIndex != -1) {
+                    auto& initialRootGesture = initialGesture.links[rootLinkIndex];
+                    Transform3f rootWorldTransform = initialRootGesture.T_world;
+                    Transform3f rootLocalTransform;
+                    // Root Link 的 T_bounding_box_local 平移计算
+                    Vec3f worldDeltaTranslation;
+
+                    worldDeltaTranslation = initialGesture.links[rootLinkIndex].T_visual_bb_world.translation()
+                                            - initialRootGesture.T_world.translation();
+
+
+                    Mat3f R_PJ_transpose = initialRootGesture.T_world.rotation().transpose();
+                    Vec3f relativeTranslation = R_PJ_transpose * worldDeltaTranslation;
+                    rootLocalTransform.translation() = relativeTranslation;
+                    initialGesture.links[rootLinkIndex].T_visual_bb_local.translation() = rootLocalTransform.translation();
+
+                    Mat3f R_PJ = this->urdfInfo.links[rootLinkIndex].T_world.rotation();
+                    Mat3f R_BB = this->urdfInfo.links[rootLinkIndex].T_visual_bb_world.rotation();
+                    Mat3f relativeRotation = R_PJ.transpose() * R_BB;
+                    initialGesture.links[rootLinkIndex].T_visual_bb_local.rotation() = relativeRotation;
+
+                    updateWorldRecursive(rootLinkIndex, rootWorldTransform);
+                }
+            }
+        }
+
+        Array<Vec3f, DeviceType::CPU> hCenters = gethCenters();
+        Array<TQuat, CPU> hAngles = gethAngles();
+        Array<Vec3f, DeviceType::CPU> hVelocities = gethVelocities();
+        Array<Vec3f, CPU> hAngularVelocities = gethAngularVelocities();
+        Array<Mat3f, CPU> hRotations = gethRotationMatrix();
+
+        auto instances = this->varVehiclesTransform()->getValue();
+
+        for (int i = 0; i < hinge_param.num_bodies; i++) {
+            auto it = hinge_param.ids[i];
+            for (int j = 0; j < ctrl_mb_chains[it].body_indices.size(); j++) {
+                auto index = ctrl_mb_chains[it].body_indices[j];
+                hCenters[index] = this->initialGesture[it].links[j].T_visual_bb_world.translation() + instances[it].translation();
+                std::cout << "Translation of link: " << this->initialGesture[it].links[j].name << "\n"
+                    << this->initialGesture[it].links[j].T_visual_bb_world.translation() << std::endl;
+                // std::cout << it << " hCenter: " << hCenters[index] << std::endl;
+                hAngles[index] = TQuat(this->initialGesture[it].links[j].T_visual_bb_world.rotation());
+                std::cout << it << " index: " << index << " hAngles: "
+                << hAngles[index].x << ", " << hAngles[index].y << ", " << hAngles[index].z << ", " << hAngles[index].w << ", "  << std::endl;
+                hRotations[index] = hAngles[index].toMatrix3x3(); // 必须基于 hAngles
+                hVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
+                hAngularVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
+            }
+        }
+
+        this->stateCenter()->assign(hCenters);
+        this->stateQuaternion()->assign(hAngles);
         this->stateRotationMatrix()->assign(hRotations);
         this->stateVelocity()->assign(hVelocities);
         this->stateAngularVelocity()->assign(hAngularVelocities);

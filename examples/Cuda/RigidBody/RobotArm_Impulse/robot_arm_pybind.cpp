@@ -263,7 +263,7 @@ void bindUrdf(py::module_ &m) {
         .def_readwrite("T_local",          &UrdfLink::T_local)
         .def_readwrite("T_center_world",   &UrdfLink::T_center_world)
         .def_readwrite("T_center_local",   &UrdfLink::T_center_local)
-        .def_readwrite("shapeId",          &UrdfLink::shapeId)
+        .def_readwrite("shapeId",          &UrdfLink::visualShapeId)
         .def_readwrite("isRoot",           &UrdfLink::isRoot);
 
     py::class_<UrdfJoint>(m, "UrdfJoint")

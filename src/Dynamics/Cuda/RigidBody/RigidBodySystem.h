@@ -85,6 +85,13 @@ namespace dyno
 			const BoxInfo& box,
 			const Real density = Real(100));
 
+		void bindBox(
+			const std::shared_ptr<PdActor> actor,
+			const BoxInfo& box,
+			const Real vol,
+			const Mat3f inertia,
+			const Real density /*= Real(100)*/);
+
 		void bindSphere(
 			const std::shared_ptr<PdActor> actor,
 			const SphereInfo& sphere,

@@ -101,7 +101,10 @@ public:
 
     void addExampleRigidBodies(std::string urdf_fn, Vec3f base, Vec3f offset, Real density,
                                int num_copies_x, int num_copies_y, int num_copies_z);
-    void addRobotArmRigidBodies(std::string urdf_fn, Real density, std::vector<Vec3f> targetPosition, bool renderBoundingBox);
+    void addRobotArmRigidBodies(std::string urdf_fn, Real density, std::vector<Vec3f> targetPosition,
+      bool renderBoundingBox, bool visual_or_collision/* visual == 0, collision == 1*/);
+
+    void loadUrdf(std::string urdf_fn);
     // ------------------------------------
 
     // ------------------------------------
@@ -145,6 +148,8 @@ protected:
     std::vector<Vec3f> initialPositions; // initial position of all rigid bodies
     std::vector<TQuat> initialQuats; // initial rotation quaternion of all rigid bodies
     std::vector<Matrix> initialRotations; // initial rotation matrix of all rigid bodies
+
+    DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
   };
 
 } // namespace dyno

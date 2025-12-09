@@ -145,6 +145,39 @@ namespace dyno
 	}
 
 	template<typename TDataType>
+	void RigidBodySystem<TDataType>::bindBox(
+		const std::shared_ptr<PdActor> actor,
+		const BoxInfo& box,
+		const Real vol,
+		const Mat3f inertia,
+		const Real density /*= Real(100)*/)
+	{
+		auto& rigidbody = mHostRigidBodyStates[actor->idx];
+
+		float lx = 2.0f * box.halfLength[0];
+		float ly = 2.0f * box.halfLength[1];
+		float lz = 2.0f * box.halfLength[2];
+
+		Real mass = density * vol;
+
+		// Calculate the inertia of box in the local frame
+		auto localInertia = density * inertia;
+
+		// Transform into the rigid body frame
+		auto rotShape = box.rot.toMatrix3x3();
+		auto rotBody = rigidbody.angle.toMatrix3x3();
+
+		auto rigidbodyInertia = rotBody * (rotShape * localInertia * rotShape.transpose() + ParallelAxisTheorem(box.center, mass)) * rotBody.transpose();
+
+		rigidbody.mass += mass;
+		rigidbody.inertia += rigidbodyInertia;
+		rigidbody.shapeType = ET_COMPOUND;
+
+		mHostShape2RigidBodyMapping.insert(mHostShape2RigidBodyMapping.begin() + mHostSpheres.size() + mHostBoxes.size(), Pair<uint, uint>(mHostBoxes.size(), (uint)actor->idx));
+		mHostBoxes.push_back(box);
+	}
+
+	template<typename TDataType>
 	void RigidBodySystem<TDataType>::bindSphere(
 		const std::shared_ptr<PdActor> actor, 
 		const SphereInfo& sphere, 

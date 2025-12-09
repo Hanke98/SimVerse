@@ -389,10 +389,10 @@ namespace dyno
             int childId = joint.childLinkId;
             UrdfLink& childLink = urdfInfo.links[childId];
             childLink.T_local = joint.originLocal;
-            std::cout << "Name of link: " << childLink.name << "\n"
-                      << "Rotation: " << childLink.T_local.rotation() << "\n"
-                      << "Translation: " << childLink.T_local.translation() << "\n"
-                      << std::endl;
+            // std::cout << "Name of link: " << childLink.name << "\n"
+            //           << "Rotation: " << childLink.T_local.rotation() << "\n"
+            //           << "Translation: " << childLink.T_local.translation() << "\n"
+            //           << std::endl;
             Transform3f T_world_child = joint.originWorld;  // world -> child
 
             // 递归子 link

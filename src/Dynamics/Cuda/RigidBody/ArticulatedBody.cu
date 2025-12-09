@@ -148,7 +148,7 @@ namespace dyno
 		}
 		else if (ext == ".urdf")
 		{
-			loadURDFTextureMesh(texMesh, name, urdfInfo, true);
+			loadURDFTextureMesh(texMesh, name, urdfInfo, varObjYUp()->getValue());
 		}
 	}
 

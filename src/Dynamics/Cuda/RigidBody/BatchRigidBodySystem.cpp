@@ -264,24 +264,16 @@ namespace dyno
 
                 // 获取 Parent Joint 的世界旋转矩阵 (R_PJ)
                 Mat3f R_PJ = this->urdfInfo.joints[j].originWorld.rotation();
+
                 // 获取 Bounding Box 的世界旋转矩阵 (R_BB)
                 Mat3f R_BB = T_boundingbox_world.rotation();
-                // if (!visual_or_collision) {
-                //     R_BB = this->urdfInfo.links[childId].T_visual_bb_world.rotation();
-                // } else {
-                //     R_BB = this->urdfInfo.links[childId].T_collision_bb_world.rotation();
-                // }
+
                 // 计算相对旋转 (R_PJ_to_BB = R_PJ_transpose * R_BB)
                 Mat3f relativeRotation = R_PJ.transpose() * R_BB;
 
                 // 获取世界坐标系下的相对平移向量 (t_BB - t_PJ)
                 Vec3f worldDeltaTranslation = T_boundingbox_world.translation()
                                               - this->urdfInfo.joints[j].originWorld.translation();
-                // if (!visual_or_collision) {
-                //     worldDeltaTranslation = this->urdfInfo.links[childId].T_visual_bb_world.translation() - this->urdfInfo.joints[j].originWorld.translation();
-                // } else {
-                //     worldDeltaTranslation = this->urdfInfo.links[childId].T_collision_bb_world.translation() - this->urdfInfo.joints[j].originWorld.translation();
-                // }
 
                 // 获取 Parent Joint 的世界旋转矩阵转置 (R_PJ_transpose)
                 Mat3f R_PJ_transpose = this->urdfInfo.joints[j].originWorld.rotation().transpose();
@@ -332,8 +324,6 @@ namespace dyno
                     initialPositions.push_back(rigidbody.position);
                     initialQuats.push_back(rigidbody.angle);
                     initialRotations.push_back(rigidbody.angle.toMatrix3x3());
-
-                    std::cout << "Position: " << rigidbody.position << std::endl;
 
                     if (this->urdfInfo.links[l].isRoot) {
                         rigidbody.motionType = BodyType::Static;
@@ -537,14 +527,10 @@ namespace dyno
 
                     if (originalJoint.type == REVOLUTE) {
                         const auto& theta = hinge_param.theta[i][j];
-                        // std::cout << "theta: " << i << ", " << j << ", " << theta << std::endl;
+
                         // 轴在 Parent Link Frame 下的表示（来自原始零位姿态）
-                        // Vec3f axisParent = originalJoint.originLocal.rotation() * originalJoint.axis;
                         Vec3f axisParent = originalParentLink.T_world.rotation().inverse() * originalJoint.axisWorld;
-                        // if (i == 0 && j == 1) {
-                        //     std::cout << "axisParent: " << i << ", " << j << ", " << axisParent << std::endl;
-                        // }
-                        // std::cout << "axisParent: " << axisParent.x << ", " << axisParent.y << ", " << axisParent.z << std::endl;
+
                         axisParent.normalize();
                         TQuat thetaQuat(theta, axisParent);
                         Mat3f rotationMatrix = thetaQuat.toMatrix3x3();
@@ -566,9 +552,6 @@ namespace dyno
                     currentLink.T_world = parentTWorld;
                     currentLink.T_visual_bb_world = composeTransform(currentLink.T_world, currentLink.T_visual_bb_local);
                     currentLink.T_collision_bb_world = composeTransform(currentLink.T_world, currentLink.T_collision_bb_local);
-                    std::cout << "T_collision_bb_world: " << currentLink.T_collision_bb_world.translation() << std::endl;
-                    std::cout << "T_world: " << currentLink.T_world.translation() << std::endl;
-                    std::cout << "T_local: " << currentLink.T_collision_bb_local.translation() << std::endl;
 
                     for (int jointIdx : linkChildJoints[currentLinkIdx]) {
                         UrdfJoint& childJoint = initialGesture.joints[jointIdx];
@@ -642,7 +625,6 @@ namespace dyno
                     hCenters[index] = this->initialGesture[it].links[j].T_collision_bb_world.translation() + instances[it].translation();
                     hAngles[index] = TQuat(this->initialGesture[it].links[j].T_collision_bb_world.rotation());
                 }
-                std::cout << "hCenters[" << index << "]: " << hCenters[index] << std::endl;
                 hRotations[index] = hAngles[index].toMatrix3x3(); // 必须基于 hAngles
                 hVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
                 hAngularVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);

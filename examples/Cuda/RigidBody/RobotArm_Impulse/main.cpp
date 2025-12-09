@@ -40,7 +40,7 @@ int main() {
     bool enableFriction = false;
     bool enableRendering = true;
     bool enableSaveScreen = false;
-    bool render_collision = false;
+    bool render_collision = true;
     std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/";
     Vec3f base{ -0.0f, -0.0f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
@@ -57,7 +57,7 @@ int main() {
     hinge_param.num_bodies = 1;
     hinge_param.ids.push_back(0);
     // hinge_param.ids.push_back(1);
-    std::vector<float> theta{0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    std::vector<float> theta{0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
     hinge_param.theta.push_back(theta);
     // hinge_param.theta.push_back(theta);
 

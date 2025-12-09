@@ -617,7 +617,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             mergedShape->boundingBox       = TAlignedBox3D<Real>(lo, hi);
             mergedShape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
 
-            link.T_collision_bb_world = mergedShape->boundingTransform;
+            link.T_collision_bb_world = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
 
             reShapes.push_back(mergedShape);
             link.collisionShapeId = globalShapeId;

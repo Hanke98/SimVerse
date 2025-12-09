@@ -255,25 +255,31 @@ namespace dyno
                 auto parentId = this->urdfInfo.joints[j].parentLinkId;
                 auto childId = this->urdfInfo.joints[j].childLinkId;
 
+                Transform3f T_boundingbox_world;
+                if (!this->varVisualOrCollision()->getValue()) {
+                    T_boundingbox_world = this->urdfInfo.links[childId].T_visual_bb_world;
+                } else {
+                    T_boundingbox_world = this->urdfInfo.links[childId].T_collision_bb_world;
+                }
+
                 // 获取 Parent Joint 的世界旋转矩阵 (R_PJ)
                 Mat3f R_PJ = this->urdfInfo.joints[j].originWorld.rotation();
                 // 获取 Bounding Box 的世界旋转矩阵 (R_BB)
-                Mat3f R_BB = this->urdfInfo.links[childId].T_visual_bb_world.rotation();
+                Mat3f R_BB = T_boundingbox_world.rotation();
                 // if (!visual_or_collision) {
                 //     R_BB = this->urdfInfo.links[childId].T_visual_bb_world.rotation();
-                // }
-                // else {
+                // } else {
                 //     R_BB = this->urdfInfo.links[childId].T_collision_bb_world.rotation();
                 // }
                 // 计算相对旋转 (R_PJ_to_BB = R_PJ_transpose * R_BB)
                 Mat3f relativeRotation = R_PJ.transpose() * R_BB;
 
                 // 获取世界坐标系下的相对平移向量 (t_BB - t_PJ)
-                Vec3f worldDeltaTranslation = this->urdfInfo.links[childId].T_visual_bb_world.translation() - this->urdfInfo.joints[j].originWorld.translation();
+                Vec3f worldDeltaTranslation = T_boundingbox_world.translation()
+                                              - this->urdfInfo.joints[j].originWorld.translation();
                 // if (!visual_or_collision) {
                 //     worldDeltaTranslation = this->urdfInfo.links[childId].T_visual_bb_world.translation() - this->urdfInfo.joints[j].originWorld.translation();
-                // }
-                // else {
+                // } else {
                 //     worldDeltaTranslation = this->urdfInfo.links[childId].T_collision_bb_world.translation() - this->urdfInfo.joints[j].originWorld.translation();
                 // }
 
@@ -281,16 +287,14 @@ namespace dyno
                 Mat3f R_PJ_transpose = this->urdfInfo.joints[j].originWorld.rotation().transpose();
                 // 计算相对平移
                 Vec3f relativeTranslation = R_PJ_transpose * worldDeltaTranslation;
-                this->urdfInfo.links[childId].T_visual_bb_local.translation() = relativeTranslation;
-                this->urdfInfo.links[childId].T_visual_bb_local.rotation() = relativeRotation;
-                // if (!visual_or_collision) {
-                //     this->urdfInfo.links[childId].T_visual_bb_local.translation() = relativeTranslation;
-                //     this->urdfInfo.links[childId].T_visual_bb_local.rotation() = relativeRotation;
-                // }
-                // else {
-                //     this->urdfInfo.links[childId].T_collision_bb_local.translation() = relativeTranslation;
-                //     this->urdfInfo.links[childId].T_collision_bb_local.rotation() = relativeRotation;
-                // }
+                if (!visual_or_collision) {
+                    this->urdfInfo.links[childId].T_visual_bb_local.translation() = relativeTranslation;
+                    this->urdfInfo.links[childId].T_visual_bb_local.rotation() = relativeRotation;
+                }
+                else {
+                    this->urdfInfo.links[childId].T_collision_bb_local.translation() = relativeTranslation;
+                    this->urdfInfo.links[childId].T_collision_bb_local.rotation() = relativeRotation;
+                }
 
             }
 
@@ -328,6 +332,8 @@ namespace dyno
                     initialPositions.push_back(rigidbody.position);
                     initialQuats.push_back(rigidbody.angle);
                     initialRotations.push_back(rigidbody.angle.toMatrix3x3());
+
+                    std::cout << "Position: " << rigidbody.position << std::endl;
 
                     if (this->urdfInfo.links[l].isRoot) {
                         rigidbody.motionType = BodyType::Static;
@@ -560,6 +566,9 @@ namespace dyno
                     currentLink.T_world = parentTWorld;
                     currentLink.T_visual_bb_world = composeTransform(currentLink.T_world, currentLink.T_visual_bb_local);
                     currentLink.T_collision_bb_world = composeTransform(currentLink.T_world, currentLink.T_collision_bb_local);
+                    std::cout << "T_collision_bb_world: " << currentLink.T_collision_bb_world.translation() << std::endl;
+                    std::cout << "T_world: " << currentLink.T_world.translation() << std::endl;
+                    std::cout << "T_local: " << currentLink.T_collision_bb_local.translation() << std::endl;
 
                     for (int jointIdx : linkChildJoints[currentLinkIdx]) {
                         UrdfJoint& childJoint = initialGesture.joints[jointIdx];
@@ -576,24 +585,38 @@ namespace dyno
 
                 if (rootLinkIndex != -1) {
                     auto& initialRootGesture = initialGesture.links[rootLinkIndex];
+                    Transform3f* initialRootBBGestureWorld = nullptr;
+                    Transform3f* initialRootBBGestureLocal = nullptr;
+                    if (!varVisualOrCollision()->getValue()) {
+                        initialRootBBGestureWorld = &initialRootGesture.T_visual_bb_world;
+                        initialRootBBGestureLocal = &initialRootGesture.T_visual_bb_local;
+                    } else {
+                        initialRootBBGestureWorld = &initialRootGesture.T_collision_bb_world;
+                        initialRootBBGestureLocal = &initialRootGesture.T_collision_bb_local;
+                    }
+
                     Transform3f rootWorldTransform = initialRootGesture.T_world;
                     Transform3f rootLocalTransform;
                     // Root Link 的 T_bounding_box_local 平移计算
                     Vec3f worldDeltaTranslation;
 
-                    worldDeltaTranslation = initialGesture.links[rootLinkIndex].T_visual_bb_world.translation()
+                    worldDeltaTranslation = initialRootBBGestureWorld->translation()
                                             - initialRootGesture.T_world.translation();
-
 
                     Mat3f R_PJ_transpose = initialRootGesture.T_world.rotation().transpose();
                     Vec3f relativeTranslation = R_PJ_transpose * worldDeltaTranslation;
                     rootLocalTransform.translation() = relativeTranslation;
-                    initialGesture.links[rootLinkIndex].T_visual_bb_local.translation() = rootLocalTransform.translation();
+                    initialRootBBGestureLocal->translation() = rootLocalTransform.translation();
 
                     Mat3f R_PJ = this->urdfInfo.links[rootLinkIndex].T_world.rotation();
-                    Mat3f R_BB = this->urdfInfo.links[rootLinkIndex].T_visual_bb_world.rotation();
+                    Mat3f R_BB;
+                    if (!varVisualOrCollision()->getValue()) {
+                        R_BB = this->urdfInfo.links[rootLinkIndex].T_visual_bb_world.rotation();
+                    } else {
+                        R_BB = this->urdfInfo.links[rootLinkIndex].T_collision_bb_world.rotation();
+                    }
                     Mat3f relativeRotation = R_PJ.transpose() * R_BB;
-                    initialGesture.links[rootLinkIndex].T_visual_bb_local.rotation() = relativeRotation;
+                    initialRootBBGestureLocal->rotation() = relativeRotation;
 
                     updateWorldRecursive(rootLinkIndex, rootWorldTransform);
                 }
@@ -612,13 +635,14 @@ namespace dyno
             auto it = hinge_param.ids[i];
             for (int j = 0; j < ctrl_mb_chains[it].body_indices.size(); j++) {
                 auto index = ctrl_mb_chains[it].body_indices[j];
-                hCenters[index] = this->initialGesture[it].links[j].T_visual_bb_world.translation() + instances[it].translation();
-                std::cout << "Translation of link: " << this->initialGesture[it].links[j].name << "\n"
-                    << this->initialGesture[it].links[j].T_visual_bb_world.translation() << std::endl;
-                // std::cout << it << " hCenter: " << hCenters[index] << std::endl;
-                hAngles[index] = TQuat(this->initialGesture[it].links[j].T_visual_bb_world.rotation());
-                std::cout << it << " index: " << index << " hAngles: "
-                << hAngles[index].x << ", " << hAngles[index].y << ", " << hAngles[index].z << ", " << hAngles[index].w << ", "  << std::endl;
+                if (!varVisualOrCollision()->getValue()) {
+                    hCenters[index] = this->initialGesture[it].links[j].T_visual_bb_world.translation() + instances[it].translation();
+                    hAngles[index] = TQuat(this->initialGesture[it].links[j].T_visual_bb_world.rotation());
+                } else {
+                    hCenters[index] = this->initialGesture[it].links[j].T_collision_bb_world.translation() + instances[it].translation();
+                    hAngles[index] = TQuat(this->initialGesture[it].links[j].T_collision_bb_world.rotation());
+                }
+                std::cout << "hCenters[" << index << "]: " << hCenters[index] << std::endl;
                 hRotations[index] = hAngles[index].toMatrix3x3(); // 必须基于 hAngles
                 hVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);
                 hAngularVelocities[index] = Vec3f(0.0f, 0.0f, 0.0f);

@@ -89,6 +89,21 @@ namespace dyno
 		DArray<TConstraintPair<float>> constraints
 	);
 
+	void calculateErrorVector(
+		DArray<float> eta,
+		DArray<Vec3f> J,
+		DArray<Vec3f> velocity,
+		DArray<Vec3f> angular_velocity,
+		DArray<Vec3f> pos,
+		DArray<Quat1f> rotation_q,
+		DArray<TConstraintPair<float>> constraints,
+		DArray<float> errors,
+		float slop,
+		float beta,
+		uint substepping,
+		float dt
+	);
+
 	void calculateEtaVectorForPJSBaumgarte(
 		DArray<float> eta,
 		DArray<Vec3f> J,
@@ -230,6 +245,30 @@ namespace dyno
 		DArray<float> CFM
 	);
 
+	float PostStablizationErrorValidate(
+		DArray<float> error_out,
+		DArray<Vec3f> dp,
+		DArray<Vec3f> J,
+		DArray<float> error_in,
+		DArray<TConstraintPair<float>> constraints
+	);
+
+	void PostStablization(
+		DArray<float> lambda,
+		DArray<Vec3f> dp,
+		DArray<Vec3f> J,
+		DArray<Vec3f> B,
+		DArray<float> error,
+		DArray<TConstraintPair<float>> constraints,
+		DArray<int> nbq,
+		DArray<float> K_1,
+		DArray<Mat2f> K_2,
+		DArray<Mat3f> K_3,
+		DArray<float> mass,
+		DArray<float> fricCoeffs,
+		float mu,
+		float g
+	);
 
 	void JacobiIteration(
 		DArray<float> lambda,
@@ -314,10 +353,25 @@ namespace dyno
 		DArray<Mat3f> K_3
 	);
 
+	void initExtImpulse(
+		DArray<Vec3f> impulse_ext
+	);
+
 	void setUpGravity(
 		DArray<Vec3f> impulse_ext,
 		float g,
 		float dt
+	);
+
+	void setUpExternalForce(
+		DArray<Vec3f> externalImpulse,  
+		DArray<Vec3f> externalForce, 
+		DArray<Vec3f> externalTorque,
+		DArray<float> mass,
+		DArray<Mat3f> inertia,
+		DArray<Vec3f> AngularVelocity,
+		DArray<Mat3f> rotMat,
+		float dt                            
 	);
 
 
@@ -326,6 +380,11 @@ namespace dyno
 		DArray<Vec3f> mImpulse,
 		DArray<TConstraintPair<float>> constraints,
 		DArray<float> eta
+	);
+
+	Real checkOutPositionError(
+		DArray<Vec3f> pos,
+		DArray<TConstraintPair<float>> constraints
 	);
 
 	void calculateDiagnals(
@@ -345,7 +404,6 @@ namespace dyno
 		const std::string& filename
 	);
 
-
 	void calculateEtaVectorForRelaxation(
 		DArray<float> eta,
 		DArray<Vec3f> J,
@@ -357,8 +415,6 @@ namespace dyno
 	double checkOutErrors(
 		DArray<float> errors
 	);
-	
-
 
 	void calculateMatrixA(
 		DArray<Vec3f> &J,

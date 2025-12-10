@@ -3,7 +3,7 @@ if(PERIDYNO_LIBRARY_RIGIDBODY)
         RigidBody
         GlfwGUI)
 
-    add_example(GL_HitBricks RigidBody LIB_DEPENDENCY)
+    # add_example(GL_HitBricks RigidBody LIB_DEPENDENCY)
 
-    set_target_properties(GL_HitBricks PROPERTIES CUDA_ARCHITECTURES ${CUDA_ARCH_FLAGS})
+    # set_target_properties(GL_HitBricks PROPERTIES CUDA_ARCHITECTURES ${CUDA_ARCH_FLAGS})
 endif()

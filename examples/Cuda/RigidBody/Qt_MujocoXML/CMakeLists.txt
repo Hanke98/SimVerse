@@ -8,5 +8,5 @@ if(PERIDYNO_QT_GUI AND PERIDYNO_LIBRARY_RIGIDBODY)
         MujocoLoader
         STLIO
         )
-    add_example(Qt_MujocoXML RigidBody LIB_DEPENDENCY)
+    # add_example(Qt_MujocoXML RigidBody LIB_DEPENDENCY)
 endif()

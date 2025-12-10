@@ -23,51 +23,8 @@ namespace dyno
 	RigidBodySystem<TDataType>::RigidBodySystem()
 		: Node()
 	{
-		auto defaultTopo = std::make_shared<DiscreteElements<TDataType>>();
-		this->stateTopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
-
-		auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
-		this->stateTopology()->connect(elementQuery->inDiscreteElements());
-		this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
-		this->stateAttribute()->connect(elementQuery->inAttribute());
-		this->animationPipeline()->pushModule(elementQuery);
-		//elementQuery->varSelfCollision()->setValue(false);
-
-		auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
-		this->stateTopology()->connect(cdBV->inDiscreteElements());
-		this->animationPipeline()->pushModule(cdBV);
-
-		auto merge = std::make_shared<ContactsUnion<TDataType>>();
-		elementQuery->outContacts()->connect(merge->inContactsA());
-		cdBV->outContacts()->connect(merge->inContactsB());
-
-		this->animationPipeline()->pushModule(merge);
-
-		auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
-		this->stateTimeStep()->connect(iterSolver->inTimeStep());
-		this->varFrictionEnabled()->connect(iterSolver->varFrictionEnabled());
-		this->varGravityEnabled()->connect(iterSolver->varGravityEnabled());
-		this->varGravityValue()->connect(iterSolver->varGravityValue());
-		this->varFrictionCoefficient()->connect(iterSolver->varFrictionCoefficient());
-		this->varSlop()->connect(iterSolver->varSlop());
-		this->stateMass()->connect(iterSolver->inMass());
-		
-		this->stateFrictionCoefficients()->connect(iterSolver->inFrictionCoefficients());
-		this->stateAttribute()->connect(iterSolver->inAttribute());
-		this->stateCenter()->connect(iterSolver->inCenter());
-		this->stateVelocity()->connect(iterSolver->inVelocity());
-		this->stateAngularVelocity()->connect(iterSolver->inAngularVelocity());
-		this->stateRotationMatrix()->connect(iterSolver->inRotationMatrix());
-		this->stateInertia()->connect(iterSolver->inInertia());
-		this->stateQuaternion()->connect(iterSolver->inQuaternion());
-		this->stateInitialInertia()->connect(iterSolver->inInitialInertia());
-		this->stateTopology()->connect(iterSolver->inDiscreteElements());
-		merge->outContacts()->connect(iterSolver->inContacts());
-		this->animationPipeline()->pushModule(iterSolver);
-
-
-		this->setDt(0.016f);
-	}
+  	init();
+  }
 
 	template<typename TDataType>
 	RigidBodySystem<TDataType>::~RigidBodySystem()
@@ -339,6 +296,8 @@ namespace dyno
 		DArray<Attribute> atts,
 		DArray<RigidBodyInfo> states,
 		DArray<Real> fricCoeffs,
+		DArray<Coord> externalForce,
+		DArray<Coord> externalTorque,
 		ElementOffset offset)
 	{
 		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
@@ -354,6 +313,9 @@ namespace dyno
 		inertia[tId] = states[tId].inertia;
 		mask[tId] = states[tId].collisionMask;
 		fricCoeffs[tId] = states[tId].friction;
+
+		externalForce[tId] = states[tId].externalForce;
+		externalTorque[tId] = states[tId].externalTorque;
 
 		Attribute att_i;
 		att_i.setObjectId(states[tId].bodyId);
@@ -503,6 +465,8 @@ namespace dyno
 		this->stateCollisionMask()->resize(sizeOfRigidBodies);
 		this->stateAttribute()->resize(sizeOfRigidBodies);
 		this->stateFrictionCoefficients()->resize(sizeOfRigidBodies);
+		this->stateExternalForce()->resize(sizeOfRigidBodies);
+		this->stateExternalTorque()->resize(sizeOfRigidBodies);
 
 		cuExecute(sizeOfRigidBodies,
 			RB_SetupInitialStates,
@@ -517,6 +481,8 @@ namespace dyno
 			this->stateAttribute()->getData(),
 			mDeviceRigidBodyStates,
 			this->stateFrictionCoefficients()->getData(),
+			this->stateExternalForce()->getData(),
+			this->stateExternalTorque()->getData(),
 			eleOffset);
 
 		this->stateInitialInertia()->resize(sizeOfRigidBodies);

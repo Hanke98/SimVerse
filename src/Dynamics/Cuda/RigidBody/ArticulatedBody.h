@@ -23,6 +23,8 @@
 
 #include "Field/FilePath.h"
 
+#include "UrdfFunc.h"
+
 namespace dyno 
 {
 	template<typename TDataType>
@@ -39,6 +41,8 @@ namespace dyno
 
 		//Bind rigid body to a shape in TextureMesh
 		void bindShape(std::shared_ptr<PdActor> actor, Pair<uint, uint> shapeId);
+
+		UrdfInformation urdfInfo;
 
 	public:
 		DEF_VAR(FilePath, FilePath, "", "");
@@ -65,6 +69,8 @@ namespace dyno
 		void updateInstanceTransform();
 
 		void clearVechicle();
+
+		void clearRobot();
 
 		void transform();
 

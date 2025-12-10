@@ -11,6 +11,7 @@
 
 #include "DirectedAcyclicGraph.h"
 
+#include "Profiler.h"
 #include "SceneLoaderFactory.h"
 
 #include "Timer.h"
@@ -194,7 +195,8 @@ namespace dyno
 
 	void SceneGraph::takeOneFrame()
 	{
-		std::cout << "****************    Frame " << mFrameNumber << " Started    ****************" << std::endl;
+		// std::cout << "****************    Frame " << mFrameNumber << " Started    ****************" << std::endl;
+	  // std::getchar();
 		
 		CTimer timer;
 		timer.start();
@@ -251,7 +253,9 @@ namespace dyno
 
 		timer.stop();
 
-		std::cout << "----------------    Frame " << mFrameNumber << " Ended! ( " << timer.getElapsedTime() << " ms in Total)  ----------------" << std::endl << std::endl;
+		// PROFILE_REPORT_FROM("TJConstraintSolver::constrain");
+
+		// std::cout << "----------------    Frame " << mFrameNumber << " Ended! ( " << timer.getElapsedTime() << " ms in Total)  ----------------" << std::endl << std::endl;
 
 		mFrameNumber++;
 

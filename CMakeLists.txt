@@ -1,9 +1,12 @@
 ﻿cmake_minimum_required(VERSION 3.10)                                                            #指定CMake的最低版本为3.10。若版本过低，请自行升级CMake
 
+message(STATUS "CMAKE_PREFIX_PATH: " ${CMAKE_PREFIX_PATH})
 include(cmake/modules.cmake)
 
 set(PERIDYNO_GPU_BACKEND "CUDA" CACHE STRING "GPU Backend")
 set_property(CACHE PERIDYNO_GPU_BACKEND PROPERTY STRINGS "CUDA;Vulkan;NoGPU")
+option(PERIDYNO_USE_SYSTEM_GLFW "Use system installed GLFW library" OFF)
+
 
 set(PERIDYNO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(SUPPORTED_LANGUAGES "CXX;C")
@@ -137,9 +140,16 @@ if("${PERIDYNO_GPU_BACKEND}" STREQUAL "CUDA")
 	#option(PERIDYNO_LIBRARY_RENDERING "Enable binding the rendering library" ON)
 	option(PERIDYNO_PLUGIN_ALL "Enable binding the plugin libraries" ON)
 
-	add_subdirectory(external/glfw-3.3.0)
+	if (NOT PERIDYNO_USE_SYSTEM_GLFW)
+		add_subdirectory(external/glfw-3.3.0)
+	else()
+		find_package(glfw3 REQUIRED)
+	endif()
 	add_subdirectory(external/glad-4.6)
 	add_subdirectory(external/imgui)
+
+	#	newly add pybind11
+	add_subdirectory(external/pybind11)
 
 	if(PERIDYNO_PLUGIN_ALL)
 		option(PERIDYNO_PLUGIN_ALEMBIC "Enable binding the abc exporter library" OFF)
@@ -191,8 +201,13 @@ elseif("${PERIDYNO_GPU_BACKEND}" STREQUAL "Vulkan")
 	option(PERIDYNO_LIBRARY_RENDERING "Enable binding the rendering library" ON)
 	option(PERIDYNO_PLUGIN_ALL "Enable binding the plugin libraries" OFF)
 	option(PERIDYNO_PYTHON_BINDING "Enable python binding with pybind11" OFF)
-	
-	add_subdirectory(external/glfw-3.3.0)
+
+	if (NOT PERIDYNO_USE_SYSTEM_GLFW)
+		add_subdirectory(external/glfw-3.3.0)
+	else()
+		find_package(glfw3 REQUIRED)
+	endif()
+
 	add_subdirectory(external/glad-4.6)
 	add_subdirectory(external/imgui)
 
@@ -337,7 +352,12 @@ else()
 		add_subdirectory(tests)
 	endif()
 
-	add_subdirectory(external/glfw-3.3.0)
+	if (NOT PERIDYNO_USE_SYSTEM_GLFW)
+		add_subdirectory(external/glfw-3.3.0)
+	else()
+		find_package(glfw3 REQUIRED)
+	endif()
+
 	add_subdirectory(external/glad-4.6)
 	add_subdirectory(external/imgui)
 

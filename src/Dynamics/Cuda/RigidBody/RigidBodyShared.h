@@ -51,6 +51,8 @@ namespace dyno
 			collisionMask = CT_AllObjects;
 			shapeType = ET_Other;
 			angle = Quat<Real>(0.0f, 0.0f, 0.0f, 1.0f);
+			externalForce = Vector<Real, 3>(0.0f);
+			externalTorque = Vector<Real, 3>(0.0f);
 		}
 
 		RigidBodyInfo(Vector<Real, 3> p, Quat<Real> q = Quat<Real>(0.0f, 0.0f, 0.0f, 1.0f))
@@ -68,6 +70,8 @@ namespace dyno
 			collisionMask = CT_AllObjects;
 			shapeType = ET_Other;
 			angle = q;
+			externalForce = Vector<Real, 3>(0.0f);
+			externalTorque = Vector<Real, 3>(0.0f);
 		}
 
 		Quat<Real> angle;
@@ -86,6 +90,10 @@ namespace dyno
 
 		/// The inertia of the body
 		SquareMatrix<Real, 3> inertia;
+
+		Vector<Real, 3> externalForce;
+
+		Vector<Real, 3> externalTorque;
 
 		uint bodyId;
 

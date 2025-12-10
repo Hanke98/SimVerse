@@ -1,5 +1,6 @@
-#include <QtApp.h>
+// #include <QtApp.h>
 
+#include <GlfwApp.h>
 #include <SceneGraph.h>
 
 #include <RigidBody/ArticulatedBody.h>
@@ -36,7 +37,7 @@ std::shared_ptr<SceneGraph> creatCar()
 	auto jeep = scn->addNode(std::make_shared<ArticulatedBody<DataType3f>>());
 	jeep->varFilePath()->setValue(getAssetPath() + "Jeep/JeepGltf/jeep.gltf");
 
-	uint N = 1;
+	uint N = 2;
 
 	for (uint i = 0; i < N; i++)
 	{
@@ -157,7 +158,8 @@ std::shared_ptr<SceneGraph> creatCar()
 
 int main()
 {
-	QtApp app;
+	// QtApp app;
+	GlfwApp app;
 	app.setSceneGraph(creatCar());
 	app.initialize(1280, 768);
 

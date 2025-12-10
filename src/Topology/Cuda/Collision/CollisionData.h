@@ -249,6 +249,8 @@ namespace dyno
 			pos2 = p2;
 			normal1 = n1;
 			normal2 = n2;
+			bodyActualId1 = a;
+			bodyActualId2 = b;
 		}
 
 		int bodyId1;
@@ -280,6 +282,9 @@ namespace dyno
 		bool isValid;
 
 		Quat1f rotQuat;
+		
+		int bodyActualId1; // Actual id, in case one of the bodies is set INVALID
+		int bodyActualId2;
 
 	};
 }

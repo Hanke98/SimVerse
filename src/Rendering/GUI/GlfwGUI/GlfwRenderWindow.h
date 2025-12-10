@@ -62,6 +62,8 @@ namespace dyno {
 
 		ImWindow* imWindow() { return &mImWindow; }
 
+		GLFWwindow* getGLFWWindow() const { return mWindow; }
+
 	protected:
 		void initCallbacks();    //init default callbacks
 

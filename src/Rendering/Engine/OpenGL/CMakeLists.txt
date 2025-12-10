@@ -17,7 +17,13 @@ source_group("Shader Sources" FILES ${SHADER_FILES})
 # use glslang for compling shaders to binary
 # vulkan backend already include glslang
 if(NOT ${PERIDYNO_GPU_BACKEND} STREQUAL "Vulkan")
+    set(BUILD_SHARED_LIBS_BAK ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    set(CMAKE_BUILD_TYPE_BAK ${CMAKE_BUILD_TYPE})
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
     add_subdirectory(${PERIDYNO_ROOT}/external/glslang "${CMAKE_BINARY_DIR}/external")
+    set(CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE_BAK})
+    set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_BAK})
 endif()
 
 set(SHADER_BINARY_FILES "")

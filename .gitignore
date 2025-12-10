@@ -47,3 +47,16 @@ build-*
 
 imgui.ini
 compile_commands.json
+log*
+.env
+
+asset
+tmp
+
+*.so
+
+examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/*.bmp
+save_picture
+save_picture_256envs
+save_picture_ctlFreq1
+save_picture_torque

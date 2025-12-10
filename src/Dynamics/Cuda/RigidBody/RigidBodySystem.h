@@ -50,6 +50,7 @@ namespace dyno
 		typedef typename ::dyno::PointJoint<Real> PointJoint;
 
 		RigidBodySystem();
+		RigidBodySystem(std::string name);
 		~RigidBodySystem() override;
 
 		std::shared_ptr<PdActor> addBox(
@@ -161,7 +162,15 @@ namespace dyno
 
 		std::string getNodeType() override { return "Rigid Bodies"; }
 
+		std::vector<HingeJoint>& getHostHingeJoints() { return mHostJointsHinge; }
+		std::vector<FixedJoint>& getHostFixedJoints() { return mHostJointsFixed; }
+		std::vector<PointJoint>& getHostPointJoints() { return mHostJointsPoint; }
+		std::vector<SliderJoint>& getHostSliderJoints() { return mHostJointsSlider; }
+
 	protected:
+
+		void init();
+
 		void resetStates() override;
 
 		void postUpdateStates() override;
@@ -217,6 +226,12 @@ namespace dyno
 		DEF_ARRAY_STATE(Attribute, Attribute, DeviceType::GPU, "Rigid body attributes");
 
 		DEF_ARRAY_STATE(Matrix, InitialInertia, DeviceType::GPU, "Initial inertia matrix");
+
+		DEF_ARRAY_STATE(Coord, ExternalForce, DeviceType::GPU, "External force applied to rigid bodies");
+		
+		DEF_ARRAY_STATE(Coord, ExternalTorque, DeviceType::GPU, "External torque applied to rigid bodies");
+
+		DEF_VAR(Real, AngularDamping, 50.0, "Angular Damping");
 
 	private:
 		void setupShape2RigidBodyMapping();

@@ -146,6 +146,10 @@ namespace dyno
 		{
 			loadTextureMeshFromObj(texMesh, name);
 		}
+		else if (ext == ".urdf")
+		{
+			loadURDFTextureMesh(texMesh, name, urdfInfo, true);
+		}
 	}
 
 	template<typename TDataType>
@@ -222,6 +226,13 @@ namespace dyno
 
 	template<typename TDataType>
 	void ArticulatedBody<TDataType>::clearVechicle()
+	{
+		mBindingPair.clear();
+		mActors.clear();
+	}
+
+	template<typename TDataType>
+	void ArticulatedBody<TDataType>::clearRobot()
 	{
 		mBindingPair.clear();
 		mActors.clear();

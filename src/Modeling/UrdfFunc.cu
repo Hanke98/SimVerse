@@ -800,6 +800,57 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
         // std::cout << "Inertia: \n" << link.localInertia << std::endl;
     }
 
+    auto& joints = urdfInfo.joints;
+    for (auto & joint : joints) {
+        auto parentId = joint.parentLinkId;
+        auto childId = joint.childLinkId;
+
+        // Transform3f T_boundingbox_world;
+        // if (!this->varVisualOrCollision()->getValue()) {
+            Transform3f T_visual_bb_world = urdfInfo.links[childId].T_visual_bb_world;
+        // } else {
+            Transform3f T_collision_bb_world = urdfInfo.links[childId].T_collision_bb_world;
+        // }
+
+        // 获取 Parent Joint 的世界旋转矩阵 (R_PJ)
+        Mat3f R_PJ = joint.originWorld.rotation();
+
+        // 获取 Bounding Box 的世界旋转矩阵 (R_BB)
+        // Mat3f R_BB = T_boundingbox_world.rotation();
+        Mat3f R_BB_visual = T_visual_bb_world.rotation();
+        Mat3f R_BB_collision = T_collision_bb_world.rotation();
+
+        // 计算相对旋转 (R_PJ_to_BB = R_PJ_transpose * R_BB)
+        // Mat3f relativeRotation_visual = R_PJ.transpose() * R_BB;
+        Mat3f relativeRotation_visual = R_PJ.transpose() * R_BB_visual;
+        Mat3f relativeRotation_collision = R_PJ.transpose() * R_BB_collision;
+
+        // 获取世界坐标系下的相对平移向量 (t_BB - t_PJ)
+        // Vec3f worldDeltaTranslation = T_boundingbox_world.translation()
+        //                               - joints[j].originWorld.translation();
+        Vec3f worldDeltaTranslation_visual = T_visual_bb_world.translation()
+                                             - joint.originWorld.translation();
+        Vec3f worldDeltaTranslation_collision = T_collision_bb_world.translation()
+                                             - joint.originWorld.translation();
+
+
+        // 获取 Parent Joint 的世界旋转矩阵转置 (R_PJ_transpose)
+        Mat3f R_PJ_transpose = joint.originWorld.rotation().transpose();
+        // 计算相对平移
+        // Vec3f relativeTranslation = R_PJ_transpose * worldDeltaTranslation;
+        Vec3f relativeTranslation_visual = R_PJ_transpose * worldDeltaTranslation_visual;
+        Vec3f relativeTranslation_collision = R_PJ_transpose * worldDeltaTranslation_collision;
+        // if (!visual_or_collision) {
+            urdfInfo.links[childId].T_visual_bb_local.translation() = relativeTranslation_visual;
+            urdfInfo.links[childId].T_visual_bb_local.rotation() = relativeRotation_visual;
+        // }
+        // else {
+            urdfInfo.links[childId].T_collision_bb_local.translation() = relativeTranslation_collision;
+            urdfInfo.links[childId].T_collision_bb_local.rotation() = relativeRotation_collision;
+        // }
+
+    }
+
     return true;
 }
 

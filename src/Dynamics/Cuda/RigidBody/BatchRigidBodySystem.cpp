@@ -249,46 +249,7 @@ namespace dyno
                 std::cout << "Robot: Skip loading file" << std::endl;
             }
 
-            this->varVisualOrCollision()->setValue(visual_or_collision);
-
-            for (int j = 0; j < this->urdfInfo.joints.size(); ++j) {
-                auto parentId = this->urdfInfo.joints[j].parentLinkId;
-                auto childId = this->urdfInfo.joints[j].childLinkId;
-
-                Transform3f T_boundingbox_world;
-                if (!this->varVisualOrCollision()->getValue()) {
-                    T_boundingbox_world = this->urdfInfo.links[childId].T_visual_bb_world;
-                } else {
-                    T_boundingbox_world = this->urdfInfo.links[childId].T_collision_bb_world;
-                }
-
-                // 获取 Parent Joint 的世界旋转矩阵 (R_PJ)
-                Mat3f R_PJ = this->urdfInfo.joints[j].originWorld.rotation();
-
-                // 获取 Bounding Box 的世界旋转矩阵 (R_BB)
-                Mat3f R_BB = T_boundingbox_world.rotation();
-
-                // 计算相对旋转 (R_PJ_to_BB = R_PJ_transpose * R_BB)
-                Mat3f relativeRotation = R_PJ.transpose() * R_BB;
-
-                // 获取世界坐标系下的相对平移向量 (t_BB - t_PJ)
-                Vec3f worldDeltaTranslation = T_boundingbox_world.translation()
-                                              - this->urdfInfo.joints[j].originWorld.translation();
-
-                // 获取 Parent Joint 的世界旋转矩阵转置 (R_PJ_transpose)
-                Mat3f R_PJ_transpose = this->urdfInfo.joints[j].originWorld.rotation().transpose();
-                // 计算相对平移
-                Vec3f relativeTranslation = R_PJ_transpose * worldDeltaTranslation;
-                if (!visual_or_collision) {
-                    this->urdfInfo.links[childId].T_visual_bb_local.translation() = relativeTranslation;
-                    this->urdfInfo.links[childId].T_visual_bb_local.rotation() = relativeRotation;
-                }
-                else {
-                    this->urdfInfo.links[childId].T_collision_bb_local.translation() = relativeTranslation;
-                    this->urdfInfo.links[childId].T_collision_bb_local.rotation() = relativeRotation;
-                }
-
-            }
+            // this->varVisualOrCollision()->setValue(visual_or_collision);
 
             auto addRigidArmExample = [&](const Vec3f& _targetPosition)
             -> std::pair<MulitBodyChainIndices, MulitBodyChainIndices>
@@ -310,7 +271,7 @@ namespace dyno
 
                     uint it;
 
-                    if (!visual_or_collision) {
+                    if (!this->varVisualOrCollision()->getValue()) {
                         it = this->urdfInfo.links[l].visualShapeId;
                     } else {
                         it = this->urdfInfo.links[l].collisionShapeId;
@@ -339,7 +300,7 @@ namespace dyno
                     if (this->urdfInfo.links[l].isRoot) {
                         this->bindBox(actor, box, 1000000000000);
                     } else {
-                        if (!visual_or_collision) {
+                        if (!this->varVisualOrCollision()->getValue()) {
                             this->bindBox(actor, box, density);
                         } else {
                             this->bindBox(actor, box, this->urdfInfo.links[l].volume, this->urdfInfo.links[l].localInertia, density);
@@ -357,42 +318,49 @@ namespace dyno
                     auto childId = this->urdfInfo.joints[j].childLinkId;
 
                     if (this->urdfInfo.joints[j].type == REVOLUTE) {
-                        if (!visual_or_collision) {
-                            auto& joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
-                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                            joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-                            joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                        HingeJoint<Real>* joint;
+                        if (!this->varVisualOrCollision()->getValue()) {
+                            joint = &this->createHingeJoint(actors[this->urdfInfo.links[parentId].visualShapeId],
+                                                            actors[this->urdfInfo.links[childId].visualShapeId]);
                         } else {
-                            auto& joint = this->createHingeJoint(actors[this->urdfInfo.links[parentId].collisionShapeId], actors[this->urdfInfo.links[childId].collisionShapeId]);
-                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                            joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-                            joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                            joint = &this->createHingeJoint(actors[this->urdfInfo.links[parentId].collisionShapeId],
+                                                            actors[this->urdfInfo.links[childId].collisionShapeId]);
                         }
+                        joint->setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation()
+                                              + instances[robotarmIndex].translation());
+                        joint->setAxis(this->urdfInfo.joints[j].axisWorld);
+                        joint->setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
 
                         mb.hinge_joint_indices.push_back(j);
                     }
                     if (this->urdfInfo.joints[j].type == PRISMATIC) {
-                        if (!visual_or_collision) {
-                            auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
-                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                            joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-                            joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                        SliderJoint<Real>* joint;
+                        if (!this->varVisualOrCollision()->getValue()) {
+                            joint = &this->createSliderJoint(actors[this->urdfInfo.links[parentId].visualShapeId],
+                                                             actors[this->urdfInfo.links[childId].visualShapeId]);
                         } else {
-                            auto &joint = this->createSliderJoint(actors[this->urdfInfo.links[parentId].collisionShapeId], actors[this->urdfInfo.links[childId].collisionShapeId]);
-                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
-                            joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-                            joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+                            joint = &this->createSliderJoint(actors[this->urdfInfo.links[parentId].collisionShapeId],
+                                                             actors[this->urdfInfo.links[childId].collisionShapeId]);
                         }
+                        joint->setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation()
+                                              + instances[robotarmIndex].translation());
+                        joint->setAxis(this->urdfInfo.joints[j].axisWorld);
+                        joint->setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+
                         mb.slider_joint_indices.push_back(j);
                     }
                     if (this->urdfInfo.joints[j].type == FIXED) {
-                        if (!visual_or_collision) {
-                            auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].visualShapeId], actors[this->urdfInfo.links[childId].visualShapeId]);
-                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                        FixedJoint<Real>* joint;
+                        if (!this->varVisualOrCollision()->getValue()) {
+                            joint = &this->createFixedJoint(actors[this->urdfInfo.links[parentId].visualShapeId],
+                                                            actors[this->urdfInfo.links[childId].visualShapeId]);
                         } else {
-                            auto &joint = this->createFixedJoint(actors[this->urdfInfo.links[parentId].collisionShapeId], actors[this->urdfInfo.links[childId].collisionShapeId]);
-                            joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
+                            joint = &this->createFixedJoint(actors[this->urdfInfo.links[parentId].collisionShapeId],
+                                                            actors[this->urdfInfo.links[childId].collisionShapeId]);
                         }
+                        joint->setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation()
+                                              + instances[robotarmIndex].translation());
+
                         mb.fixed_joint_indices.push_back(j);
                     }
                 }

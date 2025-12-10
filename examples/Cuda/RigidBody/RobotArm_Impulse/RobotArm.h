@@ -80,6 +80,7 @@ namespace dyno
         void setTransform(Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);
         void setInitGesture(InitHingeParam& hinge_param);
         void isObjYUp(bool objYUp);
+        void setRenderVisualOrCollision(bool visual_or_collision);
 
     private:
         std::shared_ptr<BatchRigidBodySystem<TDataType>> batchSolver;

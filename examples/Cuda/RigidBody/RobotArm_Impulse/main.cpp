@@ -40,7 +40,7 @@ int main() {
     bool enableFriction = false;
     bool enableRendering = true;
     bool enableSaveScreen = false;
-    bool render_collision = true;
+    bool render_collision = false;
     std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/";
     Vec3f base{ -0.0f, -0.0f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
@@ -69,6 +69,7 @@ int main() {
     simulator.setTransform(base, offset, num_copies_x, num_copies_y, num_copies_z);
     simulator.setAngularDamping(damping);
     simulator.isObjYUp(!render_collision);
+    simulator.setRenderVisualOrCollision(render_collision);
     simulator.addRobotArmRigidBodies(urdf_fn, density, target_position, render_boundingbox, render_collision);
     // simulator.setInitGesture(hinge_param);
 

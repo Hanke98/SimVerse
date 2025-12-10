@@ -288,6 +288,11 @@ namespace dyno
         batchSolver->varObjYUp()->setValue(objYUp);
     }
 
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setRenderVisualOrCollision(bool visual_or_collision) {
+        batchSolver->varVisualOrCollision()->setValue(visual_or_collision);
+    }
+
     DEFINE_CLASS(RobotArmSimulator);
 }
     

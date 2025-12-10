@@ -316,7 +316,7 @@ namespace dyno
 					}
 					joint.setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation() + instances[robotarmIndex].translation());
 					joint.setAxis(this->urdfInfo.joints[j].axisWorld);
-					joint.setRange(this->urdfInfo.joints[j].limits.lower, this->urdfInfo.joints[j].limits.upper);
+					joint.setRange(-this->urdfInfo.joints[j].limits.upper, -this->urdfInfo.joints[j].limits.lower);
 					mb.hinge_joint_indices.push_back(j);
 				}
 				if (this->urdfInfo.joints[j].type == PRISMATIC)

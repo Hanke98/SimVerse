@@ -148,7 +148,7 @@ def main():
     enable_gravity = False
     enable_friction = False
     enable_render = True
-    enable_record = True
+    enable_record = False
 
     base = ra.Vec3f(-0.0, -0.0, -0.0)
     offset = ra.Vec3f(1.5, 0.0, 1.5)
@@ -211,13 +211,13 @@ def main():
         print("parent_id: ", vec.parentLinkId, " child_id: ", vec.childLinkId)
 
     target_angle = [
-        0.7,   # joint 0
-        -1.0,   # joint 1
-        0.3,   # joint 2
-        -1.3,  # joint 3
-        1.7,   # joint 4
-        1.8,   # joint 5
-        0.1,   # joint 6
+        0.0,   # joint 0
+        0.0,   # joint 1
+        0.0,   # joint 2
+        -1.0,   # joint 3
+        0.0,   # joint 4
+        2.0,   # joint 5
+        0.0,   # joint 6
     ]
 
     hinge_angle_old = [0.0 for _ in range(7)]

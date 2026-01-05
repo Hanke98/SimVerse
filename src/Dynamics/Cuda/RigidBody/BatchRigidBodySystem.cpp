@@ -308,6 +308,19 @@ namespace dyno
                     }
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
                     mb.body_indices.push_back(actor->idx);
+
+                    for (auto& pid : this->urdfInfo.links[l].patchShapeIds) {
+                        auto pUp = texMesh->shapes()[pid]->boundingBox.v1;
+                        auto pDown = texMesh->shapes()[pid]->boundingBox.v0;
+                        rigidbody.position = texMesh->shapes()[pid]->boundingTransform.translation() + instances[robotarmIndex].translation()+ Vec3f(1.0f, 0.0f, 0.0f);
+                        rigidbody.motionType = BodyType::Static;
+                        auto pActor = this->createRigidBody(rigidbody);
+                        actors[pid] = pActor;
+                        BoxInfo pBox;
+                        pBox.halfLength = (pUp - pDown) / 2;
+                        this->bindBox(pActor, pBox, density);
+                        this->bindShape(pActor, Pair<uint, uint>(pid, robotarmIndex));
+                    }
                 }
 
                 for (int j = 0; j < this->urdfInfo.joints.size(); ++j) {

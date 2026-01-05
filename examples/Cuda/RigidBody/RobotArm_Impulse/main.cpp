@@ -57,7 +57,7 @@ int main() {
     hinge_param.num_bodies = 1;
     hinge_param.ids.push_back(0);
     // hinge_param.ids.push_back(1);
-    std::vector<float> theta{0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+    std::vector<float> theta{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     hinge_param.theta.push_back(theta);
     // hinge_param.theta.push_back(theta);
 
@@ -115,13 +115,13 @@ int main() {
     };
 
     Real targetAngle[7] = {
-        Real(0.3),    // joint 0
-        Real(1.0),    // joint 1
-        Real(0),    // joint 2
-        Real(-0.6),    // joint 3
-        Real(0.3),    // joint 4
-        Real(1.8),    // joint 5
-        Real(0.3)     // joint 6
+        Real(0.3),    // joint 0 0.3
+        Real(1.0),    // joint 1 1.0
+        Real(0),      // joint 2 0
+        Real(-0.6),   // joint 3 -0.6
+        Real(0.3),    // joint 4 0.3
+        Real(1.8),    // joint 5 1.8
+        Real(0.3)     // joint 6 0.3
     };
 
     int checkFrequancy = 100;

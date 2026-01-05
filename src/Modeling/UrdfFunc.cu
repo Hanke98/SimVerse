@@ -1,11 +1,91 @@
 #include "UrdfFunc.h"
 #include "ImageLoader.h"
 #include "GltfFunc.h"
+#include "Vector/Vector3D.h"
+#include <iostream>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tinyobjloader/tiny_obj_loader.h>
 
 #include <filesystem>
+
+// -----------------------------------------------------------------------------
+// Triangle Morton ordering
+// -----------------------------------------------------------------------------
+namespace {
+
+static inline uint32_t expandBits(uint32_t v)
+{
+    // Expands a 10-bit integer into 30 bits by inserting 2 zeros after each bit.
+    v = (v * 0x00010001u) & 0xFF0000FFu;
+    v = (v * 0x00000101u) & 0x0F00F00Fu;
+    v = (v * 0x00000011u) & 0xC30C30C3u;
+    v = (v * 0x00000005u) & 0x49249249u;
+    return v;
+}
+
+static inline uint32_t morton3D(float x, float y, float z)
+{
+    x = std::min(std::max(x * 1024.0f, 0.0f), 1023.0f);
+    y = std::min(std::max(y * 1024.0f, 0.0f), 1023.0f);
+    z = std::min(std::max(z * 1024.0f, 0.0f), 1023.0f);
+    uint32_t xx = expandBits((unsigned int)x);
+    uint32_t yy = expandBits((unsigned int)y);
+    uint32_t zz = expandBits((unsigned int)z);
+    return xx * 4 + yy * 2 + zz;
+}
+
+static inline float safeInv(float v, float eps = 1e-9f)
+{
+    return 1.0f / ((std::abs(v) < eps) ? eps : v);
+}
+
+// Build Morton-sorted order for triangles using their (already computed) centers.
+// Output 'order' is a permutation of [0..numTris-1], sorted by Morton key.
+static void mortonSortTrianglesByCenters(
+    const std::vector<dyno::Vec3f>& triCenters,
+    std::vector<uint32_t>&          order)
+{
+    const size_t n = triCenters.size();
+    order.resize(n);
+    if (n == 0) return;
+
+    dyno::Vec3f cmin(dyno::REAL_MAX);
+    dyno::Vec3f cmax(-dyno::REAL_MAX);
+    for (const auto& c : triCenters)
+    {
+        cmin = cmin.minimum(c);
+        cmax = cmax.maximum(c);
+    }
+    dyno::Vec3f extent = cmax - cmin;
+    const float invX = safeInv(static_cast<float>(extent.x));
+    const float invY = safeInv(static_cast<float>(extent.y));
+    const float invZ = safeInv(static_cast<float>(extent.z));
+
+    struct KeyTri { uint64_t key; uint32_t tri; }; //  key: sort key; tri: original triangle index
+    std::vector<KeyTri> keys(n);
+
+    for (uint32_t t = 0; t < static_cast<uint32_t>(n); ++t)
+    {
+        const auto& c = triCenters[t];
+        const float nx = static_cast<float>(c.x - cmin.x) * invX;
+        const float ny = static_cast<float>(c.y - cmin.y) * invY;
+        const float nz = static_cast<float>(c.z - cmin.z) * invZ;
+        const uint32_t m = morton3D(nx, ny, nz);
+
+        // Stable tie-breaker with triangle index
+        keys[t] = KeyTri{ (static_cast<uint64_t>(m) << 32) | static_cast<uint64_t>(t), t };
+    }
+
+    std::sort(keys.begin(), keys.end(), [](const KeyTri& a, const KeyTri& b) {
+        return a.key < b.key;
+    });
+
+    for (size_t i = 0; i < n; ++i)
+        order[i] = keys[i].tri;
+}
+
+} 
 
 namespace dyno
 {
@@ -145,6 +225,12 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
 
     auto& links = urdfInfo.links;
 
+    // Output: patchBoundingBox[linkId][patchId] stores world-space AABBs for patches.
+    std::vector<std::vector<TAlignedBox3D<Real>>> patchBoundingBox;
+    patchBoundingBox.clear();
+    patchBoundingBox.resize(links.size());
+    const int facesPerPatch = 320;
+
     texMesh->clear();
 
     std::vector<Vec3f> vertices;
@@ -160,9 +246,8 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     uint globalShapeId = 0;
 
     // Iterate through each link and handle the visual mesh
-    for (auto& link : links) {
-        // if (link.visualMeshPath.empty())
-        //     continue;
+    for (size_t linkId = 0; linkId < links.size(); ++linkId) {
+        auto& link = links[linkId];
         if (!link.visualMeshPath.empty()) {
             // Construct the complete path to the mesh
             auto meshFull = FilePath(getAssetPath() + "/../asset/" + link.visualMeshPath);
@@ -263,7 +348,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
 
                 std::shared_ptr<ImageLoader> loader = std::make_shared<ImageLoader>();
 
-                // diffuse 纹理
+                // diffuse texture
                 if (!mtl.diffuse_texname.empty())
                 {
                     auto tex_path = (urdfRoot / mtl.diffuse_texname).string();
@@ -273,7 +358,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                     }
                 }
 
-                // bump / normal 贴图
+                // bump / normal maps
                 if (!mtl.bump_texname.empty())
                 {
                     auto tex_path = (urdfRoot/ mtl.bump_texname).string();
@@ -306,7 +391,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 // std::vector<TopologyModule::Triangle> normalIndex;
                 // std::vector<TopologyModule::Triangle> texCoordIndex;
 
-                // 绑定材质（tinyobj 每个 shape 可以有 material_ids）
+                // Bind materials (each shape in tinyobj can have material_ids)
                 // if (!mesh.material_ids.empty() && mesh.material_ids[0] >= 0)
                 // {
                 //     int localMatId  = mesh.material_ids[0];
@@ -317,7 +402,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 //         shape->material = reMats[globalMatId];
                 // }
 
-                // tinyobj 里 indices 是三角形列表（每个 index 里有 v / n / t 下标）
+                // In tinyobj, the indices are a list of triangles (each index contains the subscripts of v / n / t)
                 for (size_t i = 0; i < mesh.indices.size(); i += 3)
                 {
                     auto idx0 = mesh.indices[i + 0];
@@ -372,7 +457,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                     // hi = hi.maximum(vertices[v1]);
                     // hi = hi.maximum(vertices[v2]);
 
-                    // 填 shapeIds：把这几个顶点标记为当前 globalShapeId
+                    // Fill in shapeIds: mark these vertices as the current globalShapeId
                     shapeIds[v0] = globalShapeId;
                     shapeIds[v1] = globalShapeId;
                     shapeIds[v2] = globalShapeId;
@@ -382,17 +467,17 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             mergedShape->normalIndex.assign(normalIndex);
             mergedShape->texCoordIndex.assign(texCoordIndex);
 
-            // 包围盒与中心
+            // Bounding box and center
             auto shapeCenter = (lo + hi) * Real(0.5);
             mergedShape->boundingBox       = TAlignedBox3D<Real>(lo, hi);
             mergedShape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
 
-            // link 在 world 下的姿态
+            // The posture of link under world space
             Transform3f T_w_link = link.T_world;
             Mat3f R_w_link = T_w_link.rotation();
             Vec3f t_w_link = T_w_link.translation();
 
-            // 把 world 坐标转回 link 局部：p_local = R^T (p_world - t)
+            // Convert world coordinates back to link local: p_local = R^T (p_world - t)
             Vec3f center_local = R_w_link.transpose() * (shapeCenter - t_w_link);
 
             link.T_visual_bb_world = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
@@ -639,6 +724,269 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 }
             }
         }
+
+        if (!link.visualMeshPath.empty()) {
+            // Construct the complete path to the mesh
+            auto meshFull = FilePath(getAssetPath() + "/../asset/" + link.visualMeshPath);
+            std::string meshFile   = meshFull.string();
+            std::string meshFolder = meshFull.path().parent_path().string();
+
+            tinyobj::attrib_t                attrib;
+            std::vector<tinyobj::shape_t>    shapes;
+            std::vector<tinyobj::material_t> materials;
+            std::string                      warn, err;
+
+            bool ret = tinyobj::LoadObj(
+                &attrib,
+                &shapes,
+                &materials,
+                &warn,
+                &err,
+                meshFile.c_str(),
+                meshFolder.c_str()
+            );
+
+            if (!warn.empty())
+                std::cerr << "tinyobj warn: " << warn << std::endl;
+            if (!err.empty())
+            {
+                std::cerr << "tinyobj err: " << err << std::endl;
+                continue;
+            }
+            if (!ret)
+            {
+                std::cerr << "Failed to load obj: " << meshFile << std::endl;
+                continue;
+            }
+
+            size_t vOffset = vertices.size();
+            size_t nOffset = normals.size();
+            size_t tOffset = texCoords.size();
+
+            bool hasNormals   = !attrib.normals.empty();
+            bool hasTexcoords = !attrib.texcoords.empty();
+
+            // Append the data from the obj file
+            for (size_t i = 0; i < attrib.vertices.size(); i += 3)
+            {
+                vertices.push_back(Vec3f(
+                    attrib.vertices[i + 0],
+                    attrib.vertices[i + 1],
+                    attrib.vertices[i + 2]
+                ));
+            }
+            if (hasNormals) {
+                for (size_t i = 0; i < attrib.normals.size(); i += 3)
+                {
+                    normals.push_back(Vec3f(
+                        attrib.normals[i + 0],
+                        attrib.normals[i + 1],
+                        attrib.normals[i + 2]
+                    ));
+                }
+            }
+
+            if (hasTexcoords) {
+                for (size_t i = 0; i < attrib.texcoords.size(); i += 2)
+                {
+                    texCoords.push_back(Vec2f(
+                        attrib.texcoords[i + 0],
+                        attrib.texcoords[i + 1]
+                    ));
+                }
+            } else {
+                if (texCoords.size() < vertices.size())
+                {
+                    texCoords.resize(vertices.size());
+                }
+
+                for (size_t vi = vOffset; vi < vertices.size(); ++vi)
+                {
+                    texCoords[vi] = Vec2f(0.0f, 0.0f);
+                }
+            }
+
+            shapeIds.resize(vertices.size());
+
+            dyno::CArray2D<dyno::Vec4f> texture(1, 1);
+            texture[0, 0] = dyno::Vec4f(1);
+
+            std::vector<TopologyModule::Triangle> vertexIndex;
+            std::vector<TopologyModule::Triangle> normalIndex;
+            std::vector<TopologyModule::Triangle> texCoordIndex;
+            // Triangle centers (for Morton ordering). One entry per triangle.
+            std::vector<Vec3f> triCenters;
+
+            Transform3f T_world_mesh = composeTransform(link.T_world, link.T_mesh);
+
+            for (const auto& tshape : shapes)
+            {
+                const auto& mesh = tshape.mesh;
+
+                // In tinyobj, indices are a list of triangles (each index contains v/n/t subscripts)
+                for (size_t i = 0; i < mesh.indices.size(); i += 3)
+                {
+                    auto idx0 = mesh.indices[i + 0];
+                    auto idx1 = mesh.indices[i + 1];
+                    auto idx2 = mesh.indices[i + 2];
+
+                    // Add the offset to convert the local subscript into a global subscript
+                    int v0 = idx0.vertex_index + static_cast<int>(vOffset);
+                    int v1 = idx1.vertex_index + static_cast<int>(vOffset);
+                    int v2 = idx2.vertex_index + static_cast<int>(vOffset);
+
+                    TopologyModule::Triangle tri(v0, v1, v2);
+
+                    vertexIndex.push_back(tri);
+
+                    if (hasNormals && idx0.normal_index >= 0 && idx1.normal_index >= 0 && idx2.normal_index >= 0) {
+                        int n0 = (idx0.normal_index  >= 0) ? idx0.normal_index  + static_cast<int>(nOffset) : -1;
+                        int n1 = (idx1.normal_index  >= 0) ? idx1.normal_index  + static_cast<int>(nOffset) : -1;
+                        int n2 = (idx2.normal_index  >= 0) ? idx2.normal_index  + static_cast<int>(nOffset) : -1;
+                        normalIndex.push_back(TopologyModule::Triangle(n0, n1, n2));
+                    } else {
+                        normalIndex.push_back(tri);
+                    }
+
+                    if (hasTexcoords && idx0.texcoord_index >= 0 && idx1.texcoord_index >= 0 && idx2.texcoord_index >= 0) {
+                        int t0 = (idx0.texcoord_index >= 0) ? idx0.texcoord_index + static_cast<int>(tOffset) : -1;
+                        int t1 = (idx1.texcoord_index >= 0) ? idx1.texcoord_index + static_cast<int>(tOffset) : -1;
+                        int t2 = (idx2.texcoord_index >= 0) ? idx2.texcoord_index + static_cast<int>(tOffset) : -1;
+                        texCoordIndex.push_back(TopologyModule::Triangle(t0, t1, t2));
+                    } else {
+                        texCoordIndex.push_back(tri);
+                    }
+                    // TODO: Use oriented bounding box, and transform the bb later.
+                    Vec3f transformedV0 = T_world_mesh * vertices[v0];
+                    Vec3f transformedV1 = T_world_mesh * vertices[v1];
+                    Vec3f transformedV2 = T_world_mesh * vertices[v2];
+
+                    // Store for later normalization + Morton sort
+                    triCenters.push_back((transformedV0 + transformedV1 + transformedV2) * (Real(1.0) / Real(3.0)));
+                }
+            }
+
+            // -----------------------------------------------------------------
+            // Morton sort triangles to improve spatial locality.
+            // -----------------------------------------------------------------
+            if (triCenters.size() == vertexIndex.size() && !vertexIndex.empty())
+            {
+                std::vector<uint32_t> triOrder;
+                mortonSortTrianglesByCenters(triCenters, triOrder);
+
+                // Reorder triangle index arrays consistently.
+                std::vector<TopologyModule::Triangle> vSorted(vertexIndex.size());
+                std::vector<TopologyModule::Triangle> nSorted(normalIndex.size());
+                std::vector<TopologyModule::Triangle> tSorted(texCoordIndex.size());
+
+                for (size_t k = 0; k < triOrder.size(); ++k)
+                {
+                    const uint32_t src = triOrder[k];
+                    vSorted[k] = vertexIndex[src];
+                    nSorted[k] = normalIndex[src];
+                    tSorted[k] = texCoordIndex[src];
+                }
+                vertexIndex.swap(vSorted);
+                normalIndex.swap(nSorted);
+                texCoordIndex.swap(tSorted);
+            }
+
+            // The pose of link under world space
+            Transform3f T_w_link = link.T_world;
+            Mat3f R_w_link = T_w_link.rotation();
+            Vec3f t_w_link = T_w_link.translation();
+
+            // p_world = T_world * link.meshTransform * p_mesh
+            for (size_t i = vOffset; i < vertices.size(); ++i)
+            {
+                vertices[i] = T_world_mesh * vertices[i];
+            }
+            
+            // -----------------------------------------------------------------
+            // Create patch shapes (world space) for this link (visual mesh).
+            // -----------------------------------------------------------------
+            {
+                const int triCount = static_cast<int>(vertexIndex.size());
+                const int fpp      = facesPerPatch;
+                const int patchCnt = (triCount + fpp - 1) / fpp;
+
+                auto& out = patchBoundingBox[linkId];
+                out.clear();
+                out.reserve(patchCnt);
+
+                for (int p = 0; p < patchCnt; ++p)
+                {
+                    const int begin = p * fpp;
+                    const int end   = std::min(begin + fpp, triCount);
+
+                    Vec3f plo(dyno::REAL_MAX);
+                    Vec3f phi(-dyno::REAL_MAX);
+
+                    std::vector<TopologyModule::Triangle> patchVertexIndex;
+                    std::vector<TopologyModule::Triangle> patchNormalIndex;
+                    std::vector<TopologyModule::Triangle> patchTexCoordIndex;
+
+                    for (int t = begin; t < end; ++t)
+                    {
+                        const auto& tri = vertexIndex[t];
+                        const Vec3f& a = vertices[tri[0]];
+                        const Vec3f& b = vertices[tri[1]];
+                        const Vec3f& c = vertices[tri[2]];
+
+                        plo = plo.minimum(a).minimum(b).minimum(c);
+                        phi = phi.maximum(a).maximum(b).maximum(c);
+
+                        patchVertexIndex.push_back(tri);
+                        patchNormalIndex.push_back(normalIndex[t]);
+                        patchTexCoordIndex.push_back(texCoordIndex[t]);
+
+                        // Set shapeIds for this patch
+                        shapeIds[tri[0]] = globalShapeId;
+                        shapeIds[tri[1]] = globalShapeId;
+                        shapeIds[tri[2]] = globalShapeId;
+                    }
+
+                    out.emplace_back(TAlignedBox3D<Real>(plo, phi));
+
+                    // Create patchShape
+                    std::shared_ptr<Shape> patchShape = std::make_shared<Shape>();
+                    patchShape->vertexIndex.assign(patchVertexIndex);
+                    patchShape->normalIndex.assign(patchNormalIndex);
+                    patchShape->texCoordIndex.assign(patchTexCoordIndex);
+                    // patchShape->boundingBox = TAlignedBox3D<Real>(plo, phi);
+                    patchShape->boundingBox = reShapes[link.visualShapeId]->boundingBox; 
+
+                    // auto patchCenter = (plo + phi) * Real(0.5);
+                    // patchShape->boundingTransform = Transform3f(patchCenter, Mat3f::identityMatrix(), Vec3f(1));
+                    patchShape->boundingTransform = reShapes[link.visualShapeId]->boundingTransform;
+
+                    // Material with different color for adjacent patches
+                    auto mat = std::make_shared<Material>();
+                    Vec3f colors[] = {Vec3f(1,0,0), Vec3f(0,1,0), Vec3f(0,0,1), Vec3f(1,1,0), Vec3f(1,0,1), Vec3f(0,1,1)};
+                    mat->baseColor = colors[p % 6];
+                    reMats.push_back(mat);
+                    patchShape->material = reMats.back();
+
+                    reShapes.push_back(patchShape);
+                    link.patchShapeIds.push_back(globalShapeId);
+                    if (p == patchCnt -1) {
+                        std::cout << "Link " << link.name << " : total " << patchCnt << " patches," << " final globalShapeId: " << globalShapeId << std::endl;
+                    }
+                    globalShapeId++;
+                }
+            }
+
+            auto R = T_world_mesh.rotation();
+            if (hasNormals)
+            {
+                for (size_t i = nOffset; i < normals.size(); ++i)
+                {
+                    normals[i] = R * normals[i];
+                    Real len = normals[i].norm();
+                    if (len > Real(1e-8)) normals[i] /= len;
+                }
+            }
+        }
     }
 
     // 全部 link 处理完毕，一次性把 std::vector 拷到 DArray
@@ -656,7 +1004,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     {
         DArray<int> counter;
         counter.resize(texMesh->vertices().size());
-        // 5+v: Perform point counter operation to assign shape ids
+        // Perform point counter operation to assign shape ids
         Shape_PointCounter(counter,
             texMesh->shapeIds(),
             i);
@@ -728,7 +1076,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     }
 
     // -------------------------------------------------------------------------
-    // 处理 Collision Mesh 并计算体积和转动惯量
+    // Process the Collision Mesh and calculate the volume and moment of inertia
     // -------------------------------------------------------------------------
     for (auto& link : links) {
         if (link.collisionMeshPath.empty()) {

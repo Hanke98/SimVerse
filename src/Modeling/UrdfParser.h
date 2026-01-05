@@ -38,6 +38,7 @@ namespace dyno
         bool isRoot = false;
         Real volume;
         Mat3f localInertia;
+        std::vector<uint> patchShapeIds;
     };
 
     // 关节限制信息

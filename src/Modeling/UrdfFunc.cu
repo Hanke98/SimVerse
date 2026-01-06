@@ -454,14 +454,6 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                     hi = hi.maximum(transformedV1);
                     hi = hi.maximum(transformedV2);
 
-                    // lo = lo.minimum(vertices[v0]);
-                    // lo = lo.minimum(vertices[v1]);
-                    // lo = lo.minimum(vertices[v2]);
-                    //
-                    // hi = hi.maximum(vertices[v0]);
-                    // hi = hi.maximum(vertices[v1]);
-                    // hi = hi.maximum(vertices[v2]);
-
                     // Fill in shapeIds: mark these vertices as the current globalShapeId
                     shapeIds[v0] = globalShapeId;
                     shapeIds[v1] = globalShapeId;
@@ -910,87 +902,6 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             // -----------------------------------------------------------------
             // Create patch shapes (world space) for this link (visual mesh).
             // -----------------------------------------------------------------
-            // {
-            //     PatchingParams     patchParams;
-            //     PatchingResultHost patchResult;
-            //     MortonChunkPatcher patcher;
-            //     // MeshTopologyHost   topo;
-            //     auto topo = MeshTopologyBuilder::BuildFromTriangles((int)vertexIndex.size(), vertexIndex);
-
-            //     patcher.BuildPatches(topo, patchParams, patchResult);
-
-            //     // topo.numFaces = static_cast<int>(vertexIndex.size());
-            //     patchParams.targetFacesPerPatch = facesPerPatch;
-            //     patcher.BuildPatches(topo, patchParams, patchResult);
-
-            //     auto& bboxout = patchBoundingBox[linkId];
-            //     bboxout.clear();
-            //     bboxout.reserve(patchResult.numPatches);
-
-            //     for (int p = 0; p < patchResult.numPatches; ++p)
-            //     {
-            //         const int begin = patchResult.patchOffsets[p];
-            //         const int end   = patchResult.patchOffsets[p + 1];
-
-            //         Vec3f plo(REAL_MAX);
-            //         Vec3f phi(-REAL_MAX);
-
-            //         std::vector<TopologyModule::Triangle> patchVertexIndex;
-            //         std::vector<TopologyModule::Triangle> patchNormalIndex;
-            //         std::vector<TopologyModule::Triangle> patchTexCoordIndex;
-
-            //         patchVertexIndex.reserve(end - begin);
-            //         patchNormalIndex.reserve(end - begin);
-            //         patchTexCoordIndex.reserve(end - begin);
-
-            //         for (int t = begin; t < end; ++t)
-            //         {
-            //             const auto& tri = vertexIndex[t];
-            //             const Vec3f& a = vertices[tri[0]];
-            //             const Vec3f& b = vertices[tri[1]];
-            //             const Vec3f& c = vertices[tri[2]];
-
-            //             plo = plo.minimum(a).minimum(b).minimum(c);
-            //             phi = phi.maximum(a).maximum(b).maximum(c);
-
-            //             patchVertexIndex.push_back(vertexIndex[t]);
-            //             patchNormalIndex.push_back(normalIndex[t]);
-            //             patchTexCoordIndex.push_back(texCoordIndex[t]);
-
-            //             // Set shapeIds for this patch
-            //             shapeIds[tri[0]] = globalShapeId;
-            //             shapeIds[tri[1]] = globalShapeId;
-            //             shapeIds[tri[2]] = globalShapeId;
-            //         }
-
-            //         bboxout.emplace_back(TAlignedBox3D<Real>(plo, phi));
-
-            //         // Create patchShape
-            //         std::shared_ptr<Shape> patchShape = std::make_shared<Shape>();
-            //         patchShape->vertexIndex.assign(patchVertexIndex);
-            //         patchShape->normalIndex.assign(patchNormalIndex);
-            //         patchShape->texCoordIndex.assign(patchTexCoordIndex);
-            //         // patchShape->boundingBox = TAlignedBox3D<Real>(plo, phi);
-            //         patchShape->boundingBox = reShapes[link.visualShapeId]->boundingBox; 
-
-            //         // auto patchCenter = (plo + phi) * Real(0.5);
-            //         // patchShape->boundingTransform = Transform3f(patchCenter, Mat3f::identityMatrix(), Vec3f(1));
-            //         patchShape->boundingTransform = reShapes[link.visualShapeId]->boundingTransform;
-
-            //         // Material with different color for adjacent patches
-            //         auto mat = std::make_shared<Material>();
-            //         Vec3f colors[] = {Vec3f(1,0,0), Vec3f(0,1,0), Vec3f(0,0,1), Vec3f(1,1,0), Vec3f(1,0,1), Vec3f(0,1,1)};
-            //         mat->baseColor = colors[p % 6];
-            //         reMats.push_back(mat);
-            //         patchShape->material = reMats.back();
-
-            //         reShapes.push_back(patchShape);
-            //         link.patchShapeIds.push_back(globalShapeId);
-
-            //         globalShapeId++;
-            //     }
-            // }
-
             {
                 PatchingParams     patchParams;
                 PatchingResultHost patchResult;
@@ -1002,6 +913,29 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 // topo.numFaces = static_cast<int>(vertexIndex.size());
                 patchParams.targetFacesPerPatch = std::max(0, facesPerPatch);
                 patcher.BuildPatches(topo, patchParams, patchResult);
+
+                // Add assertions to verify patch allocation correctness
+                assert(patchResult.patchOffsets.back() == topo.numFaces);
+                assert(patchResult.patchFaces.size() == topo.numFaces);
+
+                // Check that all facePatchId are assigned (not -1)
+                for (int i = 0; i < topo.numFaces; ++i) {
+                    assert(patchResult.facePatchId[i] != -1);
+                }
+
+                // Check patchFaces for no duplicates and no omissions (debug mode only)
+                #ifndef NDEBUG
+                std::vector<uint8_t> seen(topo.numFaces, 0);
+                for (size_t i = 0; i < patchResult.patchFaces.size(); ++i) {
+                    int face = patchResult.patchFaces[i];
+                    assert(face >= 0 && face < topo.numFaces);
+                    assert(seen[face] == 0); // no duplicate
+                    seen[face] = 1;
+                }
+                for (int i = 0; i < topo.numFaces; ++i) {
+                    assert(seen[i] == 1); // no omission
+                }
+                #endif
 
                 auto& bboxout = patchBoundingBox[linkId];
                 bboxout.clear();

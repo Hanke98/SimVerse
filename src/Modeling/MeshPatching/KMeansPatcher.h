@@ -20,6 +20,22 @@ private:
         const MeshTopologyHost& topo,
         const PatchingParams& params,
         std::vector<int>& outSeedFaces);
+
+    // Stage1-2: GPU assign + CSR 构建（Milestone 3.1 已通过的部分抽成函数）
+    static void RunAssignAndCSR_GPU(
+        const MeshTopologyHost& topo,
+        const std::vector<int>& seedFaces,
+        const PatchingParams& params,
+        PatchingResultHost& out,
+        int& outMaxPatchSize);
+
+    // Stage3: CPU 更新 seeds（从 boundary 向内 BFS，取最后一层）
+    static void UpdateSeedsHost(
+        const MeshTopologyHost& topo,
+        const PatchingResultHost& res,
+        uint32_t rngSeed,
+        int iter,
+        std::vector<int>& outSeedFaces);
 };
 
 } // namespace dyno

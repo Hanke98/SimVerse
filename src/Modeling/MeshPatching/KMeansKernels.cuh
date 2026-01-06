@@ -4,17 +4,17 @@
 
 namespace dyno {
 
-#ifndef DYNO_CUDA_CHECK
-#define DYNO_CUDA_CHECK(call)                                                   \
-    do {                                                                        \
-        cudaError_t err__ = (call);                                             \
-        if (err__ != cudaSuccess) {                                             \
-            printf("CUDA error %s:%d: %s\n", __FILE__, __LINE__,                \
-                   cudaGetErrorString(err__));                                  \
-            asm("trap;");                                                       \
-        }                                                                       \
-    } while (0)
-#endif
+// #ifndef DYNO_CUDA_CHECK
+// #define DYNO_CUDA_CHECK(call)                                                   \
+//     do {                                                                        \
+//         cudaError_t err__ = (call);                                             \
+//         if (err__ != cudaSuccess) {                                             \
+//             printf("CUDA error %s:%d: %s\n", __FILE__, __LINE__,                \
+//                    cudaGetErrorString(err__));                                  \
+//             asm("trap;");                                                       \
+//         }                                                                       \
+//     } while (0)
+// #endif
 
 __global__ void KernelFillInt(int* a, int n, int v)
 {

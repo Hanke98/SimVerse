@@ -3,7 +3,16 @@
 #include "GLSurfaceVisualModule.h"
 #include "Mapping/DiscreteElementsToTriangleSet.h"
 #include "Mapping/DiscreteSpheresToTriangleSet.h"
+#include "Mapping/TextureMeshToTriangleSet.h"
+
+#include "Collision/CollistionDetectionBoundingBox.h"
+#include "Collision/NeighborLinkQuery.h"
+
+#include "RigidBody/Module/ContactsUnion.h"
+#include "RigidBody/Module/TJConstraintSolver.h"
 // #include "UrdfFunc.h"
+
+#include <algorithm>
 
 namespace dyno
 {
@@ -11,12 +20,222 @@ namespace dyno
     BatchRigidBodySystem<TDataType>::BatchRigidBodySystem()
       : ArticulatedBody<TDataType>()
     {
-        RigidBodySystem<TDataType>::init();
+        // RigidBodySystem<TDataType>::init(); // Replaced by NeighborLinkQuery (URDF-driven).
+        initCollisionPipeline();
     }
 
     template<typename TDataType>
     BatchRigidBodySystem<TDataType>::~BatchRigidBodySystem()
     {
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::initCollisionPipeline()
+    {
+        auto defaultTopo = std::make_shared<DiscreteElements<TDataType>>();
+        this->stateTopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
+
+        // NeighborElementQuery path (kept for quick rollback)
+        // auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
+        // elementQuery->varSelfCollision()->setValue(true);
+        // this->stateTopology()->connect(elementQuery->inDiscreteElements());
+        // this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
+        // this->stateAttribute()->connect(elementQuery->inAttribute());
+        // this->animationPipeline()->pushModule(elementQuery);
+
+        auto tm2ts = std::make_shared<TextureMeshToTriangleSet<TDataType>>();
+        this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
+        this->animationPipeline()->pushModule(tm2ts);
+
+        m_neighborLinkQuery = std::make_shared<NeighborLinkQuery<TDataType>>();
+        tm2ts->outTriangleSet()->connect(m_neighborLinkQuery->inTriangleSet());
+        this->animationPipeline()->pushModule(m_neighborLinkQuery);
+
+        auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
+        this->stateTopology()->connect(cdBV->inDiscreteElements());
+        this->animationPipeline()->pushModule(cdBV);
+
+        auto merge = std::make_shared<ContactsUnion<TDataType>>();
+        m_neighborLinkQuery->outContacts()->connect(merge->inContactsA());
+        cdBV->outContacts()->connect(merge->inContactsB());
+        this->animationPipeline()->pushModule(merge);
+
+        auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
+        // auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
+        this->stateTimeStep()->connect(iterSolver->inTimeStep());
+        this->varFrictionEnabled()->connect(iterSolver->varFrictionEnabled());
+        this->varGravityEnabled()->connect(iterSolver->varGravityEnabled());
+        this->varGravityValue()->connect(iterSolver->varGravityValue());
+        this->varFrictionCoefficient()->connect(iterSolver->varFrictionCoefficient());
+        this->varSlop()->connect(iterSolver->varSlop());
+        this->stateMass()->connect(iterSolver->inMass());
+
+        this->stateExternalForce()->connect(iterSolver->inExternalForce());
+        this->stateExternalTorque()->connect(iterSolver->inExternalTorque());
+        this->varAngularDamping()->connect(iterSolver->varAngularDamping());
+
+        this->stateFrictionCoefficients()->connect(iterSolver->inFrictionCoefficients());
+        this->stateAttribute()->connect(iterSolver->inAttribute());
+        this->stateCenter()->connect(iterSolver->inCenter());
+        this->stateVelocity()->connect(iterSolver->inVelocity());
+        this->stateAngularVelocity()->connect(iterSolver->inAngularVelocity());
+        this->stateRotationMatrix()->connect(iterSolver->inRotationMatrix());
+        this->stateInertia()->connect(iterSolver->inInertia());
+        this->stateQuaternion()->connect(iterSolver->inQuaternion());
+        this->stateInitialInertia()->connect(iterSolver->inInitialInertia());
+        this->stateTopology()->connect(iterSolver->inDiscreteElements());
+        merge->outContacts()->connect(iterSolver->inContacts());
+        this->animationPipeline()->pushModule(iterSolver);
+
+        this->setDt(0.016f);
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::setupNeighborLinkQueryFromUrdf()
+    {
+        if (!m_neighborLinkQuery)
+        {
+            return;
+        }
+
+        const auto& links = this->urdfInfo.links;
+        if (links.empty())
+        {
+            return;
+        }
+
+        auto mesh = this->stateTextureMesh()->constDataPtr();
+        if (mesh == nullptr)
+        {
+            return;
+        }
+
+        using Real = typename TDataType::Real;
+        using AABB = TAlignedBox3D<Real>;
+
+        if (this->urdfInfo.linkAABBs.size() != links.size())
+        {
+            printf("[NeighborLinkQuery] linkAABBs size mismatch: %zu vs %zu\n",
+                   this->urdfInfo.linkAABBs.size(),
+                   links.size());
+            // return;
+        }
+
+        std::vector<AABB> linkAabbs = this->urdfInfo.linkAABBs;
+
+        const auto& shapes = mesh->shapes();
+        std::vector<int> shapeTriOffsets(shapes.size() + 1, 0);
+        for (size_t i = 0; i < shapes.size(); ++i)
+        {
+            shapeTriOffsets[i + 1] = shapeTriOffsets[i] + static_cast<int>(shapes[i]->vertexIndex.size());
+        }
+
+        std::vector<int> linkPatchOffsets(links.size() + 1, 0);
+        std::vector<AABB> patchAabbs;
+        std::vector<int> patchTriOffsets;
+        std::vector<int> patchTriIndices;
+        patchTriOffsets.push_back(0);
+
+        int patchTotal = 0;
+        for (size_t l = 0; l < links.size(); ++l)
+        {
+            const auto& link = links[l];
+            int shapeId = static_cast<int>(link.visualShapeId);
+            size_t patchCount = 0;
+
+            if (shapeId >= 0 && static_cast<size_t>(shapeId + 1) < shapeTriOffsets.size()
+                && link.patchOffsets.size() >= 2 && !link.patchFaces.empty())
+            {
+                size_t offsetCount = link.patchOffsets.size() - 1;
+                patchCount = std::min(offsetCount, link.patchAABBs.size());
+            }
+
+            for (size_t p = 0; p < patchCount; ++p)
+            {
+                patchAabbs.push_back(link.patchAABBs[p]);
+
+                int begin = link.patchOffsets[p];
+                int end = link.patchOffsets[p + 1];
+                if (begin < 0) begin = 0;
+                if (end > static_cast<int>(link.patchFaces.size()))
+                {
+                    end = static_cast<int>(link.patchFaces.size());
+                }
+
+                int triBase = shapeTriOffsets[shapeId];
+                for (int t = begin; t < end; ++t)
+                {
+                    int face = link.patchFaces[t];
+                    patchTriIndices.push_back(triBase + face);
+                }
+
+                patchTriOffsets.push_back(static_cast<int>(patchTriIndices.size()));
+                ++patchTotal;
+            }
+
+            linkPatchOffsets[l + 1] = patchTotal;
+        }
+
+        m_neighborLinkQuery->inLinkAABBs()->assign(linkAabbs);
+        m_neighborLinkQuery->inPatchAABBs()->assign(patchAabbs);
+        m_neighborLinkQuery->inLinkPatchOffsets()->assign(linkPatchOffsets);
+        m_neighborLinkQuery->inPatchTriOffsets()->assign(patchTriOffsets);
+        m_neighborLinkQuery->inPatchTriIndices()->assign(patchTriIndices);
+
+        std::vector<std::vector<int>> adjacent(links.size());
+        for (const auto& joint : this->urdfInfo.joints)
+        {
+            int parent = joint.parentLinkId;
+            int child = joint.childLinkId;
+            if (parent >= 0 && child >= 0
+                && parent < static_cast<int>(links.size())
+                && child < static_cast<int>(links.size()))
+            {
+                adjacent[parent].push_back(child);
+                adjacent[child].push_back(parent);
+            }
+        }
+        if (!adjacent.empty())
+        {
+            // Convert std::vector<std::vector<int>> to DArrayList<int>
+            CArrayList<int> convertedArray;
+            std::vector<uint> counts;
+            for (const auto& vec : adjacent) {
+                counts.push_back(static_cast<uint>(vec.size()));
+            }
+
+            CArray<uint> countArray;
+            countArray.assign(counts);
+            convertedArray.resize(countArray);
+            for (size_t i = 0; i < adjacent.size(); ++i) {
+                auto& list = convertedArray[i];
+                for (int val : adjacent[i]) {
+                    list.insert(val);
+                }
+            }
+            m_neighborLinkQuery->inAdjacentLinks()->assign(convertedArray);
+        }
+
+#ifndef NDEBUG
+        printf("[NeighborLinkQuery] links=%zu patches=%zu patchTris=%zu\n",
+               links.size(),
+               patchAabbs.size(),
+               patchTriIndices.size());
+        printf("[NeighborLinkQuery] contacts=%u\n",
+               static_cast<unsigned int>(m_neighborLinkQuery->outContacts()->size()));
+        if (!linkPatchOffsets.empty() && linkPatchOffsets.back() != static_cast<int>(patchAabbs.size()))
+        {
+            printf("[NeighborLinkQuery] linkPatchOffsets.back()=%d patchCount=%zu\n",
+                   linkPatchOffsets.back(),
+                   patchAabbs.size());
+        }
+        if (!patchTriOffsets.empty() && patchTriOffsets.back() != static_cast<int>(patchTriIndices.size()))
+        {
+            printf("[NeighborLinkQuery] patchTriOffsets.back()=%d triCount=%zu\n",
+                   patchTriOffsets.back(),
+                   patchTriIndices.size());
+        }
+#endif
     }
 
     template<typename TDataType>
@@ -309,18 +528,18 @@ namespace dyno
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
                     mb.body_indices.push_back(actor->idx);
 
-                    for (auto& pid : this->urdfInfo.links[l].patchShapeIds) {
-                        auto pUp = texMesh->shapes()[pid]->boundingBox.v1;
-                        auto pDown = texMesh->shapes()[pid]->boundingBox.v0;
-                        rigidbody.position = texMesh->shapes()[pid]->boundingTransform.translation() + instances[robotarmIndex].translation()+ Vec3f(1.0f, 0.0f, 0.0f);
-                        rigidbody.motionType = BodyType::Static;
-                        auto pActor = this->createRigidBody(rigidbody);
-                        actors[pid] = pActor;
-                        BoxInfo pBox;
-                        pBox.halfLength = (pUp - pDown) / 2;
-                        this->bindBox(pActor, pBox, density);
-                        this->bindShape(pActor, Pair<uint, uint>(pid, robotarmIndex));
-                    }
+                    // for (auto& pid : this->urdfInfo.links[l].patchShapeIds) {
+                    //     auto pUp = texMesh->shapes()[pid]->boundingBox.v1;
+                    //     auto pDown = texMesh->shapes()[pid]->boundingBox.v0;
+                    //     rigidbody.position = texMesh->shapes()[pid]->boundingTransform.translation() + instances[robotarmIndex].translation()+ Vec3f(1.0f, 0.0f, 0.0f);
+                    //     rigidbody.motionType = BodyType::Static;
+                    //     auto pActor = this->createRigidBody(rigidbody);
+                    //     actors[pid] = pActor;
+                    //     BoxInfo pBox;
+                    //     pBox.halfLength = (pUp - pDown) / 2;
+                    //     this->bindBox(pActor, pBox, density);
+                    //     this->bindShape(pActor, Pair<uint, uint>(pid, robotarmIndex));
+                    // }
                 }
 
                 for (int j = 0; j < this->urdfInfo.joints.size(); ++j) {
@@ -431,6 +650,7 @@ namespace dyno
                 robotarmIndex++;
             }
             attachRender();
+            setupNeighborLinkQueryFromUrdf();
     }
 
     template<typename TDataType>

@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <tinyxml/tinyxml2.h>
+#include "Primitive/Primitive3D.h"
 #include "Vector.h"
 #include "Matrix.h"
 
@@ -39,6 +40,10 @@ namespace dyno
         Real volume;
         Mat3f localInertia;
         std::vector<uint> patchShapeIds;
+        bool hasPatch = false;
+        std::vector<int> patchFaces;
+        std::vector<int> patchOffsets;
+        std::vector<TAlignedBox3D<Real>> patchAABBs;
     };
 
     // 关节限制信息
@@ -73,6 +78,7 @@ namespace dyno
         std::vector<UrdfLink> links;
         std::vector<UrdfJoint> joints;
         std::string robotName;
+        std::vector<TAlignedBox3D<Real>> linkAABBs;
     };
     
     // URDF解析器类

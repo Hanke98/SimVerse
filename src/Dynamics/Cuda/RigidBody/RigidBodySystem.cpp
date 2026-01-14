@@ -34,6 +34,7 @@ namespace dyno
     this->stateTopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
     //
     auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
+    elementQuery->varSelfCollision()->setValue(true);
     this->stateTopology()->connect(elementQuery->inDiscreteElements());
     this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
     this->stateAttribute()->connect(elementQuery->inAttribute());

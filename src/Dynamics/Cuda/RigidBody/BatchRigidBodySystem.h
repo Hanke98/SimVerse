@@ -9,9 +9,12 @@
 #include "Collision/CollisionData.h"
 
 #include <iostream>
+#include <memory>
 #include <vector>
 namespace dyno
 {
+  template<typename TDataType> class NeighborLinkQuery;
+
   template<typename TDataType>
   class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
 public:
@@ -142,6 +145,9 @@ protected:
     void applyOneMultiBodyTorqueControl(int mb_id, Coord torque);
 
 protected:
+    void initCollisionPipeline();
+    void setupNeighborLinkQueryFromUrdf();
+
     std::vector<MulitBodyChainIndices> ctrl_mb_chains; // main multi-body chains with control
     std::vector<MulitBodyChainIndices> non_ctrl_mb_chains; // other multi-body chains in the env.
 
@@ -150,6 +156,8 @@ protected:
     std::vector<Matrix> initialRotations; // initial rotation matrix of all rigid bodies
 
     DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
+
+    std::shared_ptr<NeighborLinkQuery<TDataType>> m_neighborLinkQuery;
   };
 
 } // namespace dyno

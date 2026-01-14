@@ -36,6 +36,14 @@ private:
         uint32_t rngSeed,
         int iter,
         std::vector<int>& outSeedFaces);
+
+    // Stage4: CPU 插 seed（对大 patch 从 boundary 挑 k 个新 seed）
+    static void AddSeedsHost(
+        const MeshTopologyHost& topo,
+        const PatchingResultHost& res,
+        const PatchingParams& params,
+        int iter,
+        std::vector<int>& inoutSeedFaces);
 };
 
 } // namespace dyno

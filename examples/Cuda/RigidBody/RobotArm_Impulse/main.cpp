@@ -258,15 +258,15 @@ int main() {
             }
         }
 
-        // moterVelocities1 = {
-        //     (float)torque[0],
-        //     (float)torque[1],
-        //     (float)torque[2],
-        //     (float)torque[3],
-        //     (float)torque[4],
-        //     (float)torque[5],
-        //     (float)torque[6]
-        // };
+        moterVelocities1 = {
+            (float)torque[0],
+            (float)torque[1],
+            (float)torque[2],
+            (float)torque[3],
+            (float)torque[4],
+            (float)torque[5],
+            (float)torque[6]
+        };
 
         RobotArmSimulator<DataType3f>::HingeTorqueParam param;
         param.num_bodies = 1;

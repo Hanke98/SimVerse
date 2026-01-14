@@ -2,6 +2,10 @@
 #include <iostream>
 #include <sstream>
 #include <unordered_set>
+#include <vector>
+#include <cctype>
+#include <fstream>
+#include <cstdint>
 
 namespace dyno
 {
@@ -23,6 +27,103 @@ namespace dyno
         }
         
         return processedPath;
+    }
+
+    static std::vector<int> parseIntListAttr(const char* attr)
+    {
+        std::vector<int> out;
+        if (!attr) return out;
+
+        std::string s(attr);
+        for (char& c : s)
+        {
+            const bool ok = (std::isdigit(static_cast<unsigned char>(c)) || c == '-' || c == '+');
+            if (!ok) c = ' ';
+        }
+
+        std::stringstream ss(s);
+        int v = 0;
+        while (ss >> v)
+        {
+            out.push_back(v);
+        }
+        return out;
+    }
+
+    static std::string getDirectoryName(const std::string& path)
+    {
+        const size_t pos = path.find_last_of("/\\");
+        if (pos == std::string::npos) return ".";
+        return path.substr(0, pos);
+    }
+
+    static bool isAbsolutePath(const std::string& p)
+    {
+        if (p.empty()) return false;
+        if (p[0] == '/' || p[0] == '\\') return true;
+        // Windows: "C:\..."
+        if (p.size() >= 2 && std::isalpha(static_cast<unsigned char>(p[0])) && p[1] == ':') return true;
+        return false;
+    }
+
+    static std::string joinPath(const std::string& dir, const std::string& file)
+    {
+        if (dir.empty() || dir == ".") return file;
+        if (dir.back() == '/' || dir.back() == '\\') return dir + file;
+        return dir + "/" + file;
+    }
+
+    static bool readPatchBin(const std::string& filepath,
+                             std::vector<int>& outFaces,
+                             std::vector<int>& outOffsets,
+                             uint32_t* outVersion = nullptr)
+    {
+        outFaces.clear();
+        outOffsets.clear();
+
+        std::ifstream is(filepath, std::ios::binary);
+        if (!is.is_open()) return false;
+
+        uint32_t magic = 0;
+        uint32_t ver = 0;
+        uint32_t numFaces = 0;
+        uint32_t numOffsets = 0;
+
+        is.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+        is.read(reinterpret_cast<char*>(&ver), sizeof(ver));
+        is.read(reinterpret_cast<char*>(&numFaces), sizeof(numFaces));
+        is.read(reinterpret_cast<char*>(&numOffsets), sizeof(numOffsets));
+
+        if (!is.good()) return false;
+
+        // 'PTCH' little-endian (与 Writer 中 0x48435450u 对齐)
+        if (magic != 0x48435450u) return false;
+
+        if (outVersion) *outVersion = ver;
+
+        // 简单 sanity check，避免异常文件导致超大分配
+        if (numOffsets < 2) return false;
+        if (numFaces > 200000000u || numOffsets > 200000000u) return false;
+
+        std::vector<int32_t> offsets32(numOffsets);
+        std::vector<int32_t> faces32(numFaces);
+
+        is.read(reinterpret_cast<char*>(offsets32.data()), sizeof(int32_t) * offsets32.size());
+        is.read(reinterpret_cast<char*>(faces32.data()), sizeof(int32_t) * faces32.size());
+
+        if (!is.good()) return false;
+
+        outOffsets.resize(numOffsets);
+        for (size_t i = 0; i < offsets32.size(); ++i) outOffsets[i] = static_cast<int>(offsets32[i]);
+
+        outFaces.resize(numFaces);
+        for (size_t i = 0; i < faces32.size(); ++i) outFaces[i] = static_cast<int>(faces32[i]);
+
+        // 基本一致性检查（失败则认为读取失败，方便上层重新 patch）
+        if (outOffsets.front() != 0) return false;
+        if (outOffsets.back() != static_cast<int>(outFaces.size())) return false;
+
+        return true;
     }
 
     bool UrdfParser::parse(const std::string& filePath, UrdfInformation& urdfInfo, bool objYUp)
@@ -113,7 +214,97 @@ namespace dyno
                         link.visualMeshPath = processMeshPath(meshElem->Attribute("filename"));
                     }
                 }
+                
+                link.hasPatch = false;
+                link.patchFaces.clear();
+                link.patchOffsets.clear();
+
+                tinyxml2::XMLElement* patchElem = visualElem->FirstChildElement("patch");
+                if (patchElem)
+                {
+                    // 先标记存在 patch；如果读取失败，再将 hasPatch 置回 false 以便后续重新 patch
+                    link.hasPatch = true;
+
+                    bool loadedFromBin = false;
+
+                    // 新格式：<information filename="xxx.bin"/>
+                    tinyxml2::XMLElement* infoElem = patchElem->FirstChildElement("information");
+                    if (infoElem && infoElem->Attribute("filename"))
+                    {
+                        std::string binName = infoElem->Attribute("filename");
+                        std::string binPath = binName;
+
+                        // 相对路径：默认相对于 urdf 文件所在目录
+                        if (!isAbsolutePath(binPath))
+                        {
+                            const std::string urdfDir = getDirectoryName(filePath);
+                            binPath = joinPath(urdfDir, binPath);
+                        }
+
+                        uint32_t binVer = 0;
+                        if (!readPatchBin(binPath, link.patchFaces, link.patchOffsets, &binVer))
+                        {
+                            std::cerr << "[UrdfParser] Warning: failed to read patch bin file "
+                                      << binPath << " on link " << link.name << std::endl;
+
+                            // 读取失败：清空并允许后续重新 patch
+                            link.patchFaces.clear();
+                            link.patchOffsets.clear();
+                            link.hasPatch = false;
+                        }
+                        else
+                        {
+                            loadedFromBin = true;
+                        }
+                    }
+
+                    // 旧格式兼容：<faceID ID="..."/> + <offset prefixsum="..."/>
+                    if (!loadedFromBin)
+                    {
+                        tinyxml2::XMLElement* faceElem = patchElem->FirstChildElement("faceID");
+                        if (faceElem && faceElem->Attribute("ID"))
+                        {
+                            link.patchFaces = parseIntListAttr(faceElem->Attribute("ID"));
+                        }
+                        else
+                        {
+                            std::cerr << "[UrdfParser] Warning: <patch> exists but <information filename=\"...\"> missing "
+                                         "and <faceID ID=\"...\"> missing on link "
+                                      << link.name << std::endl;
+                        }
+
+                        tinyxml2::XMLElement* offsetElem = patchElem->FirstChildElement("offset");
+                        if (offsetElem && offsetElem->Attribute("prefixsum"))
+                        {
+                            link.patchOffsets = parseIntListAttr(offsetElem->Attribute("prefixsum"));
+                        }
+                        else
+                        {
+                            std::cerr << "[UrdfParser] Warning: <patch> exists but <information filename=\"...\"> missing "
+                                         "and <offset prefixsum=\"...\"> missing on link "
+                                      << link.name << std::endl;
+                        }
+
+                        // 一致性检查（旧格式）
+                        if (!link.patchOffsets.empty())
+                        {
+                            if (link.patchOffsets.size() < 2 || link.patchOffsets.front() != 0)
+                            {
+                                std::cerr << "[UrdfParser] Warning: patchOffsets invalid (size<2 or front!=0) on link "
+                                          << link.name << std::endl;
+                            }
+                            if (!link.patchFaces.empty() &&
+                                link.patchOffsets.back() != static_cast<int>(link.patchFaces.size()))
+                            {
+                                std::cerr << "[UrdfParser] Warning: patchOffsets.back() != patchFaces.size() on link "
+                                          << link.name << " (back=" << link.patchOffsets.back()
+                                          << ", faces=" << link.patchFaces.size() << ")" << std::endl;
+                            }
+                        }
+                    }
+                }
             }
+            
             tinyxml2::XMLElement* collisionElem = linkElem->FirstChildElement("collision");
             if (collisionElem)
             {

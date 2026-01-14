@@ -262,7 +262,7 @@ namespace dyno
 
 		if (!this->inContacts()->isEmpty() || topo->totalJointSize() > 0)
 		{
-			this->inContacts()->clear();
+			// this->inContacts()->clear();
 			if (mContactsInLocalFrame.size() != this->inContacts()->size()) {
 				mContactsInLocalFrame.resize(this->inContacts()->size());
 			}
@@ -387,6 +387,7 @@ namespace dyno
 					this->varGravityValue()->getValue(),
 					dt
 				);
+				std::cout << "Gravity is enabled with value: " << this->varGravityValue()->getValue() << std::endl;
 			}
 
 			setUpExternalForce(

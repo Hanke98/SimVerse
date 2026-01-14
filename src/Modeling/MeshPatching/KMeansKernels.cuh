@@ -40,7 +40,7 @@ __global__ void KernelSetSeeds(int* facePatchId, const int* seedFaces, int numSe
     }
 }
 
-// 全量扫描式传播：对每个 face，如果已有 patchId，则尝试把 patchId 传播给未分配的邻居
+// Full-volume scanning propagation: For each face, if there is an existing patchId, try to propagate the patchId to unassigned neighbors.
 // faceAdj: size=3*F, faceAdj[3*f+e] = neighbor face id or -1
 __global__ void KernelPropagate(
     const int* faceAdj,

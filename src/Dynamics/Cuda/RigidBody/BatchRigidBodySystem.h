@@ -13,7 +13,7 @@
 #include <vector>
 namespace dyno
 {
-  template<typename TDataType> class NeighborLinkQuery;
+  template<typename TDataType> class NeighborTriMeshQuery;
 
   template<typename TDataType>
   class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
@@ -146,7 +146,7 @@ protected:
 
 protected:
     void initCollisionPipeline();
-    void setupNeighborLinkQueryFromUrdf();
+    void setupNeighborTriMeshQueryFromUrdf();
 
     std::vector<MulitBodyChainIndices> ctrl_mb_chains; // main multi-body chains with control
     std::vector<MulitBodyChainIndices> non_ctrl_mb_chains; // other multi-body chains in the env.
@@ -157,7 +157,7 @@ protected:
 
     DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
 
-    std::shared_ptr<NeighborLinkQuery<TDataType>> m_neighborLinkQuery;
+    std::shared_ptr<NeighborTriMeshQuery<TDataType>> m_neighborTriMeshQuery;
   };
 
 } // namespace dyno

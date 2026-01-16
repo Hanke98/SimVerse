@@ -235,7 +235,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     std::vector<std::vector<TAlignedBox3D<Real>>> patchBoundingBox;
     patchBoundingBox.clear();
     patchBoundingBox.resize(links.size());
-    const int facesPerPatch = 320;
+    const int facesPerPatch = 64;
 
     // Output: linkAABBs[linkId] stores world-space AABBs for links.
     urdfInfo.linkAABBs.clear();

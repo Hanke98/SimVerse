@@ -6,13 +6,14 @@
 #include "Mapping/TextureMeshToTriangleSet.h"
 
 #include "Collision/CollistionDetectionBoundingBox.h"
-#include "Collision/NeighborLinkQuery.h"
+#include "Collision/NeighborTriMeshQuery.h"
 
 #include "RigidBody/Module/ContactsUnion.h"
 #include "RigidBody/Module/TJConstraintSolver.h"
 // #include "UrdfFunc.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace dyno
 {
@@ -20,7 +21,7 @@ namespace dyno
     BatchRigidBodySystem<TDataType>::BatchRigidBodySystem()
       : ArticulatedBody<TDataType>()
     {
-        // RigidBodySystem<TDataType>::init(); // Replaced by NeighborLinkQuery (URDF-driven).
+        // RigidBodySystem<TDataType>::init(); // Replaced by NeighborShapeQuery (URDF-driven).
         initCollisionPipeline();
     }
 
@@ -47,16 +48,18 @@ namespace dyno
         this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
         this->animationPipeline()->pushModule(tm2ts);
 
-        m_neighborLinkQuery = std::make_shared<NeighborLinkQuery<TDataType>>();
-        tm2ts->outTriangleSet()->connect(m_neighborLinkQuery->inTriangleSet());
-        this->animationPipeline()->pushModule(m_neighborLinkQuery);
+        m_neighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
+        tm2ts->outTriangleSet()->connect(m_neighborTriMeshQuery->inTriangleSet());
+        this->stateCenter()->connect(m_neighborTriMeshQuery->inCenter());
+        this->stateRotationMatrix()->connect(m_neighborTriMeshQuery->inRotationMatrix());
+        this->animationPipeline()->pushModule(m_neighborTriMeshQuery);
 
         auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
         this->stateTopology()->connect(cdBV->inDiscreteElements());
         this->animationPipeline()->pushModule(cdBV);
 
         auto merge = std::make_shared<ContactsUnion<TDataType>>();
-        m_neighborLinkQuery->outContacts()->connect(merge->inContactsA());
+        m_neighborTriMeshQuery->outContacts()->connect(merge->inContactsA());
         cdBV->outContacts()->connect(merge->inContactsB());
         this->animationPipeline()->pushModule(merge);
 
@@ -91,15 +94,15 @@ namespace dyno
     }
 
     template<typename TDataType>
-    void BatchRigidBodySystem<TDataType>::setupNeighborLinkQueryFromUrdf()
+    void BatchRigidBodySystem<TDataType>::setupNeighborTriMeshQueryFromUrdf()
     {
-        if (!m_neighborLinkQuery)
+        if (!m_neighborTriMeshQuery)
         {
             return;
         }
 
-        const auto& links = this->urdfInfo.links;
-        if (links.empty())
+        const auto& urdfShapes = this->urdfInfo.links;
+        if (urdfShapes.empty())
         {
             return;
         }
@@ -111,129 +114,182 @@ namespace dyno
         }
 
         using Real = typename TDataType::Real;
+        using Coord = typename TDataType::Coord;
+        using Matrix = typename TDataType::Matrix;
         using AABB = TAlignedBox3D<Real>;
 
-        if (this->urdfInfo.linkAABBs.size() != links.size())
+        if (this->urdfInfo.linkAABBs.size() != urdfShapes.size())
         {
-            printf("[NeighborLinkQuery] linkAABBs size mismatch: %zu vs %zu\n",
+            printf("[NeighborTriMeshQuery] shapeAABBs size mismatch: %zu vs %zu\n",
                    this->urdfInfo.linkAABBs.size(),
-                   links.size());
+                   urdfShapes.size());
             // return;
         }
 
-        std::vector<AABB> linkAabbs = this->urdfInfo.linkAABBs;
+        std::vector<AABB> shapeAabbsLocal;
+        shapeAabbsLocal.resize(urdfShapes.size());
 
-        const auto& shapes = mesh->shapes();
-        std::vector<int> shapeTriOffsets(shapes.size() + 1, 0);
-        for (size_t i = 0; i < shapes.size(); ++i)
+        std::vector<Coord> restShapeCenters;
+        std::vector<Matrix> restShapeRotations;
+        restShapeCenters.resize(urdfShapes.size());
+        restShapeRotations.resize(urdfShapes.size());
+
+        auto toLocalAabb = [](const AABB& worldAabb, const Matrix& RRest, const Coord& tRest) -> AABB {
+            Coord centerWorld = (worldAabb.v0 + worldAabb.v1) * Real(0.5);
+            Coord extentWorld = (worldAabb.v1 - worldAabb.v0) * Real(0.5);
+
+            Coord centerLocal = RRest.transpose() * (centerWorld - tRest);
+
+            Coord extentLocal;
+            extentLocal[0] = std::fabs(RRest(0, 0)) * extentWorld[0]
+                           + std::fabs(RRest(1, 0)) * extentWorld[1]
+                           + std::fabs(RRest(2, 0)) * extentWorld[2];
+            extentLocal[1] = std::fabs(RRest(0, 1)) * extentWorld[0]
+                           + std::fabs(RRest(1, 1)) * extentWorld[1]
+                           + std::fabs(RRest(2, 1)) * extentWorld[2];
+            extentLocal[2] = std::fabs(RRest(0, 2)) * extentWorld[0]
+                           + std::fabs(RRest(1, 2)) * extentWorld[1]
+                           + std::fabs(RRest(2, 2)) * extentWorld[2];
+
+            AABB localAabb;
+            localAabb.v0 = centerLocal - extentLocal;
+            localAabb.v1 = centerLocal + extentLocal;
+            return localAabb;
+        };
+
+        for (size_t l = 0; l < urdfShapes.size(); ++l)
         {
-            shapeTriOffsets[i + 1] = shapeTriOffsets[i] + static_cast<int>(shapes[i]->vertexIndex.size());
+            const auto& shape = urdfShapes[l];
+            const auto& bbWorld = this->varVisualOrCollision()->getValue()
+                ? shape.T_collision_bb_world
+                : shape.T_visual_bb_world;
+
+            restShapeCenters[l] = bbWorld.translation();
+            restShapeRotations[l] = bbWorld.rotation();
+
+            if (l < this->urdfInfo.linkAABBs.size())
+            {
+                shapeAabbsLocal[l] = toLocalAabb(this->urdfInfo.linkAABBs[l], restShapeRotations[l], restShapeCenters[l]);
+            }
         }
 
-        std::vector<int> linkPatchOffsets(links.size() + 1, 0);
-        std::vector<AABB> patchAabbs;
-        std::vector<int> patchTriOffsets;
-        std::vector<int> patchTriIndices;
-        patchTriOffsets.push_back(0);
-
-        int patchTotal = 0;
-        for (size_t l = 0; l < links.size(); ++l)
+        const auto& meshShapes = mesh->shapes();
+        std::vector<int> shape2TriOffsets(meshShapes.size() + 1, 0);
+        // Compute triangle offsets for each mesh shape
+        for (size_t i = 0; i < meshShapes.size(); ++i)
         {
-            const auto& link = links[l];
-            int shapeId = static_cast<int>(link.visualShapeId);
+            shape2TriOffsets[i + 1] = shape2TriOffsets[i] + static_cast<int>(meshShapes[i]->vertexIndex.size());
+        }
+
+        std::vector<int> shape2PatchOffsets(urdfShapes.size() + 1, 0);
+        std::vector<AABB> patchAabbsLocal;
+        std::vector<int> patch2TriOffsets;
+        std::vector<int> patch2TriIndices;
+        patch2TriOffsets.push_back(0);
+
+        // Populate patch AABBs and triangle indices
+        int patchTotal = 0;
+        for (size_t l = 0; l < urdfShapes.size(); ++l)
+        {
+            const auto& shape = urdfShapes[l];
+            int shapeId = static_cast<int>(shape.visualShapeId);
             size_t patchCount = 0;
 
-            if (shapeId >= 0 && static_cast<size_t>(shapeId + 1) < shapeTriOffsets.size()
-                && link.patchOffsets.size() >= 2 && !link.patchFaces.empty())
+            // Check if the shape has patches
+            if (shapeId >= 0 && static_cast<size_t>(shapeId + 1) < shape2TriOffsets.size()
+                && shape.patchOffsets.size() >= 2 && !shape.patchFaces.empty())
             {
-                size_t offsetCount = link.patchOffsets.size() - 1;
-                patchCount = std::min(offsetCount, link.patchAABBs.size());
+                size_t offsetCount = shape.patchOffsets.size() - 1;
+                patchCount = std::min(offsetCount, shape.patchAABBs.size());
             }
 
+            // Loop through patches
             for (size_t p = 0; p < patchCount; ++p)
             {
-                patchAabbs.push_back(link.patchAABBs[p]);
+                patchAabbsLocal.push_back(toLocalAabb(shape.patchAABBs[p], restShapeRotations[l], restShapeCenters[l]));
 
-                int begin = link.patchOffsets[p];
-                int end = link.patchOffsets[p + 1];
+                int begin = shape.patchOffsets[p];
+                int end = shape.patchOffsets[p + 1];
                 if (begin < 0) begin = 0;
-                if (end > static_cast<int>(link.patchFaces.size()))
+                if (end > static_cast<int>(shape.patchFaces.size()))
                 {
-                    end = static_cast<int>(link.patchFaces.size());
+                    end = static_cast<int>(shape.patchFaces.size());
                 }
 
-                int triBase = shapeTriOffsets[shapeId];
+                // Compute triangle indices for the patch
+                int triBase = shape2TriOffsets[shapeId];
                 for (int t = begin; t < end; ++t)
                 {
-                    int face = link.patchFaces[t];
-                    patchTriIndices.push_back(triBase + face);
+                    int faceID = shape.patchFaces[t];
+                    patch2TriIndices.push_back(triBase + faceID);
                 }
 
-                patchTriOffsets.push_back(static_cast<int>(patchTriIndices.size()));
+                patch2TriOffsets.push_back(static_cast<int>(patch2TriIndices.size()));
                 ++patchTotal;
             }
 
-            linkPatchOffsets[l + 1] = patchTotal;
+            shape2PatchOffsets[l + 1] = patchTotal;
         }
 
-        m_neighborLinkQuery->inLinkAABBs()->assign(linkAabbs);
-        m_neighborLinkQuery->inPatchAABBs()->assign(patchAabbs);
-        m_neighborLinkQuery->inLinkPatchOffsets()->assign(linkPatchOffsets);
-        m_neighborLinkQuery->inPatchTriOffsets()->assign(patchTriOffsets);
-        m_neighborLinkQuery->inPatchTriIndices()->assign(patchTriIndices);
-
-        std::vector<std::vector<int>> adjacent(links.size());
+        m_neighborTriMeshQuery->inShapeAABBs()->assign(shapeAabbsLocal);
+        m_neighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsLocal);
+        m_neighborTriMeshQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);
+        m_neighborTriMeshQuery->inPatch2TriOffsets()->assign(patch2TriOffsets);
+        m_neighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
+        m_neighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
+        m_neighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
+        std::vector<std::vector<int>> adjacentShapes(urdfShapes.size());
         for (const auto& joint : this->urdfInfo.joints)
         {
             int parent = joint.parentLinkId;
             int child = joint.childLinkId;
             if (parent >= 0 && child >= 0
-                && parent < static_cast<int>(links.size())
-                && child < static_cast<int>(links.size()))
+                && parent < static_cast<int>(urdfShapes.size())
+                && child < static_cast<int>(urdfShapes.size()))
             {
-                adjacent[parent].push_back(child);
-                adjacent[child].push_back(parent);
+                adjacentShapes[parent].push_back(child);
+                adjacentShapes[child].push_back(parent);
             }
         }
-        if (!adjacent.empty())
+        if (!adjacentShapes.empty())
         {
             // Convert std::vector<std::vector<int>> to DArrayList<int>
             CArrayList<int> convertedArray;
             std::vector<uint> counts;
-            for (const auto& vec : adjacent) {
+            for (const auto& vec : adjacentShapes) {
                 counts.push_back(static_cast<uint>(vec.size()));
             }
 
             CArray<uint> countArray;
             countArray.assign(counts);
             convertedArray.resize(countArray);
-            for (size_t i = 0; i < adjacent.size(); ++i) {
+            for (size_t i = 0; i < adjacentShapes.size(); ++i) {
                 auto& list = convertedArray[i];
-                for (int val : adjacent[i]) {
+                for (int val : adjacentShapes[i]) {
                     list.insert(val);
                 }
             }
-            m_neighborLinkQuery->inAdjacentLinks()->assign(convertedArray);
+            m_neighborTriMeshQuery->inAdjacentShapes()->assign(convertedArray);
         }
 
 #ifndef NDEBUG
-        printf("[NeighborLinkQuery] links=%zu patches=%zu patchTris=%zu\n",
-               links.size(),
-               patchAabbs.size(),
-               patchTriIndices.size());
-        printf("[NeighborLinkQuery] contacts=%u\n",
-               static_cast<unsigned int>(m_neighborLinkQuery->outContacts()->size()));
-        if (!linkPatchOffsets.empty() && linkPatchOffsets.back() != static_cast<int>(patchAabbs.size()))
+        printf("[NeighborTriMeshQuery] shapes=%zu patches=%zu patchTris=%zu\n",
+               urdfShapes.size(),
+               patchAabbsLocal.size(),
+               patch2TriIndices.size());
+        printf("[NeighborTriMeshQuery] contacts=%u\n",
+               static_cast<unsigned int>(m_neighborTriMeshQuery->outContacts()->size()));
+        if (!shape2PatchOffsets.empty() && shape2PatchOffsets.back() != static_cast<int>(patchAabbsLocal.size()))
         {
-            printf("[NeighborLinkQuery] linkPatchOffsets.back()=%d patchCount=%zu\n",
-                   linkPatchOffsets.back(),
-                   patchAabbs.size());
+            printf("[NeighborTriMeshQuery] shape2PatchOffsets.back()=%d patchCount=%zu\n",
+                   shape2PatchOffsets.back(),
+                   patchAabbsLocal.size());
         }
-        if (!patchTriOffsets.empty() && patchTriOffsets.back() != static_cast<int>(patchTriIndices.size()))
+        if (!patch2TriOffsets.empty() && patch2TriOffsets.back() != static_cast<int>(patch2TriIndices.size()))
         {
-            printf("[NeighborLinkQuery] patchTriOffsets.back()=%d triCount=%zu\n",
-                   patchTriOffsets.back(),
-                   patchTriIndices.size());
+            printf("[NeighborTriMeshQuery] patch2TriOffsets.back()=%d triCount=%zu\n",
+                   patch2TriOffsets.back(),
+                   patch2TriIndices.size());
         }
 #endif
     }
@@ -528,7 +584,7 @@ namespace dyno
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
                     mb.body_indices.push_back(actor->idx);
 
-                    // for (auto& pid : this->urdfInfo.links[l].patchShapeIds) {
+                    // for (auto& pid : this->urdfInfo.links[l].patch2Shape) {
                     //     auto pUp = texMesh->shapes()[pid]->boundingBox.v1;
                     //     auto pDown = texMesh->shapes()[pid]->boundingBox.v0;
                     //     rigidbody.position = texMesh->shapes()[pid]->boundingTransform.translation() + instances[robotarmIndex].translation()+ Vec3f(1.0f, 0.0f, 0.0f);
@@ -650,7 +706,7 @@ namespace dyno
                 robotarmIndex++;
             }
             attachRender();
-            setupNeighborLinkQueryFromUrdf();
+            setupNeighborTriMeshQueryFromUrdf();
     }
 
     template<typename TDataType>

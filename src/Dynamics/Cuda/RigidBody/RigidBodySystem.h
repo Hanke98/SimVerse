@@ -183,6 +183,7 @@ namespace dyno
 		void postUpdateStates() override;
 
 		void clearRigidBodySystem();
+		int getHostBoxesSize() { return mHostBoxes.size(); }
 
 	public:
 		DEF_VAR(bool, FrictionEnabled, true, "A toggle to control the friction");

@@ -239,6 +239,9 @@ namespace dyno
         m_neighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
         m_neighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
         m_neighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
+
+        m_neighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
+        
         if (!mUrdfShapeRigidBodyIds.empty() && mUrdfShapeRigidBodyIds.size() == urdfShapes.size())
         {
             m_neighborTriMeshQuery->inShape2RigidBodyIds()->assign(mUrdfShapeRigidBodyIds);
@@ -528,7 +531,13 @@ namespace dyno
             } else {
                 std::cout << "Robot: Skip loading file" << std::endl;
             }
+
+            auto texMesh = this->stateTextureMesh()->getDataPtr();
+            const uint invalidElementId = static_cast<uint>(-1);
+            size_t textureShapeCount =  texMesh ? texMesh->shapes().size() : 0;
+            std::cout << "[BatchRigidBodySystem] textureShapeCount: " << textureShapeCount << std::endl;
             mUrdfShapeRigidBodyIds.clear();
+            mTextureMeshShape2ElementIds.clear();
 
             // this->varVisualOrCollision()->setValue(visual_or_collision);
 
@@ -542,7 +551,7 @@ namespace dyno
                 RigidBodyInfo rigidbody;
                 rigidbody.bodyId = robotarmIndex;
 
-                auto texMesh = this->stateTextureMesh()->constDataPtr();
+                auto topo = this->stateTopology()->getDataPtr();
                 std::map<int, std::shared_ptr<PdActor>> actors;
                 std::unordered_map<std::string, int> linkNameToActorIndex;
 
@@ -586,6 +595,7 @@ namespace dyno
 
                     BoxInfo box;
                     box.halfLength = (up - down) / 2;
+                    int oldBoxCount = this->getHostBoxesSize();
                     if (this->urdfInfo.links[l].isRoot) {
                         this->bindBox(actor, box, 1000000000000);
                     } else {
@@ -595,6 +605,27 @@ namespace dyno
                             this->bindBox(actor, box, this->urdfInfo.links[l].volume, this->urdfInfo.links[l].localInertia, density);
                         }
                     }
+                    int newBoxCount = this->getHostBoxesSize();
+                    uint boxLocalId = invalidElementId;
+                    if (oldBoxCount >= 0 && newBoxCount == oldBoxCount + 1)
+                    {
+                        boxLocalId = (uint)(newBoxCount - 1);
+                    }
+                    else
+                    {
+                        printf("[BatchRigidBodySystem] TextureMesh shape to box mapping mismatch (shapeId=%u, oldBoxCount=%d, newBoxCount=%d).\n",
+                            it,
+                            oldBoxCount,
+                            newBoxCount);
+                    }
+
+                    // Store the mapping from texture mesh shape to element id
+                    // auto& entry = mTextureMeshShape2ElementIds[it];
+                    Pair<uint, uint> entry;
+                    entry.first = it;
+                    entry.second = boxLocalId;
+                    mTextureMeshShape2ElementIds.push_back(entry);
+                    
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
                     mb.body_indices.push_back(actor->idx);
 
@@ -718,6 +749,36 @@ namespace dyno
                 ctrl_mb_chains.push_back(mb);
                 non_ctrl_mb_chains.push_back(non_ctrl_mb);
                 robotarmIndex++;
+            }
+            {
+                auto topo = this->stateTopology()->getDataPtr();
+                if (topo == nullptr)
+                {
+                    printf("[BatchRigidBodySystem] TextureMesh shape to element mapping not ready yet (topology unavailable).\n");
+                }
+                else
+                {
+                    auto elementOffset = topo->calculateElementOffset();
+                    uint boxStart = (uint)elementOffset.boxIndex();
+                    uint validCount = 0;
+                    uint invalidCount = 0;
+                    uint minId = static_cast<uint>(-1);
+                    uint maxId = 0;
+                    for (auto& entry : mTextureMeshShape2ElementIds)
+                    {
+                        entry.second = boxStart + entry.second;
+                        validCount++;
+                        if (entry.second < minId) minId = entry.second;
+                        if (entry.second > maxId) maxId = entry.second;
+                    }
+                    printf("[BatchRigidBodySystem] TextureMesh shape to element mapping ready (shapeCount=%zu, valid=%u, invalid=%u, boxStart=%u, min=%u, max=%u).\n",
+                        textureShapeCount,
+                        validCount,
+                        invalidCount,
+                        boxStart,
+                        validCount > 0 ? minId : 0,
+                        validCount > 0 ? maxId : 0);
+                }
             }
             attachRender();
             setupNeighborTriMeshQueryFromUrdf();

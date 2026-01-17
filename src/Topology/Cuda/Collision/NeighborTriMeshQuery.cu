@@ -155,6 +155,7 @@ namespace dyno
 		if (shapeId < 0)
 		{
 			worldAabbs[patchId] = localAabbs[patchId];
+			printf("[NeighborTriMeshQuery] UpdatePatchAabbs failure, patchId: %d, shapeId: %d\n", patchId, shapeId);
 			return;
 		}
 
@@ -902,6 +903,7 @@ namespace dyno
 		this->inAdjacentShapes()->tagOptional(true);
 		this->inShape2PatchCounts()->tagOptional(true);
 		this->inShape2RigidBodyIds()->tagOptional(true);
+		this->inShape2ElementIds()->tagOptional(true);
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
 		this->varDHead()->setValue(Real(0));
@@ -950,6 +952,20 @@ namespace dyno
 			return false;
 		}
 
+		uint totalSize = topo->totalSize();
+		if ((uint)shapeCount != totalSize)
+		{
+			if (!mWarnedEmptyMapping)
+			{
+				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, totalSize=%u), skip this frame.\n",
+					shapeCount,
+					totalSize);
+				mWarnedEmptyMapping = true;
+			}
+			mMappingReady = false;
+			return false;
+		}
+
 		auto& mapping = topo->shape2RigidBodyMapping();
 		uint mappingSize = mapping.size();
 		if (mappingSize == 0)
@@ -958,6 +974,19 @@ namespace dyno
 			{
 				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, mappingSize=%u), skip this frame.\n",
 					shapeCount,
+					mappingSize);
+				mWarnedEmptyMapping = true;
+			}
+			mMappingReady = false;
+			return false;
+		}
+		if (mappingSize < totalSize)
+		{
+			if (!mWarnedEmptyMapping)
+			{
+				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, totalSize=%u, mappingSize=%u), skip this frame.\n",
+					shapeCount,
+					totalSize,
 					mappingSize);
 				mWarnedEmptyMapping = true;
 			}
@@ -998,130 +1027,148 @@ namespace dyno
 		if (shapeCount <= 0)
 			return false;
 
-		if (mShape2RigidBodyIds.size() != (uint)shapeCount)
+		const uint invalidElementId = static_cast<uint>(-1);
+
+		if (!this->inShape2ElementIds()->isEmpty())
 		{
-			if (!mWarnedEmptyElementMapping)
+			auto& pairs = this->inShape2ElementIds()->getData();
+			if (pairs.size() != (uint)shapeCount)
 			{
-				printf("[NeighborTriMeshQuery] Shape2ElementMapping not ready yet (shapeCount=%d, rigidBodyMapSize=%u), skip this frame.\n",
-					shapeCount,
-					(unsigned int)mShape2RigidBodyIds.size());
-				mWarnedEmptyElementMapping = true;
+				if (!mWarnedEmptyElementMapping)
+				{
+					printf("[NeighborTriMeshQuery] Shape2ElementIds size mismatch (shapeCount=%d, pairCount=%u), skip this frame.\n",
+						shapeCount,
+						(unsigned int)pairs.size());
+					mWarnedEmptyElementMapping = true;
+				}
+				return false;
 			}
+
+			CArray<Pair<uint, uint>> hostPairs;
+			hostPairs.assign(pairs);
+
+			std::vector<int> shape2ElementIds(shapeCount, -1);
+			bool warnedDuplicate = false;
+			bool warnedOutOfRange = false;
+			for (uint i = 0; i < hostPairs.size(); ++i)
+			{
+				uint shapeId = hostPairs[i].first;
+				uint elementId = hostPairs[i].second;
+
+				if (elementId == invalidElementId)
+					continue;
+				if (shape2ElementIds[i] >= 0 && !warnedDuplicate)
+				{
+					printf("[NeighborTriMeshQuery] Shape2ElementPairs has duplicate shapeId=%u, overwriting.\n", shapeId);
+					warnedDuplicate = true;
+				}
+				shape2ElementIds[i] = (int)elementId;
+			}
+
+			bool allReady = true;
+			for (int i = 0; i < shapeCount; ++i)
+			{
+				if (shape2ElementIds[i] < 0)
+					allReady = false;
+			}
+
+			if (!allReady)
+			{
+				if (!mWarnedEmptyElementMapping)
+				{
+					printf("[NeighborTriMeshQuery] Shape2ElementMapping incomplete (shapeCount=%d), skip this frame.\n", shapeCount);
+					mWarnedEmptyElementMapping = true;
+				}
+				return false;
+			}
+
+			auto topo = this->inDiscreteElements()->getDataPtr();
+			if (topo == nullptr)
+			{
+				if (!mWarnedEmptyElementMapping)
+				{
+					printf("[NeighborTriMeshQuery] Shape2ElementMapping not ready yet (topology unavailable, shapeCount=%d), skip this frame.\n",
+						shapeCount);
+					mWarnedEmptyElementMapping = true;
+				}
+				return false;
+			}
+
+			auto& mapping = topo->shape2RigidBodyMapping();
+			if (mapping.size() == 0)
+			{
+				if (!mWarnedEmptyMapping)
+				{
+					printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, mappingSize=%u), skip this frame.\n",
+						shapeCount,
+						(unsigned int)mapping.size());
+					mWarnedEmptyMapping = true;
+				}
+				return false;
+			}
+
+			CArray<Pair<uint, uint>> hostMapping;
+			hostMapping.assign(mapping);
+
+			uint totalSize = topo->totalSize();
+			if (totalSize == 0)
+			{
+				if (!mWarnedEmptyMapping)
+				{
+					printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (totalSize=0), skip this frame.\n");
+					mWarnedEmptyMapping = true;
+				}
+				return false;
+			}
+
+			std::vector<int> element2Rigid(totalSize, -1);
+			for (uint i = 0; i < hostMapping.size(); ++i)
+			{
+				uint elementId = hostMapping[i].first;
+				if (elementId < totalSize)
+					element2Rigid[elementId] = (int)hostMapping[i].second;
+			}
+
+			std::vector<int> shape2RigidBodyIds(shapeCount, -1);
+			bool rigidReady = true;
+			for (int i = 0; i < shapeCount; ++i)
+			{
+				int elementId = shape2ElementIds[i];
+				if (elementId < 0 || (uint)elementId >= totalSize)
+				{
+					rigidReady = false;
+					continue;
+				}
+				int bodyId = element2Rigid[elementId];
+				if (bodyId < 0)
+				{
+					rigidReady = false;
+					continue;
+				}
+				shape2RigidBodyIds[i] = bodyId;
+			}
+
+			if (!rigidReady)
+			{
+				if (!mWarnedEmptyMapping)
+				{
+					printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping incomplete (shapeCount=%d), skip this frame.\n", shapeCount);
+					mWarnedEmptyMapping = true;
+				}
+				return false;
+			}
+
+			mShape2ElementIds.assign(shape2ElementIds);
+			mShape2RigidBodyIds.assign(shape2RigidBodyIds);
+			mWarnedEmptyElementMapping = false;
+			mWarnedEmptyMapping = false;
+			mMappingReady = true;
+
+			return true;
+		} else {
+			printf("[NeighborTriMeshQuery] Shape2ElementIds input is empty, skip this frame.\n");
 			return false;
 		}
-
-		auto topo = this->inDiscreteElements()->getDataPtr();
-		if (topo == nullptr)
-		{
-			if (!mWarnedEmptyElementMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2ElementMapping not ready yet (topology unavailable, shapeCount=%d), skip this frame.\n",
-					shapeCount);
-				mWarnedEmptyElementMapping = true;
-			}
-			return false;
-		}
-
-		auto& mapping = topo->shape2RigidBodyMapping();
-		if (mapping.size() == 0)
-		{
-			if (!mWarnedEmptyElementMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2ElementMapping not ready yet (shape2RigidBodyMapping empty, shapeCount=%d), skip this frame.\n",
-					shapeCount);
-				mWarnedEmptyElementMapping = true;
-			}
-			return false;
-		}
-
-		CArray<Pair<uint, uint>> hostMapping;
-		hostMapping.assign(mapping);
-
-		CArray<int> hostShape2RigidBodyIds;
-		hostShape2RigidBodyIds.assign(mShape2RigidBodyIds);
-
-		int maxBodyId = -1;
-		for (uint i = 0; i < hostShape2RigidBodyIds.size(); ++i)
-		{
-			int bodyId = hostShape2RigidBodyIds[i];
-			if (bodyId > maxBodyId)
-				maxBodyId = bodyId;
-		}
-
-		if (maxBodyId < 0)
-		{
-			if (!mWarnedEmptyElementMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2ElementMapping not ready yet (invalid rigid body ids), skip this frame.\n");
-				mWarnedEmptyElementMapping = true;
-			}
-			return false;
-		}
-
-		std::vector<int> bodyToShape((size_t)maxBodyId + 1, -1);
-		for (int i = 0; i < shapeCount; ++i)
-		{
-			int bodyId = hostShape2RigidBodyIds[i];
-			if (bodyId >= 0 && bodyId <= maxBodyId && bodyToShape[bodyId] < 0)
-				bodyToShape[bodyId] = i;
-		}
-
-		std::vector<int> shape2ElementIds(shapeCount, -1);
-		std::vector<int> shape2ElementFallback(shapeCount, -1);
-
-		ElementOffset elementOffset = topo->calculateElementOffset();
-		uint boxStart = elementOffset.boxIndex();
-		uint boxEnd = elementOffset.tetIndex();
-		uint totalSize = topo->totalSize();
-
-		for (uint i = 0; i < hostMapping.size(); ++i)
-		{
-			int elementId = (int)hostMapping[i].first;
-			int bodyId = (int)hostMapping[i].second;
-			if (elementId < 0 || (uint)elementId >= totalSize)
-				continue;
-			if (bodyId < 0 || bodyId > maxBodyId)
-				continue;
-
-			int shapeId = bodyToShape[bodyId];
-			if (shapeId < 0 || shapeId >= shapeCount)
-				continue;
-
-			if ((uint)elementId >= boxStart && (uint)elementId < boxEnd)
-			{
-				if (shape2ElementIds[shapeId] < 0)
-					shape2ElementIds[shapeId] = elementId;
-			}
-			else
-			{
-				if (shape2ElementFallback[shapeId] < 0)
-					shape2ElementFallback[shapeId] = elementId;
-			}
-		}
-
-		bool allReady = true;
-		for (int i = 0; i < shapeCount; ++i)
-		{
-			if (shape2ElementIds[i] < 0)
-				shape2ElementIds[i] = shape2ElementFallback[i];
-			if (shape2ElementIds[i] < 0)
-				allReady = false;
-		}
-
-		if (!allReady)
-		{
-			if (!mWarnedEmptyElementMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2ElementMapping incomplete (shapeCount=%d), skip this frame.\n", shapeCount);
-				mWarnedEmptyElementMapping = true;
-			}
-			return false;
-		}
-
-		mShape2ElementIds.assign(shape2ElementIds);
-		mWarnedEmptyElementMapping = false;
-
-		return true;
 	}
 
 	template<typename TDataType>
@@ -1221,8 +1268,10 @@ namespace dyno
 			return;
 		}
 
-		auto& shapeAabbs = this->inShapeAABBs()->getData();
-		int shapeCount = (int)shapeAabbs.size();
+		// auto& shapeAabbs = this->inShapeAABBs()->getData();
+		// int shapeCount = (int)shapeAabbs.size();
+		// TODO: fix shape count retrieval
+		int shapeCount = this->inShape2ElementIds()->size();
 		if (shapeCount <= 0)
 		{
 			this->outPotentialShapePairs()->resize(0);
@@ -1251,7 +1300,7 @@ namespace dyno
 			return;
 		}
 
-		if (!updateShape2RigidBodyIds(shapeCount))
+		if (!updateShape2ElementIds(shapeCount))
 		{
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
@@ -1262,6 +1311,14 @@ namespace dyno
 		if (!this->inShape2PatchOffsets()->isEmpty())
 		{
 			mShape2PatchOffsets.assign(this->inShape2PatchOffsets()->getData());
+			if (mShape2PatchOffsets.size() != (uint)(shapeCount + 1))
+			{
+				this->outPotentialShapePairs()->resize(0);
+				this->outPotentialPatchPairs()->resize(0);
+				this->outContacts()->resize(0);
+				printf("[NeighborTriMeshQuery] Shape2PatchOffsets size mismatch.\n");
+				return;
+			}
 		}
 		else
 		{
@@ -1281,15 +1338,6 @@ namespace dyno
 			mScan.exclusive(mShape2PatchOffsets, true);
 		}
 
-		if (mShape2PatchOffsets.size() != (uint)(shapeCount + 1))
-		{
-			this->outPotentialShapePairs()->resize(0);
-			this->outPotentialPatchPairs()->resize(0);
-			this->outContacts()->resize(0);
-			printf("[NeighborTriMeshQuery] Shape2PatchOffsets size mismatch.\n");
-			return;
-		}
-
 		int patchCount = (int)this->inPatchAABBs()->size();
 		if (patchCount <= 0)
 		{
@@ -1301,12 +1349,14 @@ namespace dyno
 
 		if (mPatch2Shape.size() != (uint)patchCount)
 			mPatch2Shape.resize(patchCount);
+
 		mPatch2Shape.reset();
 		cuExecute(shapeCount,
 			NLQ_BuildPatch2Shape,
 			mPatch2Shape,
 			mShape2PatchOffsets,
 			patchCount);
+
 		if (mPatch2Shape.size() != (uint)patchCount)
 		{
 			this->outPotentialShapePairs()->resize(0);
@@ -1352,7 +1402,15 @@ namespace dyno
 			return false;
 		}
 
-		if (!updateShape2ElementIds(shapeCount))
+		if (mShape2ElementIds.size() != (uint)shapeCount)
+		{
+			if (!updateShape2ElementIds(shapeCount))
+			{
+				this->outPotentialShapePairs()->resize(0);
+				return false;
+			}
+		}
+		if (mShape2ElementIds.size() != (uint)shapeCount)
 		{
 			this->outPotentialShapePairs()->resize(0);
 			return false;
@@ -1464,6 +1522,8 @@ namespace dyno
 
 		pairCountCpy.clear();
 		pairCount.clear();
+
+		std::cout << "[NeighborTriMeshQuery] broadPhase found " << total << " shape pairs." << std::endl;
 
 		mUseBroadPhasePatchPairs = false;
 		if (this->varEnableBroadPhasePatchPairs()->getValue())

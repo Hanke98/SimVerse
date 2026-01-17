@@ -75,6 +75,8 @@ namespace dyno
 
 		// Deprecated: external mapping from shapeId to rigid body id (no longer required)
 		DEF_ARRAY_IN(int, Shape2RigidBodyIds, DeviceType::GPU, "");
+		// Optional: mapping from texture mesh shapeId to discrete elementId
+		DEF_ARRAY_IN(PairUU, Shape2ElementIds, DeviceType::GPU, "");
 
 		// Rest pose for each shape (same order as shapeAABBs / patch offsets)
 		DEF_ARRAY_IN(Coord, RestShapeCenter, DeviceType::GPU, "");

@@ -25,8 +25,7 @@ namespace dyno
 	 */
 
 	template<typename TDataType>
-	class NeighborTriMeshQuery : public ComputeModule
-	// class NeighborTriMeshQuery : public NeighborElementQuery<TDataType>
+	class NeighborTriMeshQuery : public NeighborElementQuery<TDataType>
 	{
 		DECLARE_TCLASS(NeighborTriMeshQuery, TDataType)
 
@@ -50,13 +49,7 @@ namespace dyno
 		DEF_ENUM(Spatial, Spatial, Spatial::BVH, "");
 
 		DEF_VAR(bool, EnableAdjacentFilter, false, "");
-
-		DEF_VAR(Real, DHead, Real(0.0), "D head");
-
-		/**
-		* @brief A positive value indicating the size of the smallest element, its value will also influence the level of Octree or hierarchical BVH
-		*/
-		DEF_VAR(Real, GridSizeLimit, Real(0.01), "Indicate the size of the smallest element");
+		DEF_VAR(bool, EnableBroadPhasePatchPairs, false, "");
 
 		DEF_ARRAY_IN(AABB, ShapeAABBs, DeviceType::GPU, "");
 
@@ -94,8 +87,6 @@ namespace dyno
 
 		DEF_ARRAY_OUT(PairUU, PotentialPatchPairs, DeviceType::GPU, "");
 
-		DEF_ARRAY_OUT(ContactPair, Contacts, DeviceType::GPU, "");
-
 	protected:
 		void compute() override;
 
@@ -104,12 +95,15 @@ namespace dyno
 		bool middlePhase();
 		void narrowPhase();
 		bool updateShape2RigidBodyIds(int shapeCount);
+		bool updateShape2ElementIds(int shapeCount);
+		bool buildPatchPairsFromContactList(int shapeCount, int patchCount);
 
 	private:
 		Scan<int> mScan;
 		Reduction<int> mReduce;
 
 		DArray<int> mShape2PatchOffsets;
+		DArray<int> mShape2ElementIds;
 		DArray<uint> mPatch2Shape;
 		DArray<int> mShape2RigidBodyIds;
 		DArray<AABB> mShapeAabbsWorld;
@@ -125,7 +119,9 @@ namespace dyno
 
 		bool mMappingReady = false;
 		bool mWarnedEmptyMapping = false;
+		bool mUseBroadPhasePatchPairs = false;
+		bool mWarnedEmptyPatchMapping = false;
+		bool mWarnedEmptyElementMapping = false;
 
-		std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> mBroadPhaseCD;
 	};
 }

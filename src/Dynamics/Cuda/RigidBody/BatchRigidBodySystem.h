@@ -154,6 +154,7 @@ protected:
     std::vector<Vec3f> initialPositions; // initial position of all rigid bodies
     std::vector<TQuat> initialQuats; // initial rotation quaternion of all rigid bodies
     std::vector<Matrix> initialRotations; // initial rotation matrix of all rigid bodies
+    std::vector<int> mUrdfShapeRigidBodyIds;
 
     DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
 

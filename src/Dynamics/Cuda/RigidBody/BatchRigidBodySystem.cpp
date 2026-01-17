@@ -52,6 +52,7 @@ namespace dyno
         tm2ts->outTriangleSet()->connect(m_neighborTriMeshQuery->inTriangleSet());
         this->stateCenter()->connect(m_neighborTriMeshQuery->inCenter());
         this->stateRotationMatrix()->connect(m_neighborTriMeshQuery->inRotationMatrix());
+        this->stateTopology()->connect(m_neighborTriMeshQuery->inDiscreteElements());
         this->animationPipeline()->pushModule(m_neighborTriMeshQuery);
 
         auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
@@ -238,6 +239,10 @@ namespace dyno
         m_neighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
         m_neighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
         m_neighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
+        if (!mUrdfShapeRigidBodyIds.empty() && mUrdfShapeRigidBodyIds.size() == urdfShapes.size())
+        {
+            m_neighborTriMeshQuery->inShape2RigidBodyIds()->assign(mUrdfShapeRigidBodyIds);
+        }
         std::vector<std::vector<int>> adjacentShapes(urdfShapes.size());
         for (const auto& joint : this->urdfInfo.joints)
         {
@@ -523,6 +528,7 @@ namespace dyno
             } else {
                 std::cout << "Robot: Skip loading file" << std::endl;
             }
+            mUrdfShapeRigidBodyIds.clear();
 
             // this->varVisualOrCollision()->setValue(visual_or_collision);
 
@@ -569,6 +575,14 @@ namespace dyno
 
                     auto actor = this->createRigidBody(rigidbody);
                     actors[it] = actor;
+                    if (mUrdfShapeRigidBodyIds.empty())
+                    {
+                        mUrdfShapeRigidBodyIds.assign(this->urdfInfo.links.size(), -1);
+                    }
+                    if (l < (int)mUrdfShapeRigidBodyIds.size() && mUrdfShapeRigidBodyIds[l] < 0)
+                    {
+                        mUrdfShapeRigidBodyIds[l] = actor->idx;
+                    }
 
                     BoxInfo box;
                     box.halfLength = (up - down) / 2;

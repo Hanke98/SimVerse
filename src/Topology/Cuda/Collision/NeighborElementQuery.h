@@ -48,14 +48,16 @@ namespace dyno {
 	protected:
 		void compute() override;
 
-	private:
+	protected:
 		DArray<AABB> mQueryAABB;
 		DArray<AABB> mQueriedAABB;
 
+		std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> mBroadPhaseCD;
+
+	private:
 		Scan<int> mScan;
 		Reduction<int> mReduce;
 
-		std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> mBroadPhaseCD;
 		std::shared_ptr<DiscreteElements<TDataType>> mDiscreteElements;		
 	};
 }

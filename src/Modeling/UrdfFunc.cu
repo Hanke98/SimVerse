@@ -235,7 +235,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     std::vector<std::vector<TAlignedBox3D<Real>>> patchBoundingBox;
     patchBoundingBox.clear();
     patchBoundingBox.resize(links.size());
-    const int facesPerPatch = 64;
+    const int facesPerPatch = 32;
 
     // Output: linkAABBs[linkId] stores world-space AABBs for links.
     urdfInfo.linkAABBs.clear();
@@ -658,228 +658,229 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 }
             }
         }
+        
+        // avoid loading collision mesh for now
+        // if (!link.collisionMeshPath.empty()) {
+        //     // Construct the complete path to the mesh
+        //     auto meshFull = FilePath(getAssetPath() + "/../asset/" + link.collisionMeshPath);
+        //     std::string meshFile   = meshFull.string();
+        //     std::string meshFolder = meshFull.path().parent_path().string();
 
-        if (!link.collisionMeshPath.empty()) {
-            // Construct the complete path to the mesh
-            auto meshFull = FilePath(getAssetPath() + "/../asset/" + link.collisionMeshPath);
-            std::string meshFile   = meshFull.string();
-            std::string meshFolder = meshFull.path().parent_path().string();
+        //     tinyobj::attrib_t                attrib;
+        //     std::vector<tinyobj::shape_t>    shapes;
+        //     std::vector<tinyobj::material_t> materials;
+        //     std::string                      warn, err;
 
-            tinyobj::attrib_t                attrib;
-            std::vector<tinyobj::shape_t>    shapes;
-            std::vector<tinyobj::material_t> materials;
-            std::string                      warn, err;
+        //     bool ret = tinyobj::LoadObj(
+        //         &attrib,
+        //         &shapes,
+        //         &materials,
+        //         &warn,
+        //         &err,
+        //         meshFile.c_str(),
+        //         meshFolder.c_str()
+        //     );
 
-            bool ret = tinyobj::LoadObj(
-                &attrib,
-                &shapes,
-                &materials,
-                &warn,
-                &err,
-                meshFile.c_str(),
-                meshFolder.c_str()
-            );
+        //     if (!warn.empty())
+        //         std::cerr << "tinyobj warn: " << warn << std::endl;
+        //     if (!err.empty())
+        //     {
+        //         std::cerr << "tinyobj err: " << err << std::endl;
+        //         continue;
+        //     }
+        //     if (!ret)
+        //     {
+        //         std::cerr << "Failed to load obj: " << meshFile << std::endl;
+        //         continue;
+        //     }
 
-            if (!warn.empty())
-                std::cerr << "tinyobj warn: " << warn << std::endl;
-            if (!err.empty())
-            {
-                std::cerr << "tinyobj err: " << err << std::endl;
-                continue;
-            }
-            if (!ret)
-            {
-                std::cerr << "Failed to load obj: " << meshFile << std::endl;
-                continue;
-            }
+        //     size_t vOffset = vertices.size();
+        //     size_t nOffset = normals.size();
+        //     size_t tOffset = texCoords.size();
 
-            size_t vOffset = vertices.size();
-            size_t nOffset = normals.size();
-            size_t tOffset = texCoords.size();
+        //     bool hasNormals   = !attrib.normals.empty();
+        //     bool hasTexcoords = !attrib.texcoords.empty();
 
-            bool hasNormals   = !attrib.normals.empty();
-            bool hasTexcoords = !attrib.texcoords.empty();
+        //     // Append the data from the obj file
+        //     for (size_t i = 0; i < attrib.vertices.size(); i += 3)
+        //     {
+        //         vertices.push_back(Vec3f(
+        //             attrib.vertices[i + 0],
+        //             attrib.vertices[i + 1],
+        //             attrib.vertices[i + 2]
+        //         ));
+        //     }
+        //     if (hasNormals) {
+        //         for (size_t i = 0; i < attrib.normals.size(); i += 3)
+        //         {
+        //             normals.push_back(Vec3f(
+        //                 attrib.normals[i + 0],
+        //                 attrib.normals[i + 1],
+        //                 attrib.normals[i + 2]
+        //             ));
+        //         }
+        //     }
 
-            // Append the data from the obj file
-            for (size_t i = 0; i < attrib.vertices.size(); i += 3)
-            {
-                vertices.push_back(Vec3f(
-                    attrib.vertices[i + 0],
-                    attrib.vertices[i + 1],
-                    attrib.vertices[i + 2]
-                ));
-            }
-            if (hasNormals) {
-                for (size_t i = 0; i < attrib.normals.size(); i += 3)
-                {
-                    normals.push_back(Vec3f(
-                        attrib.normals[i + 0],
-                        attrib.normals[i + 1],
-                        attrib.normals[i + 2]
-                    ));
-                }
-            }
+        //     if (hasTexcoords) {
+        //         for (size_t i = 0; i < attrib.texcoords.size(); i += 2)
+        //         {
+        //             texCoords.push_back(Vec2f(
+        //                 attrib.texcoords[i + 0],
+        //                 attrib.texcoords[i + 1]
+        //             ));
+        //         }
+        //     } else {
+        //         if (texCoords.size() < vertices.size())
+        //         {
+        //             texCoords.resize(vertices.size());
+        //         }
 
-            if (hasTexcoords) {
-                for (size_t i = 0; i < attrib.texcoords.size(); i += 2)
-                {
-                    texCoords.push_back(Vec2f(
-                        attrib.texcoords[i + 0],
-                        attrib.texcoords[i + 1]
-                    ));
-                }
-            } else {
-                if (texCoords.size() < vertices.size())
-                {
-                    texCoords.resize(vertices.size());
-                }
+        //         for (size_t vi = vOffset; vi < vertices.size(); ++vi)
+        //         {
+        //             texCoords[vi] = Vec2f(0.0f, 0.0f);
+        //         }
+        //     }
 
-                for (size_t vi = vOffset; vi < vertices.size(); ++vi)
-                {
-                    texCoords[vi] = Vec2f(0.0f, 0.0f);
-                }
-            }
+        //     shapeIds.resize(vertices.size());
 
-            shapeIds.resize(vertices.size());
+        //     // convert materials of tinyobj to engine, and add them into reMats
+        //     uint matOffset = static_cast<uint>(reMats.size());
+        //     reMats.resize(reMats.size() + materials.size());
 
-            // convert materials of tinyobj to engine, and add them into reMats
-            uint matOffset = static_cast<uint>(reMats.size());
-            reMats.resize(reMats.size() + materials.size());
+        //     dyno::CArray2D<dyno::Vec4f> texture(1, 1);
+        //     texture[0, 0] = dyno::Vec4f(1);
 
-            dyno::CArray2D<dyno::Vec4f> texture(1, 1);
-            texture[0, 0] = dyno::Vec4f(1);
+        //     for (size_t mId = 0; mId < materials.size(); ++mId)
+        //     {
+        //         const auto& mtl = materials[mId];
+        //         reMats[matOffset + mId] = std::make_shared<Material>();
+        //         auto& mat = reMats[matOffset + mId];
 
-            for (size_t mId = 0; mId < materials.size(); ++mId)
-            {
-                const auto& mtl = materials[mId];
-                reMats[matOffset + mId] = std::make_shared<Material>();
-                auto& mat = reMats[matOffset + mId];
+        //         mat->baseColor = Vec3f(mtl.diffuse[0], mtl.diffuse[1], mtl.diffuse[2]);
 
-                mat->baseColor = Vec3f(mtl.diffuse[0], mtl.diffuse[1], mtl.diffuse[2]);
+        //         std::shared_ptr<ImageLoader> loader = std::make_shared<ImageLoader>();
 
-                std::shared_ptr<ImageLoader> loader = std::make_shared<ImageLoader>();
+        //         // diffuse 纹理
+        //         if (!mtl.diffuse_texname.empty())
+        //         {
+        //             auto tex_path = (urdfRoot / mtl.diffuse_texname).string();
+        //             if (loader->loadImage(tex_path.c_str(), texture))
+        //             {
+        //                 mat->texColor.assign(texture);
+        //             }
+        //         }
 
-                // diffuse 纹理
-                if (!mtl.diffuse_texname.empty())
-                {
-                    auto tex_path = (urdfRoot / mtl.diffuse_texname).string();
-                    if (loader->loadImage(tex_path.c_str(), texture))
-                    {
-                        mat->texColor.assign(texture);
-                    }
-                }
+        //         // bump / normal 贴图
+        //         if (!mtl.bump_texname.empty())
+        //         {
+        //             auto tex_path = (urdfRoot/ mtl.bump_texname).string();
+        //             if (loader->loadImage(tex_path.c_str(), texture))
+        //             {
+        //                 mat->texBump.assign(texture);
+        //                 auto texOpt = mtl.bump_texopt;
+        //                 mat->bumpScale = texOpt.bump_multiplier;
+        //             }
+        //         }
+        //     }
 
-                // bump / normal 贴图
-                if (!mtl.bump_texname.empty())
-                {
-                    auto tex_path = (urdfRoot/ mtl.bump_texname).string();
-                    if (loader->loadImage(tex_path.c_str(), texture))
-                    {
-                        mat->texBump.assign(texture);
-                        auto texOpt = mtl.bump_texopt;
-                        mat->bumpScale = texOpt.bump_multiplier;
-                    }
-                }
-            }
+        //     // Merge all shapes into a single shape
+        //     std::shared_ptr<Shape> mergedShape = std::make_shared<Shape>();
+        //     std::vector<TopologyModule::Triangle> vertexIndex;
+        //     std::vector<TopologyModule::Triangle> normalIndex;
+        //     std::vector<TopologyModule::Triangle> texCoordIndex;
 
-            // Merge all shapes into a single shape
-            std::shared_ptr<Shape> mergedShape = std::make_shared<Shape>();
-            std::vector<TopologyModule::Triangle> vertexIndex;
-            std::vector<TopologyModule::Triangle> normalIndex;
-            std::vector<TopologyModule::Triangle> texCoordIndex;
+        //     Transform3f T_world_mesh = composeTransform(link.T_world, link.T_mesh);
+        //     Vec3f lo( REAL_MAX);
+        //     Vec3f hi(-REAL_MAX);
 
-            Transform3f T_world_mesh = composeTransform(link.T_world, link.T_mesh);
-            Vec3f lo( REAL_MAX);
-            Vec3f hi(-REAL_MAX);
+        //     for (const auto& tshape : shapes)
+        //     {
+        //         const auto& mesh = tshape.mesh;
 
-            for (const auto& tshape : shapes)
-            {
-                const auto& mesh = tshape.mesh;
+        //         // tinyobj 里 indices 是三角形列表（每个 index 里有 v / n / t 下标）
+        //         for (size_t i = 0; i < mesh.indices.size(); i += 3)
+        //         {
+        //             auto idx0 = mesh.indices[i + 0];
+        //             auto idx1 = mesh.indices[i + 1];
+        //             auto idx2 = mesh.indices[i + 2];
 
-                // tinyobj 里 indices 是三角形列表（每个 index 里有 v / n / t 下标）
-                for (size_t i = 0; i < mesh.indices.size(); i += 3)
-                {
-                    auto idx0 = mesh.indices[i + 0];
-                    auto idx1 = mesh.indices[i + 1];
-                    auto idx2 = mesh.indices[i + 2];
+        //             // 加上 offset，把局部下标变成全局下标
+        //             int v0 = idx0.vertex_index + static_cast<int>(vOffset);
+        //             int v1 = idx1.vertex_index + static_cast<int>(vOffset);
+        //             int v2 = idx2.vertex_index + static_cast<int>(vOffset);
 
-                    // 加上 offset，把局部下标变成全局下标
-                    int v0 = idx0.vertex_index + static_cast<int>(vOffset);
-                    int v1 = idx1.vertex_index + static_cast<int>(vOffset);
-                    int v2 = idx2.vertex_index + static_cast<int>(vOffset);
+        //             TopologyModule::Triangle tri(v0, v1, v2);
 
-                    TopologyModule::Triangle tri(v0, v1, v2);
+        //             vertexIndex.push_back(tri);
 
-                    vertexIndex.push_back(tri);
+        //             if (hasNormals && idx0.normal_index >= 0 && idx1.normal_index >= 0 && idx2.normal_index >= 0) {
+        //                 int n0 = (idx0.normal_index  >= 0) ? idx0.normal_index  + static_cast<int>(nOffset) : -1;
+        //                 int n1 = (idx1.normal_index  >= 0) ? idx1.normal_index  + static_cast<int>(nOffset) : -1;
+        //                 int n2 = (idx2.normal_index  >= 0) ? idx2.normal_index  + static_cast<int>(nOffset) : -1;
+        //                 normalIndex.push_back(TopologyModule::Triangle(n0, n1, n2));
+        //             } else {
+        //                 normalIndex.push_back(tri);
+        //             }
 
-                    if (hasNormals && idx0.normal_index >= 0 && idx1.normal_index >= 0 && idx2.normal_index >= 0) {
-                        int n0 = (idx0.normal_index  >= 0) ? idx0.normal_index  + static_cast<int>(nOffset) : -1;
-                        int n1 = (idx1.normal_index  >= 0) ? idx1.normal_index  + static_cast<int>(nOffset) : -1;
-                        int n2 = (idx2.normal_index  >= 0) ? idx2.normal_index  + static_cast<int>(nOffset) : -1;
-                        normalIndex.push_back(TopologyModule::Triangle(n0, n1, n2));
-                    } else {
-                        normalIndex.push_back(tri);
-                    }
+        //             if (hasTexcoords && idx0.texcoord_index >= 0 && idx1.texcoord_index >= 0 && idx2.texcoord_index >= 0) {
+        //                 int t0 = (idx0.texcoord_index >= 0) ? idx0.texcoord_index + static_cast<int>(tOffset) : -1;
+        //                 int t1 = (idx1.texcoord_index >= 0) ? idx1.texcoord_index + static_cast<int>(tOffset) : -1;
+        //                 int t2 = (idx2.texcoord_index >= 0) ? idx2.texcoord_index + static_cast<int>(tOffset) : -1;
+        //                 texCoordIndex.push_back(TopologyModule::Triangle(t0, t1, t2));
+        //             } else {
+        //                 texCoordIndex.push_back(tri);
+        //             }
+        //             // TODO: Use oriented bounding box, and transform the bb later.
+        //             Vec3f transformedV0 = T_world_mesh * vertices[v0];
+        //             Vec3f transformedV1 = T_world_mesh * vertices[v1];
+        //             Vec3f transformedV2 = T_world_mesh * vertices[v2];
 
-                    if (hasTexcoords && idx0.texcoord_index >= 0 && idx1.texcoord_index >= 0 && idx2.texcoord_index >= 0) {
-                        int t0 = (idx0.texcoord_index >= 0) ? idx0.texcoord_index + static_cast<int>(tOffset) : -1;
-                        int t1 = (idx1.texcoord_index >= 0) ? idx1.texcoord_index + static_cast<int>(tOffset) : -1;
-                        int t2 = (idx2.texcoord_index >= 0) ? idx2.texcoord_index + static_cast<int>(tOffset) : -1;
-                        texCoordIndex.push_back(TopologyModule::Triangle(t0, t1, t2));
-                    } else {
-                        texCoordIndex.push_back(tri);
-                    }
-                    // TODO: Use oriented bounding box, and transform the bb later.
-                    Vec3f transformedV0 = T_world_mesh * vertices[v0];
-                    Vec3f transformedV1 = T_world_mesh * vertices[v1];
-                    Vec3f transformedV2 = T_world_mesh * vertices[v2];
+        //             // Update the bounding box with transformed vertices
+        //             lo = lo.minimum(transformedV0);
+        //             lo = lo.minimum(transformedV1);
+        //             lo = lo.minimum(transformedV2);
 
-                    // Update the bounding box with transformed vertices
-                    lo = lo.minimum(transformedV0);
-                    lo = lo.minimum(transformedV1);
-                    lo = lo.minimum(transformedV2);
+        //             hi = hi.maximum(transformedV0);
+        //             hi = hi.maximum(transformedV1);
+        //             hi = hi.maximum(transformedV2);
 
-                    hi = hi.maximum(transformedV0);
-                    hi = hi.maximum(transformedV1);
-                    hi = hi.maximum(transformedV2);
+        //             // 填 shapeIds：把这几个顶点标记为当前 globalShapeId
+        //             shapeIds[v0] = globalShapeId;
+        //             shapeIds[v1] = globalShapeId;
+        //             shapeIds[v2] = globalShapeId;
+        //         }
+        //     }
+        //     mergedShape->vertexIndex.assign(vertexIndex);
+        //     mergedShape->normalIndex.assign(normalIndex);
+        //     mergedShape->texCoordIndex.assign(texCoordIndex);
 
-                    // 填 shapeIds：把这几个顶点标记为当前 globalShapeId
-                    shapeIds[v0] = globalShapeId;
-                    shapeIds[v1] = globalShapeId;
-                    shapeIds[v2] = globalShapeId;
-                }
-            }
-            mergedShape->vertexIndex.assign(vertexIndex);
-            mergedShape->normalIndex.assign(normalIndex);
-            mergedShape->texCoordIndex.assign(texCoordIndex);
+        //     // 包围盒与中心
+        //     auto shapeCenter = (lo + hi) * Real(0.5);
+        //     mergedShape->boundingBox       = TAlignedBox3D<Real>(lo, hi);
+        //     mergedShape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
 
-            // 包围盒与中心
-            auto shapeCenter = (lo + hi) * Real(0.5);
-            mergedShape->boundingBox       = TAlignedBox3D<Real>(lo, hi);
-            mergedShape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
+        //     link.T_collision_bb_world = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
 
-            link.T_collision_bb_world = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
+        //     reShapes.push_back(mergedShape);
+        //     link.collisionShapeId = globalShapeId;
+        //     globalShapeId++;
 
-            reShapes.push_back(mergedShape);
-            link.collisionShapeId = globalShapeId;
-            globalShapeId++;
-
-            // p_world = T_world * link.meshTransform * p_mesh
-            auto R = T_world_mesh.rotation();
-            for (size_t i = vOffset; i < vertices.size(); ++i)
-            {
-                vertices[i] = T_world_mesh * vertices[i];
-            }
-            if (hasNormals)
-            {
-                for (size_t i = nOffset; i < normals.size(); ++i)
-                {
-                    normals[i] = R * normals[i];
-                    Real len = normals[i].norm();
-                    if (len > Real(1e-8)) normals[i] /= len;
-                }
-            }
-        }
+        //     // p_world = T_world * link.meshTransform * p_mesh
+        //     auto R = T_world_mesh.rotation();
+        //     for (size_t i = vOffset; i < vertices.size(); ++i)
+        //     {
+        //         vertices[i] = T_world_mesh * vertices[i];
+        //     }
+        //     if (hasNormals)
+        //     {
+        //         for (size_t i = nOffset; i < normals.size(); ++i)
+        //         {
+        //             normals[i] = R * normals[i];
+        //             Real len = normals[i].norm();
+        //             if (len > Real(1e-8)) normals[i] /= len;
+        //         }
+        //     }
+        // }
 
         // if (!link.visualMeshPath.empty()) {
         //     // Construct the complete path to the mesh

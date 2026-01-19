@@ -1,6 +1,8 @@
-if(PERIDYNO_QT_GUI AND PERIDYNO_LIBRARY_RIGIDBODY)
+# if(PERIDYNO_QT_GUI AND PERIDYNO_LIBRARY_RIGIDBODY)
+if(PERIDYNO_LIBRARY_RIGIDBODY)
     set(LIB_DEPENDENCY 
         RigidBody
-        QtGUI)
+        UbiGUI)
+        # QtGUI)
     add_example(Qt_LinearBVH RigidBody LIB_DEPENDENCY)
 endif()

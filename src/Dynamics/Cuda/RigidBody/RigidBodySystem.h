@@ -173,6 +173,7 @@ namespace dyno
 		std::vector<FixedJoint>& getHostFixedJoints() { return mHostJointsFixed; }
 		std::vector<PointJoint>& getHostPointJoints() { return mHostJointsPoint; }
 		std::vector<SliderJoint>& getHostSliderJoints() { return mHostJointsSlider; }
+		int getHostBoxesSize() { return mHostBoxes.size(); }
 
 	protected:
 
@@ -183,7 +184,7 @@ namespace dyno
 		void postUpdateStates() override;
 
 		void clearRigidBodySystem();
-		int getHostBoxesSize() { return mHostBoxes.size(); }
+		
 
 	public:
 		DEF_VAR(bool, FrictionEnabled, true, "A toggle to control the friction");

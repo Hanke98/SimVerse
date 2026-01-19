@@ -7,6 +7,7 @@
 
 #include "Collision/CollistionDetectionBoundingBox.h"
 #include "Collision/NeighborTriMeshQuery.h"
+#include "Collision/NeighborMeshQuery.h"
 
 #include "RigidBody/Module/ContactsUnion.h"
 #include "RigidBody/Module/TJConstraintSolver.h"
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace dyno
 {
@@ -21,7 +23,7 @@ namespace dyno
     BatchRigidBodySystem<TDataType>::BatchRigidBodySystem()
       : ArticulatedBody<TDataType>()
     {
-        // RigidBodySystem<TDataType>::init(); // Replaced by NeighborShapeQuery (URDF-driven).
+        // RigidBodySystem<TDataType>::init(); // Replaced by NeighborShapeQuery.
         initCollisionPipeline();
     }
 
@@ -48,19 +50,23 @@ namespace dyno
         this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
         this->animationPipeline()->pushModule(tm2ts);
 
-        m_neighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
-        tm2ts->outTriangleSet()->connect(m_neighborTriMeshQuery->inTriangleSet());
-        this->stateCenter()->connect(m_neighborTriMeshQuery->inCenter());
-        this->stateRotationMatrix()->connect(m_neighborTriMeshQuery->inRotationMatrix());
-        this->stateTopology()->connect(m_neighborTriMeshQuery->inDiscreteElements());
-        this->animationPipeline()->pushModule(m_neighborTriMeshQuery);
+
+        // mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
+        mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
+        
+        tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
+        this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
+        this->stateRotationMatrix()->connect(mNeighborTriMeshQuery->inRotationMatrix());
+        this->stateTopology()->connect(mNeighborTriMeshQuery->inDiscreteElements());
+        this->animationPipeline()->pushModule(mNeighborTriMeshQuery);
 
         auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
         this->stateTopology()->connect(cdBV->inDiscreteElements());
         this->animationPipeline()->pushModule(cdBV);
 
         auto merge = std::make_shared<ContactsUnion<TDataType>>();
-        m_neighborTriMeshQuery->outContacts()->connect(merge->inContactsA());
+        mNeighborTriMeshQuery->outContacts()->connect(merge->inContactsA());
+        // elementQuery->outContacts()->connect(merge->inContactsA());
         cdBV->outContacts()->connect(merge->inContactsB());
         this->animationPipeline()->pushModule(merge);
 
@@ -97,7 +103,7 @@ namespace dyno
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::setupNeighborTriMeshQueryFromUrdf()
     {
-        if (!m_neighborTriMeshQuery)
+        if (!mNeighborTriMeshQuery)
         {
             return;
         }
@@ -211,9 +217,13 @@ namespace dyno
 
                 int begin = shape.patchOffsets[p];
                 int end = shape.patchOffsets[p + 1];
-                if (begin < 0) begin = 0;
+                if (begin < 0) {
+                    printf("Patch offset out of range: %d\n", begin);
+                    begin = 0;
+                }
                 if (end > static_cast<int>(shape.patchFaces.size()))
                 {
+                    printf("Patch offset out of range: %d\n", end);
                     end = static_cast<int>(shape.patchFaces.size());
                 }
 
@@ -232,20 +242,21 @@ namespace dyno
             shape2PatchOffsets[l + 1] = patchTotal;
         }
 
-        m_neighborTriMeshQuery->inShapeAABBs()->assign(shapeAabbsLocal);
-        m_neighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsLocal);
-        m_neighborTriMeshQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);
-        m_neighborTriMeshQuery->inPatch2TriOffsets()->assign(patch2TriOffsets);
-        m_neighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
-        m_neighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
-        m_neighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
-
-        m_neighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
+        mNeighborTriMeshQuery->inShapeAABBs()->assign(shapeAabbsLocal);
+        mNeighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsLocal);
+        mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);
+        mNeighborTriMeshQuery->inPatch2TriOffsets()->assign(patch2TriOffsets);
+        mNeighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
+        mNeighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
+        mNeighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
+        mNeighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
+        // mNeighborTriMeshQuery->inShape2TriOffsets()->assign(shape2TriOffsets);
         
-        if (!mUrdfShapeRigidBodyIds.empty() && mUrdfShapeRigidBodyIds.size() == urdfShapes.size())
-        {
-            m_neighborTriMeshQuery->inShape2RigidBodyIds()->assign(mUrdfShapeRigidBodyIds);
-        }
+        // if (!mUrdfShapeRigidBodyIds.empty() && mUrdfShapeRigidBodyIds.size() == urdfShapes.size())
+        // {
+        //     mNeighborTriMeshQuery->inShape2RigidBodyIds()->assign(mUrdfShapeRigidBodyIds);
+        // }
+        
         std::vector<std::vector<int>> adjacentShapes(urdfShapes.size());
         for (const auto& joint : this->urdfInfo.joints)
         {
@@ -277,7 +288,7 @@ namespace dyno
                     list.insert(val);
                 }
             }
-            m_neighborTriMeshQuery->inAdjacentShapes()->assign(convertedArray);
+            mNeighborTriMeshQuery->inAdjacentShapes()->assign(convertedArray);
         }
 
 #ifndef NDEBUG
@@ -286,7 +297,7 @@ namespace dyno
                patchAabbsLocal.size(),
                patch2TriIndices.size());
         printf("[NeighborTriMeshQuery] contacts=%u\n",
-               static_cast<unsigned int>(m_neighborTriMeshQuery->outContacts()->size()));
+               static_cast<unsigned int>(mNeighborTriMeshQuery->outContacts()->size()));
         if (!shape2PatchOffsets.empty() && shape2PatchOffsets.back() != static_cast<int>(patchAabbsLocal.size()))
         {
             printf("[NeighborTriMeshQuery] shape2PatchOffsets.back()=%d patchCount=%zu\n",
@@ -536,7 +547,7 @@ namespace dyno
             const uint invalidElementId = static_cast<uint>(-1);
             size_t textureShapeCount =  texMesh ? texMesh->shapes().size() : 0;
             std::cout << "[BatchRigidBodySystem] textureShapeCount: " << textureShapeCount << std::endl;
-            mUrdfShapeRigidBodyIds.clear();
+            mTextureMeshShape2RigidBodyIds.clear();
             mTextureMeshShape2ElementIds.clear();
 
             // this->varVisualOrCollision()->setValue(visual_or_collision);
@@ -584,13 +595,13 @@ namespace dyno
 
                     auto actor = this->createRigidBody(rigidbody);
                     actors[it] = actor;
-                    if (mUrdfShapeRigidBodyIds.empty())
+                    if (mTextureMeshShape2RigidBodyIds.empty())
                     {
-                        mUrdfShapeRigidBodyIds.assign(this->urdfInfo.links.size(), -1);
+                        mTextureMeshShape2RigidBodyIds.assign(this->urdfInfo.links.size(), -1);
                     }
-                    if (l < (int)mUrdfShapeRigidBodyIds.size() && mUrdfShapeRigidBodyIds[l] < 0)
+                    if (l < (int)mTextureMeshShape2RigidBodyIds.size() && mTextureMeshShape2RigidBodyIds[l] < 0)
                     {
-                        mUrdfShapeRigidBodyIds[l] = actor->idx;
+                        mTextureMeshShape2RigidBodyIds[l] = actor->idx;
                     }
 
                     BoxInfo box;

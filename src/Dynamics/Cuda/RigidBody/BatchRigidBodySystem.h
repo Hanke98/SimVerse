@@ -108,6 +108,11 @@ public:
       bool renderBoundingBox, bool visual_or_collision/* visual == 0, collision == 1*/);
 
     void loadUrdf(std::string urdf_fn);
+
+    void setupNeighborTriMeshQueryFromUrdf();
+    void setupNeighborMeshQueryFromUrdf();
+
+    std::vector<Pair<uint, uint>> mTextureMeshShape2ElementIds;
     // ------------------------------------
 
     // ------------------------------------
@@ -135,7 +140,7 @@ public:
     std::vector<Vec3f> getCentersByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Real> getMassByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     // ------------------------------------
-
+    
 protected:
 
     void resetOneMultiBodies(int mb_id);
@@ -144,9 +149,11 @@ protected:
 
     void applyOneMultiBodyTorqueControl(int mb_id, Coord torque);
 
+    
+
 protected:
     void initCollisionPipeline();
-    void setupNeighborTriMeshQueryFromUrdf();
+    
 
     std::vector<MulitBodyChainIndices> ctrl_mb_chains; // main multi-body chains with control
     std::vector<MulitBodyChainIndices> non_ctrl_mb_chains; // other multi-body chains in the env.
@@ -154,12 +161,13 @@ protected:
     std::vector<Vec3f> initialPositions; // initial position of all rigid bodies
     std::vector<TQuat> initialQuats; // initial rotation quaternion of all rigid bodies
     std::vector<Matrix> initialRotations; // initial rotation matrix of all rigid bodies
-    std::vector<Pair<uint, uint>> mTextureMeshShape2ElementIds;
-    std::vector<int> mUrdfShapeRigidBodyIds; // Deprecated: keep for backward compatibility
+
+    // std::vector<Pair<uint, uint>> mTextureMeshShape2ElementIds;
+    std::vector<int> mTextureMeshShape2RigidBodyIds; // Deprecated: keep for backward compatibility
 
     DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
 
-    std::shared_ptr<NeighborTriMeshQuery<TDataType>> m_neighborTriMeshQuery;
+    std::shared_ptr<NeighborTriMeshQuery<TDataType>> mNeighborTriMeshQuery;
   };
 
 } // namespace dyno

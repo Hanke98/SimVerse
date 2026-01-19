@@ -73,8 +73,9 @@ namespace dyno
 		DEF_ARRAY_IN(Coord, Center, DeviceType::GPU, "");
 		DEF_ARRAY_IN(Matrix, RotationMatrix, DeviceType::GPU, "");
 
-		// Deprecated: external mapping from shapeId to rigid body id (no longer required)
-		DEF_ARRAY_IN(int, Shape2RigidBodyIds, DeviceType::GPU, "");
+		// External mapping from shapeId to rigid body id 
+		// DEF_ARRAY_IN(int, Shape2RigidBodyIds, DeviceType::GPU, "");
+		
 		// Optional: mapping from texture mesh shapeId to discrete elementId
 		DEF_ARRAY_IN(PairUU, Shape2ElementIds, DeviceType::GPU, "");
 
@@ -84,6 +85,8 @@ namespace dyno
 
 		// Optional: adjacency list for shapes, used when EnableAdjacentFilter is true
 		DEF_ARRAYLIST_IN(int, AdjacentShapes, DeviceType::GPU, "");
+
+		// DEF_ARRAY_IN(int, Shape2TriOffsets, DeviceType::GPU, "");
 
 		DEF_ARRAY_OUT(PairUU, PotentialShapePairs, DeviceType::GPU, "");
 
@@ -114,6 +117,9 @@ namespace dyno
 		DArray<AABB> mTargetPatchAabbs;
 		DArray<AABB> mSourcePatchAabbs;
 		DArray<uint> mSource2PatchIds;
+		DArray<int> mTouchedShapeFlags;
+		DArray<int> mTouchedShapeOffsets;
+		DArray<int> mTouchedShapeIds;
 		DArray<int> mTargetShapeCounts;
 		DArray<int> mTargetShapeOffsets;
 		DArray<int> mTargetShapeWrite;

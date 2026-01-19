@@ -36,7 +36,7 @@ std::shared_ptr<SceneGraph> creatBricks()
 		{
 			for (int k = 0; k < dim; k++)
 			{
-				rigidBody.position = Vec3f(2 * i * h - h * dim, h + (2.01f) * j * h, 2 * k * h - h * dim);
+				rigidBody.position = Vec3f(2 * i * h - h * dim, h + (2.5f) * j * h, 2 * k * h - h * dim);
 				
 				auto boxAt = rigid->addBox(box, rigidBody);
 			}
@@ -71,7 +71,7 @@ std::shared_ptr<SceneGraph> creatBricks()
 	rigid->graphicsPipeline()->pushModule(wireRender);
 
 	//Visualize contact points
-	/*auto contactPointMapper = std::make_shared<ContactsToPointSet<DataType3f>>();
+	auto contactPointMapper = std::make_shared<ContactsToPointSet<DataType3f>>();
 	elementQuery->outContacts()->connect(contactPointMapper->inContacts());
 	rigid->graphicsPipeline()->pushModule(contactPointMapper);
 
@@ -79,8 +79,7 @@ std::shared_ptr<SceneGraph> creatBricks()
 	pointRender->setColor(Color(1, 0, 0));
 	pointRender->varPointSize()->setValue(0.003f);
 	contactPointMapper->outPointSet()->connect(pointRender->inPointSet());
-	rigid->graphicsPipeline()->pushModule(pointRender);*/
-
+	rigid->graphicsPipeline()->pushModule(pointRender);
 	return scn;
 }
 

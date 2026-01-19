@@ -387,7 +387,6 @@ namespace dyno
 					this->varGravityValue()->getValue(),
 					dt
 				);
-				std::cout << "Gravity is enabled with value: " << this->varGravityValue()->getValue() << std::endl;
 			}
 
 			setUpExternalForce(

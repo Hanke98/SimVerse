@@ -1,5 +1,5 @@
 #include <QtApp.h>
-
+#include <UbiApp.h>
 #include <SceneGraph.h>
 
 #include <RigidBody/ConfigurableBody.h>
@@ -71,7 +71,8 @@ std::shared_ptr<SceneGraph> creatCar()
 
 int main()
 {
-	QtApp app;
+	// QtApp app;
+	UbiApp app(GuIType::GUI_GLFW);
 	app.setSceneGraph(creatCar());
 	app.initialize(1280, 768);
 

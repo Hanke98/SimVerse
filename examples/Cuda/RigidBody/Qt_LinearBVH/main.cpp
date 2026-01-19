@@ -1,5 +1,5 @@
-#include <QtApp.h>
-
+// #include <QtApp.h>
+#include <UbiApp.h>
 #include <SceneGraph.h>
 
 #include <RigidBody/RigidBodySystem.h>
@@ -13,6 +13,8 @@
 
 #include "Collision/NeighborElementQuery.h"
 #include "Collision/CalculateBoundingBox.h"
+#include "GLPointVisualModule.h"
+#include "Mapping/ContactsToPointSet.h"
 
 #include <Topology/LinearBVH.h>
 
@@ -115,6 +117,11 @@ std::shared_ptr<SceneGraph> createBoxes()
 	mapper->outTriangleSet()->connect(sRender->inTriangleSet());
 	rigid->graphicsPipeline()->pushModule(sRender);
 
+	auto elementQuery = std::make_shared<NeighborElementQuery<DataType3f>>();
+	rigid->stateTopology()->connect(elementQuery->inDiscreteElements());
+	rigid->stateCollisionMask()->connect(elementQuery->inCollisionMask());
+	rigid->graphicsPipeline()->pushModule(elementQuery);
+
 	//Visualize bounding boxes
 	auto computeAABB = std::make_shared<CalculateBoundingBox<DataType3f>>();
 	rigid->stateTopology()->connect(computeAABB->inDiscreteElements());
@@ -133,12 +140,24 @@ std::shared_ptr<SceneGraph> createBoxes()
 	bvhMapper->outEdgeSet()->connect(wireRender->inEdgeSet());
 	rigid->graphicsPipeline()->pushModule(wireRender);
 
+	//Visualize contact points
+	auto contactPointMapper = std::make_shared<ContactsToPointSet<DataType3f>>();
+	elementQuery->outContacts()->connect(contactPointMapper->inContacts());
+	rigid->graphicsPipeline()->pushModule(contactPointMapper);
+
+	auto pointRender = std::make_shared<GLPointVisualModule>();
+	pointRender->setColor(Color(1, 0, 0));
+	pointRender->varPointSize()->setValue(0.003f);
+	contactPointMapper->outPointSet()->connect(pointRender->inPointSet());
+	rigid->graphicsPipeline()->pushModule(pointRender);
+
 	return scn;
 }
 
 int main()
 {
-	QtApp app;
+	// QtApp app;
+	UbiApp app(GUIType::GUI_GLFW);
 	app.setSceneGraph(createBoxes());
 	app.initialize(1280, 768);
 	app.mainLoop();

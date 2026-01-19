@@ -27,8 +27,46 @@ namespace dyno
 		return false;
 	}
 
+	// NOTE: localAabb is actually the patch AABB in rest world space (restWorldAabb).
+	// R represents the rotation from rest to current (or an equivalent world rotation).
+	// t represents the current world-space center of the patch AABB.
+	// x_1 = R \cdot (x_0 - c_0) + t
 	__device__ inline AABB NLQ_TransformLocalAabbToWorld(const AABB& localAabb, const Mat3f& R, const Vec3f& t)
 	{
+		// Vec3f c0 = (localAabb.v0 + localAabb.v1) * Real(0.5);
+
+		// Vec3f corner0;
+		// corner0[0] = localAabb.v0[0];
+		// corner0[1] = localAabb.v0[1];
+		// corner0[2] = localAabb.v0[2];
+		// Vec3f x1 = R * (corner0 - c0) + t;
+
+		// Vec3f vmin = x1;
+		// Vec3f vmax = x1;
+
+		// for (int i = 1; i < 8; ++i)
+		// {
+		// 	Vec3f x0;
+		// 	x0[0] = (i & 1) ? localAabb.v1[0] : localAabb.v0[0];
+		// 	x0[1] = (i & 2) ? localAabb.v1[1] : localAabb.v0[1];
+		// 	x0[2] = (i & 4) ? localAabb.v1[2] : localAabb.v0[2];
+
+		// 	Vec3f x1i = R * (x0 - c0) + t;
+
+		// 	vmin[0] = vmin[0] < x1i[0] ? vmin[0] : x1i[0];
+		// 	vmin[1] = vmin[1] < x1i[1] ? vmin[1] : x1i[1];
+		// 	vmin[2] = vmin[2] < x1i[2] ? vmin[2] : x1i[2];
+
+		// 	vmax[0] = vmax[0] > x1i[0] ? vmax[0] : x1i[0];
+		// 	vmax[1] = vmax[1] > x1i[1] ? vmax[1] : x1i[1];
+		// 	vmax[2] = vmax[2] > x1i[2] ? vmax[2] : x1i[2];
+		// }
+
+		// AABB worldAabb;
+		// worldAabb.v0 = vmin;
+		// worldAabb.v1 = vmax;
+		// return worldAabb;
+
 		Vec3f centerLocal = (localAabb.v0 + localAabb.v1) * Real(0.5);
 		Vec3f extentLocal = (localAabb.v1 - localAabb.v0) * Real(0.5);
 
@@ -44,27 +82,28 @@ namespace dyno
 		worldAabb.v1 = centerWorld + extentWorld;
 		return worldAabb;
 	}
-	inline bool NLQ_BuildShape2RigidBodyIds(
-		const DArray<Pair<uint, uint>>& mapping,
-		int shapeCount,
-		std::vector<int>& shape2RigidBodyIds)
-	{
-		CArray<Pair<uint, uint>> hostMapping;
-		hostMapping.assign(mapping);
-		if (hostMapping.size() == 0)
-			return false;
 
-		// shape2RigidBodyIds.assign(shapeCount, -1);
-		shape2RigidBodyIds.assign(hostMapping.size(), -1);
-		for (uint i = 0; i < hostMapping.size(); ++i)
-		{
-			uint shapeId = hostMapping[i].first;
-			if (shapeId < shape2RigidBodyIds.size())
-				shape2RigidBodyIds[shapeId] = static_cast<int>(hostMapping[i].second);
-		}
+	// inline bool NLQ_BuildShape2RigidBodyIds(
+	// 	const DArray<Pair<uint, uint>>& mapping,
+	// 	int shapeCount,
+	// 	std::vector<int>& shape2RigidBodyIds)
+	// {
+	// 	CArray<Pair<uint, uint>> hostMapping;
+	// 	hostMapping.assign(mapping);
+	// 	if (hostMapping.size() == 0)
+	// 		return false;
 
-		return true;
-	}
+	// 	// shape2RigidBodyIds.assign(shapeCount, -1);
+	// 	shape2RigidBodyIds.assign(hostMapping.size(), -1);
+	// 	for (uint i = 0; i < hostMapping.size(); ++i)
+	// 	{
+	// 		uint shapeId = hostMapping[i].first;
+	// 		if (shapeId < shapeCount)
+	// 			shape2RigidBodyIds[shapeId] = static_cast<int>(hostMapping[i].second);
+	// 	}
+
+	// 	return true;
+	// }
 
 	template<typename Real, typename Coord, typename Matrix>
 	__device__ inline void NLQ_GetRelativeTransform(
@@ -104,41 +143,42 @@ namespace dyno
 	}
 
 	// template<typename Real, typename Coord, typename Matrix, typename AABB>
-	__global__ void NLQ_UpdateShapeAabbs(
-		DArray<AABB> worldAabbs,
-		DArray<AABB> localAabbs,
-		DArray<Vec3f> centers,
-		DArray<Mat3f> rotations,
-		DArray<int> shape2RigidBodyIds)
-	{
-		int shapeId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (shapeId >= localAabbs.size() || shapeId >= worldAabbs.size())
-			return;
+	// __global__ void NLQ_UpdateShapeAabbs(
+	// 	DArray<AABB> worldAabbs,
+	// 	DArray<AABB> localAabbs,
+	// 	DArray<Vec3f> centers,
+	// 	DArray<Mat3f> rotations,
+	// 	DArray<int> shape2RigidBodyIds)
+	// {
+	// 	int shapeId = threadIdx.x + (blockIdx.x * blockDim.x);
+	// 	if (shapeId >= localAabbs.size() || shapeId >= worldAabbs.size())
+	// 		return;
 
-		int bodyId = shapeId;
-		if (shape2RigidBodyIds.size() > 0)
-		{
-			if (shapeId < 0 || shapeId >= shape2RigidBodyIds.size())
-			{
-				worldAabbs[shapeId] = localAabbs[shapeId];
-				return;
-			}
-			bodyId = shape2RigidBodyIds[shapeId];
-		}
+	// 	int bodyId = shapeId;
+	// 	if (shape2RigidBodyIds.size() > 0)
+	// 	{
+	// 		if (shapeId < 0 || shapeId >= shape2RigidBodyIds.size())
+	// 		{
+	// 			worldAabbs[shapeId] = localAabbs[shapeId];
+	// 			return;
+	// 		}
+	// 		bodyId = shape2RigidBodyIds[shapeId];
+	// 	}
 
-		if (bodyId < 0 || bodyId >= centers.size() || bodyId >= rotations.size())
-		{
-			worldAabbs[shapeId] = localAabbs[shapeId];
-			return;
-		}
+	// 	if (bodyId < 0 || bodyId >= centers.size() || bodyId >= rotations.size())
+	// 	{
+	// 		worldAabbs[shapeId] = localAabbs[shapeId];
+	// 		return;
+	// 	}
 
-		worldAabbs[shapeId] = NLQ_TransformLocalAabbToWorld(
-			localAabbs[shapeId],
-			rotations[bodyId],
-			centers[bodyId]);
-	}
+	// 	worldAabbs[shapeId] = NLQ_TransformLocalAabbToWorld(
+	// 		localAabbs[shapeId],
+	// 		rotations[bodyId],
+	// 		centers[bodyId]);
+	// }
 
 	// template<typename Real, typename Coord, typename Matrix, typename AABB>
+	// Deprecated: full update is unnecessary; replaced by selective update driven by outPotentialShapePairs.
 	__global__ void NLQ_UpdatePatchAabbs(
 		DArray<AABB> worldAabbs,
 		DArray<AABB> localAabbs,
@@ -176,14 +216,102 @@ namespace dyno
 			return;
 		}
 
-		// worldAabbs[patchId] = NLQ_TransformLocalAabbToWorld<Real, Coord, Matrix, AABB>(
-		// 	localAabbs[patchId],
-		// 	rotations[bodyId],
-		// 	centers[bodyId]);
 		worldAabbs[patchId] = NLQ_TransformLocalAabbToWorld(
 			localAabbs[patchId],
 			rotations[bodyId],
 			centers[bodyId]);
+	}
+
+	__global__ void NLQ_MarkTouchedShapesFromPairs(
+		DArray<int> shapeTouched,
+		DArray<Pair<uint, uint>> shapePairs,
+		int shapeCount)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= shapePairs.size()) return;
+
+		Pair<uint, uint> lp = shapePairs[tId];
+		int s0 = (int)lp.first;
+		int s1 = (int)lp.second;
+
+		if (s0 >= 0 && s0 < shapeCount)
+			atomicExch(&shapeTouched[s0], 1);
+		if (s1 >= 0 && s1 < shapeCount)
+			atomicExch(&shapeTouched[s1], 1);
+	}
+
+	__global__ void NLQ_CompactTouchedShapes(
+		DArray<int> touchedShapeIds,
+		DArray<int> shapeTouched,
+		DArray<int> prefix,
+		int shapeCount)
+	{
+		int shapeId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (shapeId >= shapeCount) return;
+
+		if (shapeTouched[shapeId] == 0)
+			return;
+
+		int out = prefix[shapeId];
+		if (out >= 0 && out < touchedShapeIds.size())
+			touchedShapeIds[out] = shapeId;
+	}
+
+	__global__ void NLQ_UpdatePatchAabbsForTouchedShapes(
+		DArray<AABB> worldAabbs,
+		DArray<AABB> localAabbs,
+		DArray<int> shape2PatchOffsets,
+		DArray<int> touchedShapeIds,
+		DArray<Vec3f> centers,
+		DArray<Mat3f> rotations,
+		DArray<int> shape2RigidBodyIds)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= touchedShapeIds.size()) return;
+
+		int patchCount = (int)localAabbs.size();
+		int worldCount = (int)worldAabbs.size();
+		int safeCount = patchCount < worldCount ? patchCount : worldCount;
+		if (safeCount <= 0)
+			return;
+
+		int shapeId = touchedShapeIds[tId];
+		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size())
+			return;
+
+		int start = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, safeCount);
+		int end = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, safeCount);
+		if (end <= start)
+			return;
+
+		int bodyId = shapeId;
+		if (shape2RigidBodyIds.size() > 0)
+		{
+			if (shapeId >= shape2RigidBodyIds.size())
+			{
+				for (int p = start; p < end; ++p)
+					worldAabbs[p] = localAabbs[p];
+				return;
+			}
+			bodyId = shape2RigidBodyIds[shapeId];
+		}
+
+		if (bodyId < 0 || bodyId >= centers.size() || bodyId >= rotations.size())
+		{
+			for (int p = start; p < end; ++p)
+				worldAabbs[p] = localAabbs[p];
+			return;
+		}
+
+		Mat3f R = rotations[bodyId];
+		Vec3f t = centers[bodyId];
+		for (int p = start; p < end; ++p)
+		{
+			worldAabbs[p] = NLQ_TransformLocalAabbToWorld(
+				localAabbs[p],
+				R,
+				t);
+		}
 	}
 
 	template<typename Box3D>
@@ -207,7 +335,8 @@ namespace dyno
 		{
 		case ET_SPHERE:
 		{
-			box = spheres[tId].aabb();
+			// FIX: elementId is global, need offset
+			box = spheres[tId - elementOffset.sphereIndex()].aabb();
 			break;
 		}
 		case ET_BOX:
@@ -274,7 +403,7 @@ namespace dyno
 		{
 		case ET_SPHERE:
 		{
-			box = spheres[elementId].aabb();
+			box = spheres[elementId - elementOffset.sphereIndex()].aabb();
 			break;
 		}
 		case ET_BOX:
@@ -372,6 +501,7 @@ namespace dyno
 		}
 	}
 
+	// Count how many times a shape is a target from shapePairs
 	__global__ void NLQ_CountTargetShapes(
 		DArray<int> targetCounts,
 		DArray<Pair<uint, uint>> shapePairs,
@@ -388,6 +518,8 @@ namespace dyno
 		atomicAdd(&targetCounts[target], 1);
 	}
 
+	// Group shape pairs by target shape
+	// That is, reorder the source shapes so that they are grouped by target shape
 	__global__ void NLQ_GroupShapePairsByTarget(
 		DArray<int> groupedSources,
 		DArray<int> targetOffsets,
@@ -461,7 +593,7 @@ namespace dyno
 		DArrayList<int> contactList)
 	{
 		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= contactList.size() || tId >= counts.size()) return;
+		if (tId >= contactList.size()) return;
 
 		counts[tId] = contactList[tId].size();
 	}
@@ -475,24 +607,28 @@ namespace dyno
 		int targetBase,
 		int targetCount)
 	{
+		// tId: local source patch id
 		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= contactList.size() || tId >= counts.size() || tId >= source2PatchIds.size())
+		if (tId >= contactList.size())
 			return;
 
 		int offset = prefix[tId];
 		int size = counts[tId];
 		int write = 0;
-		uint srcId = source2PatchIds[tId];
+		uint srcId = source2PatchIds[tId];// global source patch id
 
 		List<int>& list_i = contactList[tId];
 		for (int j = 0; j < list_i.size(); j++)
 		{
+			// targetIdx: local target patch id
 			int targetIdx = list_i[j];
+			// ignore invalid local target indices
 			if (targetIdx < 0 || targetIdx >= targetCount)
 				continue;
 
 			if (write < size && (offset + write) < patchPairs.size())
 			{
+				// (targetBase + targetIdx): global target patch id
 				patchPairs[offset + write] = Pair<uint, uint>(srcId, (uint)(targetBase + targetIdx));
 				write++;
 			}
@@ -669,9 +805,10 @@ namespace dyno
 		if (tId >= patchPairs.size()) return;
 
 		Pair<uint, uint> pp = patchPairs[tId];
-		int patch0 = (int)pp.first;
-		int patch1 = (int)pp.second;
+		int patch0 = (int)pp.first; // source patch global id
+		int patch1 = (int)pp.second; // target patch global id
 
+		// if patch index out of range, then return
 		if (patch0 < 0 || patch0 >= patchCount || patch1 < 0 || patch1 >= patchCount)
 		{
 			counts[tId] = 0;
@@ -700,7 +837,8 @@ namespace dyno
 		int bodyId1 = shape1;
 
 		if (shape0 >= 0)
-		{
+		{	
+			// Get relative transform of shape0
 			NLQ_GetRelativeTransform<Real, Coord, Matrix>(
 				shape0,
 				shape2RigidBodyIds,
@@ -715,6 +853,7 @@ namespace dyno
 
 		if (shape1 >= 0)
 		{
+			// Get relative transform of shape1
 			NLQ_GetRelativeTransform<Real, Coord, Matrix>(
 				shape1,
 				shape2RigidBodyIds,
@@ -733,7 +872,7 @@ namespace dyno
 			int triId0 = patch2TriIndices[i];
 			if (triId0 < 0 || triId0 >= triCount)
 				continue;
-
+			// compute triangle 0 in world space
 			Triangle tri0 = triangles[triId0];
 			Coord p00 = RRel0 * vertices[tri0[0]] + tRel0;
 			Coord p01 = RRel0 * vertices[tri0[1]] + tRel0;
@@ -746,12 +885,14 @@ namespace dyno
 				if (triId1 < 0 || triId1 >= triCount)
 					continue;
 
+				// compute triangle 1 in world space
 				Triangle tri1 = triangles[triId1];
 				Coord p10 = RRel1 * vertices[tri1[0]] + tRel1;
 				Coord p11 = RRel1 * vertices[tri1[1]] + tRel1;
 				Coord p12 = RRel1 * vertices[tri1[2]] + tRel1;
 				TTriangle3D<Real> t1(p10, p11, p12);
 
+				// perform narrow-phase collision detection
 				TManifold<Real> manifold;
 				CollisionDetection<Real>::request(manifold, t0, t1, dHat, dHat);
 
@@ -870,6 +1011,7 @@ namespace dyno
 				TManifold<Real> manifold;
 				CollisionDetection<Real>::request(manifold, t0, t1, dHat, dHat);
 
+				// Process contacts information
 				for (int n = 0; n < manifold.contactCount; ++n)
 				{
 					if (write >= size || (offset + write) >= contacts.size())
@@ -886,6 +1028,8 @@ namespace dyno
 					cp.normal2 = manifold.normal;
 					cp.contactType = ContactType::CT_NONPENETRATION;
 					cp.interpenetration = -manifold.contacts[n].penetration;
+					printf("[NeighborTriMeshQuery] Contact found between shape %d (tri %d) and shape %d (tri %d), penetration=%f\n",
+                            shape0, triId0, shape1, triId1, cp.interpenetration);
 
 					contacts[offset + write] = cp;
 					write++;
@@ -902,7 +1046,7 @@ namespace dyno
 	{
 		this->inAdjacentShapes()->tagOptional(true);
 		this->inShape2PatchCounts()->tagOptional(true);
-		this->inShape2RigidBodyIds()->tagOptional(true);
+		// this->inShape2RigidBodyIds()->tagOptional(true);
 		this->inShape2ElementIds()->tagOptional(true);
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
@@ -914,112 +1058,113 @@ namespace dyno
 	{
 	}
 
-	template<typename TDataType>
-	bool NeighborTriMeshQuery<TDataType>::updateShape2RigidBodyIds(int shapeCount)
-	{
-		if (!this->inShape2RigidBodyIds()->isEmpty())
-		{
-			auto& ids = this->inShape2RigidBodyIds()->getData();
-			if ((int)ids.size() == shapeCount)
-			{
-				mShape2RigidBodyIds.assign(ids);
-				if (!mMappingReady)
-				{
-					printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping ready (shapeCount=%d, source=input).\n", shapeCount);
-				}
-				mMappingReady = true;
-				mWarnedEmptyMapping = false;
-				return true;
-			}
-			if (!mWarnedEmptyMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2RigidBodyIds size mismatch (shapeCount=%d, inputSize=%u), fallback to topology mapping.\n",
-					shapeCount,
-					(unsigned int)ids.size());
-				mWarnedEmptyMapping = true;
-			}
-		}
+	// template<typename TDataType>
+	// bool NeighborTriMeshQuery<TDataType>::updateShape2RigidBodyIds(int shapeCount)
+	// {
+	// 	if (!this->inShape2RigidBodyIds()->isEmpty())
+	// 	{
+	// 		auto& ids = this->inShape2RigidBodyIds()->getData();
+	// 		if ((int)ids.size() == shapeCount)
+	// 		{
+	// 			mShape2RigidBodyIds.assign(ids);
+	// 			if (!mMappingReady)
+	// 			{
+	// 				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping ready (shapeCount=%d, source=input).\n", shapeCount);
+	// 			}
+	// 			mMappingReady = true;
+	// 			mWarnedEmptyMapping = false;
+	// 			return true;
+	// 		}
+	// 		if (!mWarnedEmptyMapping)
+	// 		{
+	// 			printf("[NeighborTriMeshQuery] Shape2RigidBodyIds size mismatch (shapeCount=%d, inputSize=%u), fallback to topology mapping.\n",
+	// 				shapeCount,
+	// 				(unsigned int)ids.size());
+	// 			mWarnedEmptyMapping = true;
+	// 		}
+	// 	}
 
-		auto topo = this->inDiscreteElements()->getDataPtr();
-		if (topo == nullptr)
-		{
-			if (!mWarnedEmptyMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (topology unavailable, shapeCount=%d, mappingSize=0), skip this frame.\n", shapeCount);
-				mWarnedEmptyMapping = true;
-			}
-			mMappingReady = false;
-			return false;
-		}
+	// 	auto topo = this->inDiscreteElements()->getDataPtr();
+	// 	if (topo == nullptr)
+	// 	{
+	// 		if (!mWarnedEmptyMapping)
+	// 		{
+	// 			printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (topology unavailable, shapeCount=%d, mappingSize=0), skip this frame.\n", shapeCount);
+	// 			mWarnedEmptyMapping = true;
+	// 		}
+	// 		mMappingReady = false;
+	// 		return false;
+	// 	}
 
-		uint totalSize = topo->totalSize();
-		if ((uint)shapeCount != totalSize)
-		{
-			if (!mWarnedEmptyMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, totalSize=%u), skip this frame.\n",
-					shapeCount,
-					totalSize);
-				mWarnedEmptyMapping = true;
-			}
-			mMappingReady = false;
-			return false;
-		}
+	// 	uint totalSize = topo->totalSize();
+	// 	if ((uint)shapeCount != totalSize)
+	// 	{
+	// 		if (!mWarnedEmptyMapping)
+	// 		{
+	// 			printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, totalSize=%u), skip this frame.\n",
+	// 				shapeCount,
+	// 				totalSize);
+	// 			mWarnedEmptyMapping = true;
+	// 		}
+	// 		mMappingReady = false;
+	// 		return false;
+	// 	}
 
-		auto& mapping = topo->shape2RigidBodyMapping();
-		uint mappingSize = mapping.size();
-		if (mappingSize == 0)
-		{
-			if (!mWarnedEmptyMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, mappingSize=%u), skip this frame.\n",
-					shapeCount,
-					mappingSize);
-				mWarnedEmptyMapping = true;
-			}
-			mMappingReady = false;
-			return false;
-		}
-		if (mappingSize < totalSize)
-		{
-			if (!mWarnedEmptyMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, totalSize=%u, mappingSize=%u), skip this frame.\n",
-					shapeCount,
-					totalSize,
-					mappingSize);
-				mWarnedEmptyMapping = true;
-			}
-			mMappingReady = false;
-			return false;
-		}
+	// 	auto& mapping = topo->shape2RigidBodyMapping();
+	// 	uint mappingSize = mapping.size();
+	// 	if (mappingSize == 0)
+	// 	{
+	// 		if (!mWarnedEmptyMapping)
+	// 		{
+	// 			printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, mappingSize=%u), skip this frame.\n",
+	// 				shapeCount,
+	// 				mappingSize);
+	// 			mWarnedEmptyMapping = true;
+	// 		}
+	// 		mMappingReady = false;
+	// 		return false;
+	// 	}
+	// 	if (mappingSize < totalSize)
+	// 	{
+	// 		if (!mWarnedEmptyMapping)
+	// 		{
+	// 			printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, totalSize=%u, mappingSize=%u), skip this frame.\n",
+	// 				shapeCount,
+	// 				totalSize,
+	// 				mappingSize);
+	// 			mWarnedEmptyMapping = true;
+	// 		}
+	// 		mMappingReady = false;
+	// 		return false;
+	// 	}
+	// 	// Move ouside now
+	// 	std::vector<int> shape2RigidBodyIds;
+	// 	if (!NLQ_BuildShape2RigidBodyIds(mapping, shapeCount, shape2RigidBodyIds))
+	// 	{
+	// 		if (!mWarnedEmptyMapping)
+	// 		{
+	// 			printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, mappingSize=%u), skip this frame.\n",
+	// 				shapeCount,
+	// 				mappingSize);
+	// 			mWarnedEmptyMapping = true;
+	// 		}
+	// 		mMappingReady = false;
+	// 		return false;
+	// 	}
 
-		std::vector<int> shape2RigidBodyIds;
-		if (!NLQ_BuildShape2RigidBodyIds(mapping, shapeCount, shape2RigidBodyIds))
-		{
-			if (!mWarnedEmptyMapping)
-			{
-				printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, mappingSize=%u), skip this frame.\n",
-					shapeCount,
-					mappingSize);
-				mWarnedEmptyMapping = true;
-			}
-			mMappingReady = false;
-			return false;
-		}
+	// 	mShape2RigidBodyIds.assign(shape2RigidBodyIds);
 
-		mShape2RigidBodyIds.assign(shape2RigidBodyIds);
-		if (!mMappingReady)
-		{
-			printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping ready (shapeCount=%d, mappingSize=%u).\n",
-				shapeCount,
-				mappingSize);
-		}
-		mMappingReady = true;
-		mWarnedEmptyMapping = false;
+	// 	if (!mMappingReady)
+	// 	{
+	// 		printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping ready (shapeCount=%d, mappingSize=%u).\n",
+	// 			shapeCount,
+	// 			mappingSize);
+	// 	}
+	// 	mMappingReady = true;
+	// 	mWarnedEmptyMapping = false;
 
-		return true;
-	}
+	// 	return true;
+	// }
 
 	template<typename TDataType>
 	bool NeighborTriMeshQuery<TDataType>::updateShape2ElementIds(int shapeCount)
@@ -1057,12 +1202,15 @@ namespace dyno
 
 				if (elementId == invalidElementId)
 					continue;
+				// if (shape2ElementIds[shapeId] >= 0 && !warnedDuplicate)
+				
 				if (shape2ElementIds[i] >= 0 && !warnedDuplicate)
 				{
 					printf("[NeighborTriMeshQuery] Shape2ElementPairs has duplicate shapeId=%u, overwriting.\n", shapeId);
 					warnedDuplicate = true;
 				}
 				shape2ElementIds[i] = (int)elementId;
+				// shape2ElementIds[shapeId] = elementId;
 			}
 
 			bool allReady = true;
@@ -1241,7 +1389,6 @@ namespace dyno
 	void NeighborTriMeshQuery<TDataType>::compute()
 	{
 		mUseBroadPhasePatchPairs = false;
-
 		if (this->outPotentialShapePairs()->isEmpty())
 			this->outPotentialShapePairs()->allocate();
 		if (this->outPotentialPatchPairs()->isEmpty())
@@ -1322,20 +1469,7 @@ namespace dyno
 		}
 		else
 		{
-			auto& counts = this->inShape2PatchCounts()->getData();
-			if ((int)counts.size() != shapeCount)
-			{
-				this->outPotentialShapePairs()->resize(0);
-				this->outPotentialPatchPairs()->resize(0);
-				this->outContacts()->resize(0);
-				printf("[NeighborTriMeshQuery] Shape2PatchCounts size mismatch.\n");
-				return;
-			}
-
-			mShape2PatchOffsets.resize(counts.size() + 1);
-			mShape2PatchOffsets.reset();
-			mShape2PatchOffsets.assign(counts, counts.size(), 0, 0);
-			mScan.exclusive(mShape2PatchOffsets, true);
+			printf("[NeighborTriMeshQuery] Shape2PatchCounts input not supported yet.\n");
 		}
 
 		int patchCount = (int)this->inPatchAABBs()->size();
@@ -1350,6 +1484,7 @@ namespace dyno
 		if (mPatch2Shape.size() != (uint)patchCount)
 			mPatch2Shape.resize(patchCount);
 
+		// Build patch2shape mapping
 		mPatch2Shape.reset();
 		cuExecute(shapeCount,
 			NLQ_BuildPatch2Shape,
@@ -1371,6 +1506,7 @@ namespace dyno
 		{
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			// printf("[NeighborTriMeshQuery] BroadPhase failed.\n");
 			return;
 		}
 
@@ -1378,6 +1514,7 @@ namespace dyno
 		if (!middlePhase())
 		{
 			this->outContacts()->resize(0);
+			// printf("[NeighborTriMeshQuery] MiddlePhase failed.\n");
 			return;
 		}
 
@@ -1388,10 +1525,12 @@ namespace dyno
 	template<typename TDataType>
 	bool NeighborTriMeshQuery<TDataType>::broadPhase()
 	{
+		// printf("[NeighborTriMeshQuery] BroadPhase started.\n");
 		auto inTopo = this->inDiscreteElements()->getDataPtr();
 		if (inTopo == nullptr)
 		{
 			this->outPotentialShapePairs()->resize(0);
+			printf("[NeighborTriMeshQuery] DiscreteElements missing.\n");
 			return false;
 		}
 
@@ -1399,6 +1538,7 @@ namespace dyno
 		if (shapeCount <= 0)
 		{
 			this->outPotentialShapePairs()->resize(0);
+			printf("[NeighborTriMeshQuery] Shape2PatchOffsets size mismatch.\n");
 			return false;
 		}
 
@@ -1407,12 +1547,14 @@ namespace dyno
 			if (!updateShape2ElementIds(shapeCount))
 			{
 				this->outPotentialShapePairs()->resize(0);
+				printf("[NeighborTriMeshQuery] Shape2ElementIds size mismatch.\n");
 				return false;
 			}
 		}
 		if (mShape2ElementIds.size() != (uint)shapeCount)
 		{
 			this->outPotentialShapePairs()->resize(0);
+			printf("[NeighborTriMeshQuery] Shape2ElementIds size mismatch.\n");
 			return false;
 		}
 
@@ -1420,6 +1562,7 @@ namespace dyno
 		if (elementCount <= 0)
 		{
 			this->outPotentialShapePairs()->resize(0);
+			printf("[NeighborTriMeshQuery] DiscreteElements size mismatch.\n");
 			return false;
 		}
 
@@ -1538,6 +1681,7 @@ namespace dyno
 	template<typename TDataType>
 	bool NeighborTriMeshQuery<TDataType>::middlePhase()
 	{
+		printf("[NeighborTriMeshQuery] MiddlePhase started.\n");
 		if (mUseBroadPhasePatchPairs)
 		{
 			return this->outPotentialPatchPairs()->size() > 0;
@@ -1561,6 +1705,15 @@ namespace dyno
 		if (mPatchAabbsWorld.size() != (uint)patchCount)
 			mPatchAabbsWorld.resize(patchCount);
 
+		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
+		if (shapeCount <= 0)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+
+		// update patch aabbs in world space
+		// Full update is unnecessary; May replaced by selective update driven by outPotentialShapePairs.
 		{
 			cuExecute((uint)patchCount,
 				NLQ_UpdatePatchAabbs,
@@ -1571,21 +1724,55 @@ namespace dyno
 				this->inRotationMatrix()->getData(),
 				mShape2RigidBodyIds);
 		}
+		printf ("[NeighborTriMeshQuery] Patch AABBs updated.\n");
+		// if (mTouchedShapeFlags.size() != (uint)shapeCount)
+		// 	mTouchedShapeFlags.resize(shapeCount);
+		// mTouchedShapeFlags.reset();
 
-// // #if !defined(NLQ_USE_LEGACY_MIDDLEPHASE)
+		// // Calculate how many times each shape is touched
+		// cuExecute(shapePairs.size(),
+		// 	NLQ_MarkTouchedShapesFromPairs,
+		// 	mTouchedShapeFlags,
+		// 	shapePairs,
+		// 	shapeCount);
+		// // Accumulate touched shape count
+		// int touchedShapeCount = mReduce.accumulate(mTouchedShapeFlags.begin(), mTouchedShapeFlags.size());
+		// if (touchedShapeCount > 0)
+		// {
+		// 	if (mTouchedShapeOffsets.size() != (uint)shapeCount)
+		// 		mTouchedShapeOffsets.resize(shapeCount);
+		// 	// Exclusive scan to build touched shape offsets
+		// 	mTouchedShapeOffsets.assign(mTouchedShapeFlags);
+		// 	mScan.exclusive(mTouchedShapeOffsets, true);
+
+		// 	if (mTouchedShapeIds.size() != (uint)touchedShapeCount)
+		// 		mTouchedShapeIds.resize(touchedShapeCount);
+		// 	// Compact touched shapes
+		// 	cuExecute((uint)shapeCount,
+		// 		NLQ_CompactTouchedShapes,
+		// 		mTouchedShapeIds,
+		// 		mTouchedShapeFlags,
+		// 		mTouchedShapeOffsets,
+		// 		shapeCount);
+		// 	// Update only touched shapes' patch AABBs
+		// 	cuExecute((uint)touchedShapeCount,
+		// 		NLQ_UpdatePatchAabbsForTouchedShapes,
+		// 		mPatchAabbsWorld,
+		// 		patchAabbs,
+		// 		mShape2PatchOffsets,
+		// 		mTouchedShapeIds,
+		// 		this->inCenter()->getData(),
+		// 		this->inRotationMatrix()->getData(),
+		// 		mShape2RigidBodyIds);
+		// }
+
+		// Build patch global IDs
 		if (mPatch2GlobalIds.size() != (uint)patchCount)
 		{
 			mPatch2GlobalIds.resize(patchCount);
 			cuExecute((uint)patchCount, NLQ_BuildPatchGlobalIds, mPatch2GlobalIds);
 		}
-
-		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
-		if (shapeCount <= 0)
-		{
-			this->outPotentialPatchPairs()->resize(0);
-			return false;
-		}
-
+		printf ("[NeighborTriMeshQuery] Patch global IDs built.\n");
 #ifndef NDEBUG
 		printf("[NeighborTriMeshQuery] middlePhase shapePairs=%u\n", (uint)shapePairs.size());
 #endif
@@ -1594,25 +1781,29 @@ namespace dyno
 			mTargetShapeCounts.resize(shapeCount);
 		mTargetShapeCounts.reset();
 
+		// Count how many times a shape is a target from shapePairs
 		cuExecute(shapePairs.size(),
 			NLQ_CountTargetShapes,
 			mTargetShapeCounts,
 			shapePairs,
 			shapeCount);
-
+		printf("[NeighborTriMeshQuery] Target shape counts computed.\n");
+		// Exclusive scan to build target shape offsets
 		if (mTargetShapeOffsets.size() != (uint)shapeCount)
 			mTargetShapeOffsets.resize(shapeCount);
 		mTargetShapeOffsets.assign(mTargetShapeCounts);
 		mScan.exclusive(mTargetShapeOffsets, true);
 
+		// Build target shape write flags and target->source shape mapping
 		if (mTargetShapeWrite.size() != (uint)shapeCount)
 			mTargetShapeWrite.resize(shapeCount);
-		mTargetShapeWrite.reset();
+		mTargetShapeWrite.reset(); 
 
 		if (mTarget2SourceShapes.size() != shapePairs.size())
 			mTarget2SourceShapes.resize(shapePairs.size());
 		mTarget2SourceShapes.reset();
 
+		// Group source shapes by target shapes from shapePairs
 		cuExecute(shapePairs.size(),
 			NLQ_GroupShapePairsByTarget,
 			mTarget2SourceShapes,
@@ -1620,20 +1811,20 @@ namespace dyno
 			mTargetShapeWrite,
 			shapePairs,
 			shapeCount);
-
+		printf("[NeighborTriMeshQuery] Target to source shape mapping built.\n");
 		CArray<int> hTargetCounts;
 		CArray<int> hTargetOffsets;
 		CArray<int> hGroupedSources;
 		CArray<int> hShape2PatchOffsets;
-		hTargetCounts.assign(mTargetShapeCounts);
-		hTargetOffsets.assign(mTargetShapeOffsets);
-		hGroupedSources.assign(mTarget2SourceShapes);
-		hShape2PatchOffsets.assign(mShape2PatchOffsets);
+		hTargetCounts.assign(mTargetShapeCounts); // Number of source shapes associated with each target shape
+		hTargetOffsets.assign(mTargetShapeOffsets); // Starting source-shape index for each target shape
+		hGroupedSources.assign(mTarget2SourceShapes); // Flattened source shapes grouped by target shapes
+		hShape2PatchOffsets.assign(mShape2PatchOffsets); // Shape to patch CSR offsets
 
 		CArray<int> hTargetPairCounts;
 		hTargetPairCounts.assign((uint)shapeCount, 0);
 
-		std::vector<std::unique_ptr<DArray<PairUU>>> targetPairs;
+		std::vector<std::unique_ptr<DArray<PairUU>>> targetPairs; // Patch pairs per target shape
 		targetPairs.resize(shapeCount);
 
 		auto clampInt = [](int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); };
@@ -1643,24 +1834,33 @@ namespace dyno
 		// The target->sources grouping keeps the layout ready for batched parallelization.
 		for (int target = 0; target < shapeCount; ++target)
 		{
+			// Read how many source shapes are grouped for this target shape
 			int groupCount = hTargetCounts[target];
+			// Skip target shapes with no source shapes
 			if (groupCount <= 0)
 				continue;
 
+			// Read starting source shape index for this target shape
 			int groupStart = hTargetOffsets[target];
+			// Skip invalid target shapes
 			if (groupStart < 0 || groupStart >= (int)hGroupedSources.size())
 				continue;
 
+			// Calculate ending source shape index for this target shape
 			int groupEnd = groupStart + groupCount;
+			// Clamp ending index to valid range
 			if (groupEnd > (int)hGroupedSources.size())
 				groupEnd = (int)hGroupedSources.size();
 
+			// Calculate how many patches are associated with this target shape
 			int tBegin = clampInt(hShape2PatchOffsets[target], 0, patchCount);
 			int tEnd = clampInt(hShape2PatchOffsets[target + 1], 0, patchCount);
 			int tCount = tEnd - tBegin;
+			// Skip target shapes with no patches
 			if (tCount <= 0)
 				continue;
 
+			// Assign target shape's patch AABBs
 			if (mTargetPatchAabbs.size() != (uint)tCount)
 				mTargetPatchAabbs.resize(tCount);
 			mTargetPatchAabbs.assign(mPatchAabbsWorld, tCount, 0, tBegin);
@@ -1668,16 +1868,20 @@ namespace dyno
 			int sourceTotal = 0;
 			for (int i = groupStart; i < groupEnd; ++i)
 			{
+				// Get source shape id
 				int sourceShape = hGroupedSources[i];
+				// Skip invalid source shapes
 				if (sourceShape < 0 || sourceShape + 1 >= (int)hShape2PatchOffsets.size())
 					continue;
 
 				int sBegin = clampInt(hShape2PatchOffsets[sourceShape], 0, patchCount);
 				int sEnd = clampInt(hShape2PatchOffsets[sourceShape + 1], 0, patchCount);
+				// Count number of patches for this source shape
 				if (sEnd > sBegin)
 					sourceTotal += (sEnd - sBegin);
 			}
 
+			// Skip target shapes with no source patches
 			if (sourceTotal <= 0)
 				continue;
 
@@ -1689,64 +1893,107 @@ namespace dyno
 			int dstOffset = 0;
 			for (int i = groupStart; i < groupEnd; ++i)
 			{
+				// Get source shape id
 				int sourceShape = hGroupedSources[i];
 				if (sourceShape < 0 || sourceShape + 1 >= (int)hShape2PatchOffsets.size())
 					continue;
-
+				// Get source shape's patch range
 				int sBegin = clampInt(hShape2PatchOffsets[sourceShape], 0, patchCount);
 				int sEnd = clampInt(hShape2PatchOffsets[sourceShape + 1], 0, patchCount);
 				int sCount = sEnd - sBegin;
 				if (sCount <= 0)
 					continue;
 
-				if (dstOffset + sCount > sourceTotal)
+				// Clamp count to avoid overflow
+				if (dstOffset + sCount > sourceTotal) {
 					sCount = sourceTotal - dstOffset;
+					printf("[NeighborTriMeshQuery] middlePhase: clamped source patch count for shape %d (sCount=%d).\n", sourceShape, sCount);
+				}
 				if (sCount <= 0)
 					break;
 
+				// Assign source shape's patch AABBs and global IDs
 				mSourcePatchAabbs.assign(mPatchAabbsWorld, sCount, (uint)dstOffset, (uint)sBegin);
 				mSource2PatchIds.assign(mPatch2GlobalIds, sCount, (uint)dstOffset, (uint)sBegin);
+				// TODO: update patch AABBs of mSource2PatchIds to world space
 				dstOffset += sCount;
 			}
 
 			if (dstOffset <= 0)
 				continue;
 
-			this->mBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
-			this->mBroadPhaseCD->varSelfCollision()->setValue(false);
-			this->mBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
-			this->mBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
+			// // broad phase again at patch level between source patches and target patches
+			// this->mBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
+			// this->mBroadPhaseCD->varSelfCollision()->setValue(false);
+			// this->mBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
+			// this->mBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
 
-			auto type = this->varSpatial()->getDataPtr()->currentKey();
-			switch (type)
-			{
-			case Spatial::BVH:
-				this->mBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
-				break;
-			case Spatial::OCTREE:
-				this->mBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::Octree);
-				break;
-			default:
-				break;
+			// auto type = this->varSpatial()->getDataPtr()->currentKey();
+			// switch (type)
+			// {
+			// case Spatial::BVH:
+			// 	this->mBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
+			// 	break;
+			// case Spatial::OCTREE:
+			// 	this->mBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::Octree);
+			// 	break;
+			// default:
+			// 	break;
+			// }
+
+			// this->mBroadPhaseCD->update();
+			// auto& contactList = this->mBroadPhaseCD->outContactList()->getData();
+
+			auto patchBroadPhaseCD = std::make_shared<CollisionDetectionBroadPhase<TDataType>>();
+            patchBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
+            patchBroadPhaseCD->varSelfCollision()->setValue(false);
+            patchBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
+            patchBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
+
+            auto type = this->varSpatial()->getDataPtr()->currentKey();
+            switch (type)
+            {
+            case Spatial::BVH:
+                patchBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
+                break;
+            case Spatial::OCTREE:
+                patchBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::Octree);
+                break;
+            default:
+                break;
+            }
+
+            patchBroadPhaseCD->update();
+			cudaError_t e = cudaGetLastError();
+			if (e != cudaSuccess) {
+				printf("[PatchBroadPhase] launch error: %s\n", cudaGetErrorString(e));
 			}
-
-			this->mBroadPhaseCD->update();
-
-			auto& contactList = this->mBroadPhaseCD->outContactList()->getData();
+			cuSynchronize();
+			printf("[NeighborTriMeshQuery] BroadPhase at patch level for target shape %d completed.\n", target);
+			// if contactList is empty, skip
+			auto& contactList = patchBroadPhaseCD->outContactList()->getData();
 			if (contactList.elementSize() == 0)
+			{
+				printf("[NeighborTriMeshQuery] No contact detected.\n");
+				// hTargetPairCounts[target] = 0;
+				// targetPairs[target] = nullptr;
 				continue;
+			}
 
 			DArray<int> contactCount;
 			contactCount.resize(contactList.size());
 			contactCount.reset();
 
+			// count contacts for each source patch
 			cuExecute(contactList.size(),
 				NLQ_CountContactList,
 				contactCount,
 				contactList);
-
+			cuSynchronize();
+			printf("[NeighborTriMeshQuery] Contact list for target shape %d counted.\n", target);
+			// reduce contact counts to get total patch pairs for this target shape
 			int total = mReduce.accumulate(contactCount.begin(), contactCount.size());
-			hTargetPairCounts[target] = total;
+			hTargetPairCounts[target] = total; // Store total patch pairs for this target shape
 			if (total <= 0)
 			{
 				contactCount.clear();
@@ -1760,6 +2007,7 @@ namespace dyno
 			auto pairs = std::make_unique<DArray<PairUU>>();
 			pairs->resize(total);
 
+			// Set patch pairs of this target shape
 			cuExecute(contactList.size(),
 				NLQ_SetPatchPairsFromContactList,
 				*pairs,
@@ -1769,7 +2017,7 @@ namespace dyno
 				mSource2PatchIds,
 				tBegin,
 				tCount);
-
+			printf("[NeighborTriMeshQuery] Target shape %d: found %d patch pairs.\n", target, total);
 			targetPairs[target] = std::move(pairs);
 
 			contactCountCpy.clear();
@@ -1779,6 +2027,7 @@ namespace dyno
 		int totalPairs = 0;
 		CArray<int> hTargetPairOffsets;
 		hTargetPairOffsets.resize(shapeCount);
+		// Build target shape patch pair offsets and count total patch pairs
 		for (int i = 0; i < shapeCount; ++i)
 		{
 			hTargetPairOffsets[i] = totalPairs;
@@ -1793,9 +2042,12 @@ namespace dyno
 			return false;
 		}
 
+		std::cout << "[NeighborTriMeshQuery] middlePhase found " << totalPairs << " patch pairs." << std::endl;
+
 		this->outPotentialPatchPairs()->resize(totalPairs);
 		auto& patchPairs = this->outPotentialPatchPairs()->getData();
 
+		// Flatten patch pairs from all target shapes into outPotentialPatchPairs()
 		for (int i = 0; i < shapeCount; ++i)
 		{
 			int count = hTargetPairCounts[i];
@@ -1811,7 +2063,7 @@ namespace dyno
 #ifndef NDEBUG
 		printf("[NeighborTriMeshQuery] middlePhase patchPairs=%d\n", totalPairs);
 #endif
-
+		printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
 		return true;
 
 // #else
@@ -1864,6 +2116,7 @@ namespace dyno
 	template<typename TDataType>
 	void NeighborTriMeshQuery<TDataType>::narrowPhase()
 	{
+		printf("[NeighborTriMeshQuery] NarrowPhase started.\n");
 		auto& patchPairs = this->outPotentialPatchPairs()->getData();
 		if (patchPairs.size() == 0)
 		{
@@ -1920,7 +2173,8 @@ namespace dyno
 			patchCount,
 			triCount,
 			patchTriCount);
-
+		cuSynchronize();
+		printf("[NeighborTriMeshQuery] NarrowPhase contact count computed.\n");
 		int total = mReduce.accumulate(contactCount.begin(), contactCount.size());
 		if (total <= 0)
 		{
@@ -1955,9 +2209,12 @@ namespace dyno
 			patchCount,
 			triCount,
 			patchTriCount);
+		cuSynchronize();
+		printf("[NeighborTriMeshQuery] NarrowPhase contacts generated: %d contacts found.\n", total);
 
 		contactCountCpy.clear();
 		contactCount.clear();
+		printf("[NeighborTriMeshQuery] NarrowPhase completed.\n");
 	}
 
 	DEFINE_CLASS(NeighborTriMeshQuery);

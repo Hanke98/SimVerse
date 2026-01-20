@@ -41,6 +41,7 @@ namespace dyno
 		this->graphicsPipeline()->pushModule(transformer);
 
 		auto prRender = std::make_shared<GLPhotorealisticInstanceRender>();
+		prRender->setAlpha(0.5f);
 		this->stateTextureMesh()->connect(prRender->inTextureMesh());
 		transformer->outInstanceTransform()->connect(prRender->inTransform());
 		this->graphicsPipeline()->pushModule(prRender);

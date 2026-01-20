@@ -1,6 +1,7 @@
 #pragma once
 #include "CollisionData.h"
 
+#include "DeclarePort.h"
 #include "Module/ComputeModule.h"
 
 #include "Topology/TriangleSet.h"
@@ -86,14 +87,17 @@ namespace dyno
 		// Optional: adjacency list for shapes, used when EnableAdjacentFilter is true
 		DEF_ARRAYLIST_IN(int, AdjacentShapes, DeviceType::GPU, "");
 
-		// DEF_ARRAY_IN(int, Shape2TriOffsets, DeviceType::GPU, "");
+		DEF_ARRAY_IN(int, Shape2TriOffsets, DeviceType::GPU, "");
 
 		DEF_ARRAY_OUT(PairUU, PotentialShapePairs, DeviceType::GPU, "");
 
 		DEF_ARRAY_OUT(PairUU, PotentialPatchPairs, DeviceType::GPU, "");
 
+		DEF_INSTANCE_OUT(TriangleSet<TDataType>, PotentialTriSet, "");
+
 	protected:
 		void compute() override;
+		std::shared_ptr<TriangleSet<DataType3f>> triSet = std::make_shared<TriangleSet<DataType3f>>();
 
 	private:
 		bool broadPhase();

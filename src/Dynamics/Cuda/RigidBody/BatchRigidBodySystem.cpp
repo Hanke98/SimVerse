@@ -1,6 +1,8 @@
 #include "BatchRigidBodySystem.h"
 #include "BasicShapes/PlaneModel.h"
+#include "GLPointVisualModule.h"
 #include "GLSurfaceVisualModule.h"
+#include "Mapping/ContactsToPointSet.h"
 #include "Mapping/DiscreteElementsToTriangleSet.h"
 #include "Mapping/DiscreteSpheresToTriangleSet.h"
 #include "Mapping/TextureMeshToTriangleSet.h"
@@ -50,15 +52,17 @@ namespace dyno
         this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
         this->animationPipeline()->pushModule(tm2ts);
 
-
-        // mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
-        mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
+        mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
+        // mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
         
         tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
         this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
         this->stateRotationMatrix()->connect(mNeighborTriMeshQuery->inRotationMatrix());
         this->stateTopology()->connect(mNeighborTriMeshQuery->inDiscreteElements());
         this->animationPipeline()->pushModule(mNeighborTriMeshQuery);
+
+		// Bridge module output to a Node field so GraphicsPipeline can discover render modules.
+		mNeighborTriMeshQuery->outPotentialTriSet()->connect(this->statePotentialTriSet());
 
         auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
         this->stateTopology()->connect(cdBV->inDiscreteElements());
@@ -69,6 +73,24 @@ namespace dyno
         // elementQuery->outContacts()->connect(merge->inContactsA());
         cdBV->outContacts()->connect(merge->inContactsB());
         this->animationPipeline()->pushModule(merge);
+
+        auto contatcTriSet = std::make_shared<GLSurfaceVisualModule>();
+        contatcTriSet->setColor(Color(1.0f, 0.0f, 1.0f));
+	    contatcTriSet->setAlpha(1.0f);
+	    contatcTriSet->varUseVertexNormal()->setValue(false);
+	    contatcTriSet->varForceUpdate()->setValue(true);
+		this->statePotentialTriSet()->connect(contatcTriSet->inTriangleSet());
+        this->graphicsPipeline()->pushModule(contatcTriSet);
+
+        auto contactPointMapper = std::make_shared<ContactsToPointSet<DataType3f>>();
+        mNeighborTriMeshQuery->outContacts()->connect(contactPointMapper->inContacts());
+        this->graphicsPipeline()->pushModule(contactPointMapper);
+
+        auto pointRender = std::make_shared<GLPointVisualModule>();
+        pointRender->setColor(Color(1, 0, 0));
+        pointRender->varPointSize()->setValue(0.03f);
+        contactPointMapper->outPointSet()->connect(pointRender->inPointSet());
+        this->graphicsPipeline()->pushModule(pointRender);
 
         auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
         // auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
@@ -120,6 +142,9 @@ namespace dyno
             return;
         }
 
+        const auto& meshShapes = mesh->shapes(); // one obj one shape, including collision and visual
+        const size_t meshShapeCount = meshShapes.size(); // so meshShapes.size() >= urdfShapes.size()
+
         using Real = typename TDataType::Real;
         using Coord = typename TDataType::Coord;
         using Matrix = typename TDataType::Matrix;
@@ -133,13 +158,10 @@ namespace dyno
             // return;
         }
 
-        std::vector<AABB> shapeAabbsLocal;
-        shapeAabbsLocal.resize(urdfShapes.size());
+        std::vector<AABB> shapeAabbsLocal(meshShapeCount);
 
-        std::vector<Coord> restShapeCenters;
-        std::vector<Matrix> restShapeRotations;
-        restShapeCenters.resize(urdfShapes.size());
-        restShapeRotations.resize(urdfShapes.size());
+        std::vector<Coord> restShapeCenters(meshShapeCount, Coord(Real(0)));
+        std::vector<Matrix> restShapeRotations(meshShapeCount, Matrix::identityMatrix());
 
         auto toLocalAabb = [](const AABB& worldAabb, const Matrix& RRest, const Coord& tRest) -> AABB {
             Coord centerWorld = (worldAabb.v0 + worldAabb.v1) * Real(0.5);
@@ -171,17 +193,20 @@ namespace dyno
                 ? shape.T_collision_bb_world
                 : shape.T_visual_bb_world;
 
-            restShapeCenters[l] = bbWorld.translation();
-            restShapeRotations[l] = bbWorld.rotation();
+            int shapeId = static_cast<int>(shape.visualShapeId);
+            if (shapeId < 0 || static_cast<size_t>(shapeId) >= meshShapeCount)
+                continue;
+
+            restShapeCenters[shapeId] = bbWorld.translation();
+            restShapeRotations[shapeId] = bbWorld.rotation();
 
             if (l < this->urdfInfo.linkAABBs.size())
             {
-                shapeAabbsLocal[l] = toLocalAabb(this->urdfInfo.linkAABBs[l], restShapeRotations[l], restShapeCenters[l]);
+                shapeAabbsLocal[shapeId] = toLocalAabb(this->urdfInfo.linkAABBs[l], restShapeRotations[shapeId], restShapeCenters[shapeId]);
             }
         }
 
-        const auto& meshShapes = mesh->shapes();
-        std::vector<int> shape2TriOffsets(meshShapes.size() + 1, 0);
+        std::vector<int> shape2TriOffsets(meshShapeCount + 1, 0);
         // Compute triangle offsets for each mesh shape
         for (size_t i = 0; i < meshShapes.size(); ++i)
         {
@@ -213,7 +238,7 @@ namespace dyno
             // Loop through patches
             for (size_t p = 0; p < patchCount; ++p)
             {
-                patchAabbsLocal.push_back(toLocalAabb(shape.patchAABBs[p], restShapeRotations[l], restShapeCenters[l]));
+                patchAabbsLocal.push_back(toLocalAabb(shape.patchAABBs[p], restShapeRotations[shapeId], restShapeCenters[shapeId]));
 
                 int begin = shape.patchOffsets[p];
                 int end = shape.patchOffsets[p + 1];
@@ -250,7 +275,7 @@ namespace dyno
         mNeighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
         mNeighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
         mNeighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
-        // mNeighborTriMeshQuery->inShape2TriOffsets()->assign(shape2TriOffsets);
+        mNeighborTriMeshQuery->inShape2TriOffsets()->assign(shape2TriOffsets);
         
         // if (!mUrdfShapeRigidBodyIds.empty() && mUrdfShapeRigidBodyIds.size() == urdfShapes.size())
         // {
@@ -549,6 +574,14 @@ namespace dyno
             std::cout << "[BatchRigidBodySystem] textureShapeCount: " << textureShapeCount << std::endl;
             mTextureMeshShape2RigidBodyIds.clear();
             mTextureMeshShape2ElementIds.clear();
+            if (textureShapeCount > 0)
+            {
+                mTextureMeshShape2ElementIds.resize(textureShapeCount);
+                for (uint i = 0; i < textureShapeCount; ++i)
+                {
+                    mTextureMeshShape2ElementIds[i] = Pair<uint, uint>(i, invalidElementId);
+                }
+            }
 
             // this->varVisualOrCollision()->setValue(visual_or_collision);
 
@@ -636,6 +669,14 @@ namespace dyno
                     entry.first = it;
                     entry.second = boxLocalId;
                     mTextureMeshShape2ElementIds.push_back(entry);
+                    // if (it < mTextureMeshShape2ElementIds.size())
+                    // {
+                    //     mTextureMeshShape2ElementIds[it] = entry;
+                    // }
+                    // else
+                    // {
+                    //     mTextureMeshShape2ElementIds.push_back(entry);
+                    // }
                     
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
                     mb.body_indices.push_back(actor->idx);
@@ -777,6 +818,12 @@ namespace dyno
                     uint maxId = 0;
                     for (auto& entry : mTextureMeshShape2ElementIds)
                     {
+                        if (entry.second == invalidElementId)
+                        {
+                            invalidCount++;
+                            continue;
+                        }
+
                         entry.second = boxStart + entry.second;
                         validCount++;
                         if (entry.second < minId) minId = entry.second;

@@ -1,9 +1,12 @@
 #pragma once
+#include "Collision/NeighborMeshQuery.h"
 #include "Node.h"
 #include "RigidBody/ArticulatedBody.h"
 #include "RigidBody/MultibodySystem.h"
 #include "RigidBodyShared.h"
 #include "RigidBodySystem.h"
+
+#include "Topology/TriangleSet.h"
 
 #include "Collision/Attribute.h"
 #include "Collision/CollisionData.h"
@@ -83,6 +86,10 @@ public:
     ~BatchRigidBodySystem() override;
 
 		DEF_VAR(FilePath, UrdfFilePath, "", "");
+
+    // Expose potential contact triangles on the Node so GraphicsPipeline can build a valid
+    // dependency graph (Pipeline reconstruct starts from Node fields).
+    DEF_INSTANCE_STATE(TriangleSet<TDataType>, PotentialTriSet, "");
 
     // ------------------------------------
     // Control APIs
@@ -167,7 +174,7 @@ protected:
 
     DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
 
-    std::shared_ptr<NeighborTriMeshQuery<TDataType>> mNeighborTriMeshQuery;
+    std::shared_ptr<NeighborMeshQuery<TDataType>> mNeighborTriMeshQuery;
   };
 
 } // namespace dyno

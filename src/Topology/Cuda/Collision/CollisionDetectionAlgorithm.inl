@@ -596,6 +596,12 @@ namespace dyno
         if (N.norm() > EPSILON) N /= N.norm(); else return;
         checkSignedDistanceAxis(D, bA, bB, N, shapeA, shapeB, radiusA, radiusB);
 
+        if (REAL_GREAT(D, 0))
+        {
+            sat.update(SeparationType::CT_POINT, bA, bB, D, N, pA, pB);
+            return;
+        }
+
         if (!checkPointInBoundary(pA, N, bA, radiusA + rA) || !checkPointInBoundary(pB, N, bB, radiusB + rB)) return;
         sat.update(SeparationType::CT_POINT, bA, bB, D, N, pA, pB);
     }
@@ -621,6 +627,12 @@ namespace dyno
         if (N.norm() > EPSILON) N /= N.norm(); else return;
         checkSignedDistanceAxis(D, bA, bB, N, shapeA, shapeB, radiusA, radiusB);
 
+        if (REAL_GREAT(D, 0))
+        {
+            sat.update(SeparationType::CT_EDGE, bA, bB, D, N, proj.v0, proj.v1);
+            return;
+        }
+        // Feature validation
         if (!checkPointInBoundary(proj.v0, N, bA, radiusA) || !checkPointInBoundary(proj.v1, N, bB, radiusB)) return;
         sat.update(SeparationType::CT_EDGE, bA, bB, D, N, proj.v0, proj.v1);
     }
@@ -641,6 +653,13 @@ namespace dyno
 		Real bA, bB;
 		if (N.norm() > EPSILON) N /= N.norm(); else return;
 		checkSignedDistanceAxis(D, bA, bB, N, shapeA, shapeB, radiusA, radiusB);
+
+        if (REAL_GREAT(D, 0))
+        {
+            sat.update(type, bA, bB, D, N, tri.v[0], tri.v[1], tri.v[2]);
+            return;
+        }
+
         Real bb = (type == CT_TRIA) ? bA : bB;
         Real rr = (type == CT_TRIA) ? radiusA : radiusB;
         for (int i = 0; i < 3; ++i)
@@ -664,6 +683,13 @@ namespace dyno
         Real bA, bB;
         if (N.norm() > EPSILON) N /= N.norm(); else return;
         checkSignedDistanceAxis(D, bA, bB, N, shapeA, shapeB, radiusA, radiusB);
+
+        if (REAL_GREAT(D, 0))
+        {
+            sat.update(type, bA, bB, D, N, rect.center, rect.axis[0], rect.axis[1], Vec3f(rect.extent[0], rect.extent[1], 0.f));
+            return;
+        }
+
         Real bb = (type == CT_RECTA) ? bA : bB;
         Real rr = (type == CT_RECTA) ? radiusA : radiusB;
         for (int i = 0; i < 4; ++i) 
@@ -2137,6 +2163,48 @@ namespace dyno
         auto checkAxisP = [&](Vec3f pA, Vec3f pB) { checkAxisPoint(sat, triA, triB, radiusA, radiusB, pA, pB); };
         auto checkAxisE = [&](Segment3D edgeA, Segment3D edgeB) { checkAxisEdge(sat, triA, triB, radiusA, radiusB, edgeA, edgeB); };
         auto checkAxisT = [&](Triangle3D face, auto type) { checkAxisTri(sat, triA, triB, radiusA, radiusB, face, type); };
+
+        // auto checkSeparated = [&](Vec3f axis) {
+        //     Vec3f N = axis;
+        //     Real D = 0;
+        //     Real bA, bB;
+        //     if (N.norm() <= EPSILON) return false;
+        //     N /= N.norm();
+        //     checkSignedDistanceAxis(D, bA, bB, N, triA, triB, radiusA, radiusB);
+        //     if (REAL_GREAT(D, 0))
+        //     {
+        //         sat.update(SeparationType::CT_POINT, bA, bB, D, N, triA.v[0], triB.v[0]);
+        //         return true;
+        //     }
+        //     return false;
+        // };
+
+        // // Fast separating-axis reject without feature checks.
+        // if (checkSeparated(triA.normal())) return;
+        // if (checkSeparated(triB.normal())) return;
+		// for (int i = 0; i < 3; i++)
+		// 	for (int j = 0; j < 3; j++)
+		// 	{
+        //         int ni = (i == 2) ? 0 : i + 1;
+        //         int nj = (j == 2) ? 0 : j + 1;
+        //         Vec3f dirA = triA.v[ni] - triA.v[i];
+        //         Vec3f dirB = triB.v[nj] - triB.v[j];
+        //         if (checkSeparated(dirA.cross(dirB))) return;
+		// 	}
+        // for (int j = 0; j < 3; j++)
+        // {
+        //     Vec3f pA = triA.v[j];
+        //     Point3D queryP(pA);
+        //     Point3D projP = queryP.project(triB);
+        //     if (checkSeparated(projP.origin - pA)) return;
+        // }
+        // for (int j = 0; j < 3; j++)
+        // {
+        //     Vec3f pB = triB.v[j];
+        //     Point3D queryP(pB);
+        //     Point3D projP = queryP.project(triA);
+        //     if (checkSeparated(pB - projP.origin)) return;
+        // }
         
         // Minkowski Face Normal
         // tri face

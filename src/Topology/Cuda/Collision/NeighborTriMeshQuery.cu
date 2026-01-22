@@ -142,6 +142,43 @@ namespace dyno
 		tRel = tCurr - RRel * tRest;
 	}
 
+	template<typename Real, typename Coord, typename Matrix>
+	inline void NLQ_GetRelativeTransformHost(
+		int shapeId,
+		const CArray<int>& shape2RigidBodyIds,
+		const CArray<Coord>& centers,
+		const CArray<Matrix>& rotations,
+		const CArray<Coord>& restShapeCenters,
+		const CArray<Matrix>& restShapeRotations,
+		Matrix& RRel,
+		Coord& tRel,
+		int& bodyId)
+	{
+		bodyId = shapeId;
+		if (shape2RigidBodyIds.size() > 0 && shapeId >= 0 && shapeId < (int)shape2RigidBodyIds.size())
+			bodyId = shape2RigidBodyIds[shapeId];
+
+		if (bodyId < 0 || bodyId >= (int)centers.size() || bodyId >= (int)rotations.size())
+		{
+			RRel = Matrix::identityMatrix();
+			tRel = Coord(Real(0));
+			return;
+		}
+
+		Coord tCurr = centers[bodyId];
+		Matrix RCurr = rotations[bodyId];
+
+		Coord tRest = Coord(Real(0));
+		Matrix RRest = Matrix::identityMatrix();
+		if (shapeId >= 0 && shapeId < (int)restShapeCenters.size())
+			tRest = restShapeCenters[shapeId];
+		if (shapeId >= 0 && shapeId < (int)restShapeRotations.size())
+			RRest = restShapeRotations[shapeId];
+
+		RRel = RCurr * RRest.transpose();
+		tRel = tCurr - RRel * tRest;
+	}
+
 	// template<typename Real, typename Coord, typename Matrix, typename AABB>
 	// __global__ void NLQ_UpdateShapeAabbs(
 	// 	DArray<AABB> worldAabbs,
@@ -611,6 +648,8 @@ namespace dyno
 		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
 		if (tId >= contactList.size())
 			return;
+		if (tId >= source2PatchIds.size())
+			return;
 
 		int offset = prefix[tId];
 		int size = counts[tId];
@@ -632,6 +671,51 @@ namespace dyno
 				patchPairs[offset + write] = Pair<uint, uint>(srcId, (uint)(targetBase + targetIdx));
 				write++;
 			}
+		}
+	}
+
+	template<typename AABB>
+	__global__ void NLQ_CountPatchPairsSingleTarget(
+		DArray<int> counts,
+		DArray<AABB> sourceAabbs,
+		DArray<AABB> targetAabbs,
+		int targetIndex)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= sourceAabbs.size())
+			return;
+		if (targetIndex < 0 || targetIndex >= targetAabbs.size())
+		{
+			counts[tId] = 0;
+			return;
+		}
+
+		counts[tId] = sourceAabbs[tId].checkOverlap(targetAabbs[targetIndex]) ? 1 : 0;
+	}
+
+	template<typename AABB>
+	__global__ void NLQ_SetPatchPairsSingleTarget(
+		DArray<Pair<uint, uint>> patchPairs,
+		DArray<AABB> sourceAabbs,
+		DArray<AABB> targetAabbs,
+		DArray<uint> source2PatchIds,
+		int targetIndex,
+		int targetPatchId,
+		DArray<int> prefix,
+		DArray<int> counts)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= sourceAabbs.size() || tId >= source2PatchIds.size())
+			return;
+		if (targetIndex < 0 || targetIndex >= targetAabbs.size())
+			return;
+		if (!sourceAabbs[tId].checkOverlap(targetAabbs[targetIndex]))
+			return;
+
+		int offset = prefix[tId];
+		if (offset >= 0 && offset < patchPairs.size() && counts[tId] > 0)
+		{
+			patchPairs[offset] = Pair<uint, uint>(source2PatchIds[tId], (uint)targetPatchId);
 		}
 	}
 
@@ -874,9 +958,12 @@ namespace dyno
 				continue;
 			// compute triangle 0 in world space
 			Triangle tri0 = triangles[triId0];
-			Coord p00 = RRel0 * vertices[tri0[0]] + tRel0;
-			Coord p01 = RRel0 * vertices[tri0[1]] + tRel0;
-			Coord p02 = RRel0 * vertices[tri0[2]] + tRel0;
+			// Coord p00 = RRel0 * vertices[tri0[0]] + tRel0;
+			// Coord p01 = RRel0 * vertices[tri0[1]] + tRel0;
+			// Coord p02 = RRel0 * vertices[tri0[2]] + tRel0;
+			Coord p00 = vertices[tri0[0]];
+			Coord p01 = vertices[tri0[1]];
+			Coord p02 = vertices[tri0[2]];
 			TTriangle3D<Real> t0(p00, p01, p02);
 
 			for (int j = start1; j < end1; ++j)
@@ -887,9 +974,12 @@ namespace dyno
 
 				// compute triangle 1 in world space
 				Triangle tri1 = triangles[triId1];
-				Coord p10 = RRel1 * vertices[tri1[0]] + tRel1;
-				Coord p11 = RRel1 * vertices[tri1[1]] + tRel1;
-				Coord p12 = RRel1 * vertices[tri1[2]] + tRel1;
+				// Coord p10 = RRel1 * vertices[tri1[0]] + tRel1;
+				// Coord p11 = RRel1 * vertices[tri1[1]] + tRel1;
+				// Coord p12 = RRel1 * vertices[tri1[2]] + tRel1;
+				Coord p10 = vertices[tri1[0]];
+				Coord p11 = vertices[tri1[1]];
+				Coord p12 = vertices[tri1[2]];
 				TTriangle3D<Real> t1(p10, p11, p12);
 
 				// perform narrow-phase collision detection
@@ -991,9 +1081,12 @@ namespace dyno
 				continue;
 
 			Triangle tri0 = triangles[triId0];
-			Coord p00 = RRel0 * vertices[tri0[0]] + tRel0;
-			Coord p01 = RRel0 * vertices[tri0[1]] + tRel0;
-			Coord p02 = RRel0 * vertices[tri0[2]] + tRel0;
+			// Coord p00 = RRel0 * vertices[tri0[0]] + tRel0;
+			// Coord p01 = RRel0 * vertices[tri0[1]] + tRel0;
+			// Coord p02 = RRel0 * vertices[tri0[2]] + tRel0;
+			Coord p00 = vertices[tri0[0]];
+			Coord p01 = vertices[tri0[1]];
+			Coord p02 = vertices[tri0[2]];
 			TTriangle3D<Real> t0(p00, p01, p02);
 
 			for (int j = start1; j < end1; ++j)
@@ -1003,9 +1096,12 @@ namespace dyno
 					continue;
 
 				Triangle tri1 = triangles[triId1];
-				Coord p10 = RRel1 * vertices[tri1[0]] + tRel1;
-				Coord p11 = RRel1 * vertices[tri1[1]] + tRel1;
-				Coord p12 = RRel1 * vertices[tri1[2]] + tRel1;
+				// Coord p10 = RRel1 * vertices[tri1[0]] + tRel1;
+				// Coord p11 = RRel1 * vertices[tri1[1]] + tRel1;
+				// Coord p12 = RRel1 * vertices[tri1[2]] + tRel1;
+				Coord p10 = vertices[tri1[0]];
+				Coord p11 = vertices[tri1[1]];
+				Coord p12 = vertices[tri1[2]];
 				TTriangle3D<Real> t1(p10, p11, p12);
 
 				TManifold<Real> manifold;
@@ -1202,15 +1298,23 @@ namespace dyno
 
 				if (elementId == invalidElementId)
 					continue;
-				// if (shape2ElementIds[shapeId] >= 0 && !warnedDuplicate)
-				
-				if (shape2ElementIds[i] >= 0 && !warnedDuplicate)
+				if (shapeId >= (uint)shapeCount)
+				{
+					if (!warnedOutOfRange)
+					{
+						printf("[NeighborTriMeshQuery] Shape2ElementPairs has out-of-range shapeId=%u (shapeCount=%d), skipping.\n",
+							shapeId, shapeCount);
+						warnedOutOfRange = true;
+					}
+					continue;
+				}
+
+				if (shape2ElementIds[shapeId] >= 0 && !warnedDuplicate)
 				{
 					printf("[NeighborTriMeshQuery] Shape2ElementPairs has duplicate shapeId=%u, overwriting.\n", shapeId);
 					warnedDuplicate = true;
 				}
-				shape2ElementIds[i] = (int)elementId;
-				// shape2ElementIds[shapeId] = elementId;
+				shape2ElementIds[shapeId] = (int)elementId;
 			}
 
 			bool allReady = true;
@@ -1344,7 +1448,6 @@ namespace dyno
 
 		mWarnedEmptyPatchMapping = false;
 
-		// TODO: filter shapePairs based on element types when a stable classification is available.
 		DArray<int> pairCount;
 		pairCount.resize(shapePairs.size());
 		pairCount.reset();
@@ -1395,6 +1498,8 @@ namespace dyno
 			this->outPotentialPatchPairs()->allocate();
 		if (this->outContacts()->isEmpty())
 			this->outContacts()->allocate();
+		if (this->outPotentialTriSet()->isEmpty())
+			this->outPotentialTriSet()->allocate();
 
 		// examine inputs
 		if (this->inShapeAABBs()->isEmpty()
@@ -1411,19 +1516,22 @@ namespace dyno
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] Missing input data.\n");
 			return;
 		}
 
 		// auto& shapeAabbs = this->inShapeAABBs()->getData();
 		// int shapeCount = (int)shapeAabbs.size();
-		// TODO: fix shape count retrieval
 		int shapeCount = this->inShape2ElementIds()->size();
 		if (shapeCount <= 0)
 		{
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] shapeAABBs is empty.\n");
 			return;
 		}
@@ -1434,6 +1542,8 @@ namespace dyno
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] RestShapeCenter missing.\n");
 			return;
 		}
@@ -1443,6 +1553,8 @@ namespace dyno
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] RestShapeRotation missing.\n");
 			return;
 		}
@@ -1452,6 +1564,8 @@ namespace dyno
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			return;
 		}
 
@@ -1463,6 +1577,8 @@ namespace dyno
 				this->outPotentialShapePairs()->resize(0);
 				this->outPotentialPatchPairs()->resize(0);
 				this->outContacts()->resize(0);
+				this->triSet->clear();
+				this->outPotentialTriSet()->setDataPtr(this->triSet);
 				printf("[NeighborTriMeshQuery] Shape2PatchOffsets size mismatch.\n");
 				return;
 			}
@@ -1478,6 +1594,8 @@ namespace dyno
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			return;
 		}
 
@@ -1497,6 +1615,8 @@ namespace dyno
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] Patch2Shape size mismatch.\n");
 			return;
 		}
@@ -1506,6 +1626,8 @@ namespace dyno
 		{
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			// printf("[NeighborTriMeshQuery] BroadPhase failed.\n");
 			return;
 		}
@@ -1514,6 +1636,8 @@ namespace dyno
 		if (!middlePhase())
 		{
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			// printf("[NeighborTriMeshQuery] MiddlePhase failed.\n");
 			return;
 		}
@@ -1922,6 +2046,62 @@ namespace dyno
 			if (dstOffset <= 0)
 				continue;
 
+			// Shrink to actual filled size to avoid using uninitialized tail entries
+			if (dstOffset < sourceTotal)
+			{
+				mSourcePatchAabbs.resize(dstOffset);
+				mSource2PatchIds.resize(dstOffset);
+				sourceTotal = dstOffset;
+			}
+
+			// BVH traversal assumes at least two target nodes; handle single-patch targets directly.
+			if (tCount == 1)
+			{
+				DArray<int> contactCount;
+				contactCount.resize(sourceTotal);
+				contactCount.reset();
+
+				cuExecute((uint)sourceTotal,
+					NLQ_CountPatchPairsSingleTarget,
+					contactCount,
+					mSourcePatchAabbs,
+					mTargetPatchAabbs,
+					0);
+
+				int total = mReduce.accumulate(contactCount.begin(), contactCount.size());
+				hTargetPairCounts[target] = total;
+				if (total <= 0)
+				{
+					contactCount.clear();
+					continue;
+				}
+
+				DArray<int> contactCountCpy;
+				contactCountCpy.assign(contactCount);
+				mScan.exclusive(contactCount, true);
+
+				auto pairs = std::make_unique<DArray<PairUU>>();
+				pairs->resize(total);
+
+				cuExecute((uint)sourceTotal,
+					NLQ_SetPatchPairsSingleTarget,
+					*pairs,
+					mSourcePatchAabbs,
+					mTargetPatchAabbs,
+					mSource2PatchIds,
+					0,
+					tBegin,
+					contactCount,
+					contactCountCpy);
+
+				printf("[NeighborTriMeshQuery] Target shape %d: found %d patch pairs.\n", target, total);
+				targetPairs[target] = std::move(pairs);
+
+				contactCountCpy.clear();
+				contactCount.clear();
+				continue;
+			}
+
 			// // broad phase again at patch level between source patches and target patches
 			// this->mBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
 			// this->mBroadPhaseCD->varSelfCollision()->setValue(false);
@@ -1949,6 +2129,9 @@ namespace dyno
             patchBroadPhaseCD->varSelfCollision()->setValue(false);
             patchBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
             patchBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
+			patchBroadPhaseCD->inSource()->tick();
+			patchBroadPhaseCD->inTarget()->tick();
+			patchBroadPhaseCD->varForceUpdate()->setValue(true);
 
             auto type = this->varSpatial()->getDataPtr()->currentKey();
             switch (type)
@@ -2121,6 +2304,8 @@ namespace dyno
 		if (patchPairs.size() == 0)
 		{
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			return;
 		}
 
@@ -2131,6 +2316,8 @@ namespace dyno
 		if (patch2TriOffsets.size() < (uint)(patchCount + 1) || patch2TriIndices.size() == 0)
 		{
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			return;
 		}
 
@@ -2142,6 +2329,8 @@ namespace dyno
 		if (triCount <= 0)
 		{
 			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			return;
 		}
 
@@ -2181,6 +2370,8 @@ namespace dyno
 			this->outContacts()->resize(0);
 			contactCount.clear();
 			contactCountCpy.clear();
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			return;
 		}
 
@@ -2211,6 +2402,144 @@ namespace dyno
 			patchTriCount);
 		cuSynchronize();
 		printf("[NeighborTriMeshQuery] NarrowPhase contacts generated: %d contacts found.\n", total);
+
+		// Build a TriangleSet for collided triangles in world space
+		CArray<ContactPair> hContacts;
+		hContacts.assign(this->outContacts()->getData());
+
+		CArray<Coord> hVertices;
+		hVertices.assign(vertices);
+		CArray<Triangle> hTriangles;
+		hTriangles.assign(triIndices);
+
+		CArray<int> hPatch2TriOffsets;
+		hPatch2TriOffsets.assign(patch2TriOffsets);
+		CArray<int> hPatch2TriIndices;
+		hPatch2TriIndices.assign(patch2TriIndices);
+		CArray<uint> hPatch2Shape;
+		hPatch2Shape.assign(mPatch2Shape);
+
+		CArray<Coord> hCenters;
+		hCenters.assign(this->inCenter()->getData());
+		CArray<Matrix> hRotations;
+		hRotations.assign(this->inRotationMatrix()->getData());
+		CArray<Coord> hRestCenters;
+		hRestCenters.assign(this->inRestShapeCenter()->getData());
+		CArray<Matrix> hRestRotations;
+		hRestRotations.assign(this->inRestShapeRotation()->getData());
+		CArray<int> hShape2Rigid;
+		hShape2Rigid.assign(mShape2RigidBodyIds);
+
+		std::vector<int> triIdToShape(triCount, -1);
+		for (int patchId = 0; patchId < patchCount; ++patchId)
+		{
+			int shapeId = patchId < (int)hPatch2Shape.size() ? (int)hPatch2Shape[patchId] : -1;
+			if (shapeId < 0)
+				continue;
+
+			if (patchId + 1 >= (int)hPatch2TriOffsets.size())
+				continue;
+			int tStart = hPatch2TriOffsets[patchId];
+			int tEnd = hPatch2TriOffsets[patchId + 1];
+			if (tStart < 0) tStart = 0;
+			if (tEnd > patchTriCount) tEnd = patchTriCount;
+			if (tEnd <= tStart)
+				continue;
+			for (int t = tStart; t < tEnd; ++t)
+			{
+				int triId = hPatch2TriIndices[t];
+				if (triId < 0 || triId >= triCount)
+					continue;
+				if (triIdToShape[triId] < 0)
+					triIdToShape[triId] = shapeId;
+			}
+		}
+
+		std::vector<Coord> contactVertices;
+		std::vector<Triangle> contactTriangles;
+		contactVertices.reserve(hContacts.size() * 6);
+		contactTriangles.reserve(hContacts.size() * 2);
+
+		for (uint i = 0; i < hContacts.size(); ++i)
+		{
+			int triId0 = hContacts[i].localId1;
+			int triId1 = hContacts[i].localId2;
+			if (triId0 < 0 || triId0 >= triCount || triId1 < 0 || triId1 >= triCount)
+				continue;
+
+			int shape0 = triIdToShape[triId0];
+			int shape1 = triIdToShape[triId1];
+			if (shape0 < 0 || shape1 < 0)
+				continue;
+
+			Matrix RRel0 = Matrix::identityMatrix();
+			Matrix RRel1 = Matrix::identityMatrix();
+			Coord tRel0 = Coord(Real(0));
+			Coord tRel1 = Coord(Real(0));
+			int bodyId0 = shape0;
+			int bodyId1 = shape1;
+
+			NLQ_GetRelativeTransformHost<Real, Coord, Matrix>(
+				shape0,
+				hShape2Rigid,
+				hCenters,
+				hRotations,
+				hRestCenters,
+				hRestRotations,
+				RRel0,
+				tRel0,
+				bodyId0);
+
+			NLQ_GetRelativeTransformHost<Real, Coord, Matrix>(
+				shape1,
+				hShape2Rigid,
+				hCenters,
+				hRotations,
+				hRestCenters,
+				hRestRotations,
+				RRel1,
+				tRel1,
+				bodyId1);
+
+			Triangle tri0 = hTriangles[triId0];
+			// Coord p00 = RRel0 * hVertices[tri0[0]] + tRel0;
+			// Coord p01 = RRel0 * hVertices[tri0[1]] + tRel0;
+			// Coord p02 = RRel0 * hVertices[tri0[2]] + tRel0;
+			Coord p00 = hVertices[tri0[0]];
+			Coord p01 = hVertices[tri0[1]];
+			Coord p02 = hVertices[tri0[2]];
+			int base = (int)contactVertices.size();
+			contactVertices.push_back(p00);
+			contactVertices.push_back(p01);
+			contactVertices.push_back(p02);
+			contactTriangles.push_back(Triangle(base, base + 1, base + 2));
+
+			Triangle tri1 = hTriangles[triId1];
+			// Coord p10 = RRel1 * hVertices[tri1[0]] + tRel1;
+			// Coord p11 = RRel1 * hVertices[tri1[1]] + tRel1;
+			// Coord p12 = RRel1 * hVertices[tri1[2]] + tRel1;
+			Coord p10 = hVertices[tri1[0]];
+			Coord p11 = hVertices[tri1[1]];
+			Coord p12 = hVertices[tri1[2]];
+			base = (int)contactVertices.size();
+			contactVertices.push_back(p10);
+			contactVertices.push_back(p11);
+			contactVertices.push_back(p12);
+			contactTriangles.push_back(Triangle(base, base + 1, base + 2));
+		}
+
+		if (contactTriangles.empty())
+		{
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
+		}
+		else
+		{
+			this->triSet->setPoints(contactVertices);
+			this->triSet->setTriangles(contactTriangles);
+			this->triSet->update();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
+		}
 
 		contactCountCpy.clear();
 		contactCount.clear();

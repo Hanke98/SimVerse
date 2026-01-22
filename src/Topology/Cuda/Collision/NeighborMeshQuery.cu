@@ -105,39 +105,39 @@ namespace dyno
 		tRel = tCurr - RRel * tRest;
 	}
 
-	// inline void NMQ_BuildShapeTriCSR(
-	// 	const CArray<int>& shape2PatchOffsets,
-	// 	const CArray<int>& patch2TriOffsets,
-	// 	const CArray<int>& patch2TriIndices,
-	// 	int shapeCount,
-	// 	int patchCount,
-	// 	std::vector<int>& shape2TriOffsets,
-	// 	std::vector<int>& shape2TriIndices)
-	// {
-	// 	shape2TriOffsets.assign(shapeCount + 1, 0);
-	// 	shape2TriIndices.clear();
-	// 	shape2TriIndices.reserve(patch2TriIndices.size());
+	inline void NMQ_BuildShapeTriCSR(
+		const CArray<int>& shape2PatchOffsets,
+		const CArray<int>& patch2TriOffsets,
+		const CArray<int>& patch2TriIndices,
+		int shapeCount,
+		int patchCount,
+		std::vector<int>& shape2TriOffsets,
+		std::vector<int>& shape2TriIndices)
+	{
+		shape2TriOffsets.assign(shapeCount + 1, 0);
+		shape2TriIndices.clear();
+		shape2TriIndices.reserve(patch2TriIndices.size());
 
-	// 	int patchTriCount = (int)patch2TriIndices.size();
-	// 	for (int shapeId = 0; shapeId < shapeCount; ++shapeId)
-	// 	{
-	// 		int pStart = NMQ_ClampIntHost(shape2PatchOffsets[shapeId], 0, patchCount);
-	// 		int pEnd = NMQ_ClampIntHost(shape2PatchOffsets[shapeId + 1], 0, patchCount);
+		int patchTriCount = (int)patch2TriIndices.size();
+		for (int shapeId = 0; shapeId < shapeCount; ++shapeId)
+		{
+			int pStart = NMQ_ClampIntHost(shape2PatchOffsets[shapeId], 0, patchCount);
+			int pEnd = NMQ_ClampIntHost(shape2PatchOffsets[shapeId + 1], 0, patchCount);
 
-	// 		for (int p = pStart; p < pEnd; ++p)
-	// 		{
-	// 			if (p + 1 >= (int)patch2TriOffsets.size())
-	// 				break;
+			for (int p = pStart; p < pEnd; ++p)
+			{
+				if (p + 1 >= (int)patch2TriOffsets.size())
+					break;
 
-	// 			int tStart = NMQ_ClampIntHost(patch2TriOffsets[p], 0, patchTriCount);
-	// 			int tEnd = NMQ_ClampIntHost(patch2TriOffsets[p + 1], 0, patchTriCount);
-	// 			for (int t = tStart; t < tEnd; ++t)
-	// 				shape2TriIndices.push_back(patch2TriIndices[t]);
-	// 		}
+				int tStart = NMQ_ClampIntHost(patch2TriOffsets[p], 0, patchTriCount);
+				int tEnd = NMQ_ClampIntHost(patch2TriOffsets[p + 1], 0, patchTriCount);
+				for (int t = tStart; t < tEnd; ++t)
+					shape2TriIndices.push_back(patch2TriIndices[t]);
+			}
 
-	// 		shape2TriOffsets[shapeId + 1] = (int)shape2TriIndices.size();
-	// 	}
-	// }
+			shape2TriOffsets[shapeId + 1] = (int)shape2TriIndices.size();
+		}
+	}
 
     inline void NMQ_BuildShapeTriCSR(
         CArray<TopologyModule::Triangle> triangles,
@@ -146,8 +146,11 @@ namespace dyno
 		std::vector<int>& shape2TriIndices)
 	{
 		int triCount = triangles.size();
+		int shapeCount = cShape2TriOffsets.size() - 1;
         shape2TriIndices.clear();
 		shape2TriIndices.reserve(triCount);
+		shape2TriOffsets.clear();
+		shape2TriOffsets.reserve(shapeCount + 1);
         
         for (int triId = 0; triId < triCount; ++triId){
             shape2TriIndices.push_back(triId);
@@ -942,9 +945,6 @@ namespace dyno
 	template<typename TDataType>
 	void NeighborMeshQuery<TDataType>::narrowPhase()
 	{
-		if (this->outPotentialTriSet()->isEmpty())
-			this->outPotentialTriSet()->allocate();
-
 		auto& shapePairs = this->outPotentialShapePairs()->getData();
 		if (shapePairs.size() == 0)
 		{
@@ -998,15 +998,15 @@ namespace dyno
 		std::vector<int> shape2TriOffsets;
         CArray<int> cShape2TriOffsets;
         cShape2TriOffsets.assign(this->inShape2TriOffsets()->getData());
-        // shape2TriOffsets.assign(cShape2TriOffsets.begin(), cShape2TriOffsets.end());
-		std::vector<int> shape2TriIndices;
-		NMQ_BuildShapeTriCSR(
-            hTriangles,
-			cShape2TriOffsets,
-            shape2TriOffsets,
-			shape2TriIndices);
 
-		if (shape2TriOffsets.size() != (size_t)(shapeCount + 1) || shape2TriIndices.empty())
+		// std::vector<int> shape2TriIndices;
+		// NMQ_BuildShapeTriCSR(
+        //     hTriangles,
+		// 	cShape2TriOffsets,
+        //     shape2TriOffsets,
+		// 	shape2TriIndices);
+
+		if (cShape2TriOffsets.size() != (size_t)(shapeCount + 1))
 		{
 			this->outContacts()->resize(0);
 			this->triSet->clear();
@@ -1015,15 +1015,6 @@ namespace dyno
 
 		Real dHat = this->varDHead()->getValue();
 		int triCount = (int)hTriangles.size();
-		if (!shape2TriOffsets.empty() && shape2TriOffsets.back() != triCount)
-		{
-			printf("[NeighborMeshQuery] Shape2TriOffsets.back() mismatch (back=%d, triCount=%d).\n",
-				shape2TriOffsets.back(),
-				triCount);
-			this->outContacts()->resize(0);
-			this->triSet->clear();
-			return;
-		}
 
 		std::vector<ContactPair> contacts;
 		contacts.reserve(hShapePairs.size());
@@ -1038,68 +1029,84 @@ namespace dyno
 			if (shape0 < 0 || shape1 < 0 || shape0 >= shapeCount || shape1 >= shapeCount)
 				continue;
 
-			int triStart0 = shape2TriOffsets[shape0];
-			int triEnd0 = shape2TriOffsets[shape0 + 1];
-			int triStart1 = shape2TriOffsets[shape1];
-			int triEnd1 = shape2TriOffsets[shape1 + 1];
+			// int triStart0 = shape2TriOffsets[shape0];
+			// int triEnd0 = shape2TriOffsets[shape0 + 1];
+			// int triStart1 = shape2TriOffsets[shape1];
+			// int triEnd1 = shape2TriOffsets[shape1 + 1];
+			int triStart0 = cShape2TriOffsets[shape0];
+			int triEnd0 = cShape2TriOffsets[shape0 + 1];
+			int triStart1 = cShape2TriOffsets[shape1];
+			int triEnd1 = cShape2TriOffsets[shape1 + 1];
 			if (triEnd0 <= triStart0 || triEnd1 <= triStart1)
 				continue;
 
-			Matrix RRel0 = Matrix::identityMatrix();
-			Matrix RRel1 = Matrix::identityMatrix();
-			Coord tRel0 = Coord(Real(0));
-			Coord tRel1 = Coord(Real(0));
-			int bodyId0 = shape0;
-			int bodyId1 = shape1;
+			// Matrix RRel0 = Matrix::identityMatrix();
+			// Matrix RRel1 = Matrix::identityMatrix();
+			// Coord tRel0 = Coord(Real(0));
+			// Coord tRel1 = Coord(Real(0));
+			int bodyId0 = hShape2Rigid[shape0];
+			int bodyId1 = hShape2Rigid[shape1];
 
-			NMQ_GetRelativeTransformHost<Real, Coord, Matrix>(
-				shape0,
-				hShape2Rigid,
-				hCenters,
-				hRotations,
-				hRestCenters,
-				hRestRotations,
-				RRel0,
-				tRel0,
-				bodyId0);
+			// NMQ_GetRelativeTransformHost<Real, Coord, Matrix>(
+			// 	shape0,
+			// 	hShape2Rigid,
+			// 	hCenters,
+			// 	hRotations,
+			// 	hRestCenters,
+			// 	hRestRotations,
+			// 	RRel0,
+			// 	tRel0,
+			// 	bodyId0);
 
-			NMQ_GetRelativeTransformHost<Real, Coord, Matrix>(
-				shape1,
-				hShape2Rigid,
-				hCenters,
-				hRotations,
-				hRestCenters,
-				hRestRotations,
-				RRel1,
-				tRel1,
-				bodyId1);
+			// NMQ_GetRelativeTransformHost<Real, Coord, Matrix>(
+			// 	shape1,
+			// 	hShape2Rigid,
+			// 	hCenters,
+			// 	hRotations,
+			// 	hRestCenters,
+			// 	hRestRotations,
+			// 	RRel1,
+			// 	tRel1,
+			// 	bodyId1);
+
+			if (bodyId0 >= 0 && bodyId1 >= 0 && bodyId0 == bodyId1)
+				continue;
 
 			for (int a = triStart0; a < triEnd0; ++a)
 			{
-				int triId0 = shape2TriIndices[a];
+				// int triId0 = shape2TriIndices[a];
+				int triId0 = a;
 				if (triId0 < 0 || triId0 >= triCount)
 					continue;
 
 				Triangle tri0 = hTriangles[triId0];
-				Coord p00 = RRel0 * hVertices[tri0[0]] + tRel0;
-				Coord p01 = RRel0 * hVertices[tri0[1]] + tRel0;
-				Coord p02 = RRel0 * hVertices[tri0[2]] + tRel0;
+				// Coord p00 = RRel0 * hVertices[tri0[0]] + tRel0;
+				// Coord p01 = RRel0 * hVertices[tri0[1]] + tRel0;
+				// Coord p02 = RRel0 * hVertices[tri0[2]] + tRel0;
+				Coord p00 = hVertices[tri0[0]];
+				Coord p01 = hVertices[tri0[1]];
+				Coord p02 = hVertices[tri0[2]];
 				TTriangle3D<Real> t0(p00, p01, p02);
 
 				for (int b = triStart1; b < triEnd1; ++b)
 				{
-					int triId1 = shape2TriIndices[b];
+					// int triId1 = shape2TriIndices[b];
+					int triId1 = b;
 					if (triId1 < 0 || triId1 >= triCount)
 						continue;
 
 					Triangle tri1 = hTriangles[triId1];
-					Coord p10 = RRel1 * hVertices[tri1[0]] + tRel1;
-					Coord p11 = RRel1 * hVertices[tri1[1]] + tRel1;
-					Coord p12 = RRel1 * hVertices[tri1[2]] + tRel1;
+					// Coord p10 = RRel1 * hVertices[tri1[0]] + tRel1;
+					// Coord p11 = RRel1 * hVertices[tri1[1]] + tRel1;
+					// Coord p12 = RRel1 * hVertices[tri1[2]] + tRel1;
+					Coord p10 = hVertices[tri1[0]];
+					Coord p11 = hVertices[tri1[1]];
+					Coord p12 = hVertices[tri1[2]];
 					TTriangle3D<Real> t1(p10, p11, p12);
 
 					TManifold<Real> manifold;
 					CollisionDetection<Real>::request(manifold, t0, t1, dHat, dHat);
+					// CollisionDetection<Real>::request(manifold, t0, t1, 0.01, 0.1);
 
 					if (manifold.contactCount > 0)
 					{
@@ -1115,23 +1122,36 @@ namespace dyno
 						contactVertices.push_back(p12);
 						contactTriangles.push_back(Triangle(base, base + 1, base + 2));
 
-						printf("[NeighborMeshQuery] Contact triangles added: shape %d (tri %d) and shape %d (tri %d)\n",
-							shape0, triId0, shape1, triId1);
+						// printf("[NeighborMeshQuery] Contact triangles added: shape %d (tri %d) and shape %d (tri %d)\n",
+						// 	shape0, triId0, shape1, triId1);
 					}
 
 					for (int n = 0; n < manifold.contactCount; ++n)
 					{
+						// ContactPair cp;
+						// cp.bodyId1 = bodyId0;
+						// cp.bodyId2 = bodyId1;
+						// // cp.localId1 = triId0;
+						// // cp.localId2 = triId1;
+						// cp.pos1 = manifold.contacts[n].position;
+						// cp.pos2 = manifold.contacts[n].position;
+						// cp.normal1 = -manifold.normal;
+						// cp.normal2 = manifold.normal;
+						// cp.contactType = ContactType::CT_NONPENETRATION;
+						// cp.interpenetration = -manifold.contacts[n].penetration;
+
 						ContactPair cp;
-						cp.bodyId1 = bodyId0;
-						cp.bodyId2 = bodyId1;
-						cp.localId1 = triId0;
-						cp.localId2 = triId1;
-						cp.pos1 = manifold.contacts[n].position;
-						cp.pos2 = manifold.contacts[n].position;
+						cp.pos1 = manifold.contacts[n].position + dHat * manifold.normal;
+						cp.pos2 = manifold.contacts[n].position + dHat * manifold.normal;
+						// cp.pos1 = manifold.contacts[n].position;
+						// cp.pos2 = manifold.contacts[n].position;
 						cp.normal1 = -manifold.normal;
 						cp.normal2 = manifold.normal;
+						cp.bodyId1 = bodyId0;
+						cp.bodyId2 = bodyId1;
 						cp.contactType = ContactType::CT_NONPENETRATION;
-						cp.interpenetration = -manifold.contacts[n].penetration;
+						cp.interpenetration = -manifold.contacts[n].penetration - 2 * dHat;
+						// cp.interpenetration = -manifold.contacts[n].penetration;
                         printf("[NeighborMeshQuery] Contact found between shape %d (tri %d) and shape %d (tri %d), penetration=%f\n",
                             shape0, triId0, shape1, triId1, cp.interpenetration);
 

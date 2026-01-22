@@ -84,7 +84,7 @@ namespace dyno
 		DEF_ARRAY_IN(Coord, RestShapeCenter, DeviceType::GPU, "");
 		DEF_ARRAY_IN(Matrix, RestShapeRotation, DeviceType::GPU, "");
 
-		// Optional: adjacency list for shapes, used when EnableAdjacentFilter is true
+		// Adjacency list for shapes, used when EnableAdjacentFilter is true
 		DEF_ARRAYLIST_IN(int, AdjacentShapes, DeviceType::GPU, "");
 
 		DEF_ARRAY_IN(int, Shape2TriOffsets, DeviceType::GPU, "");

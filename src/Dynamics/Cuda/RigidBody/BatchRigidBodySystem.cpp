@@ -12,6 +12,7 @@
 #include "Collision/NeighborMeshQuery.h"
 
 #include "RigidBody/Module/ContactsUnion.h"
+#include "RigidBody/Module/InstanceTransform.h"
 #include "RigidBody/Module/TJConstraintSolver.h"
 // #include "UrdfFunc.h"
 
@@ -48,12 +49,21 @@ namespace dyno
         // this->stateAttribute()->connect(elementQuery->inAttribute());
         // this->animationPipeline()->pushModule(elementQuery);
 
+        auto transformer = std::make_shared<InstanceTransform<DataType3f>>();
+		this->stateCenter()->connect(transformer->inCenter());
+		this->stateRotationMatrix()->connect(transformer->inRotationMatrix());
+		this->stateBindingPair()->connect(transformer->inBindingPair());
+		this->stateBindingTag()->connect(transformer->inBindingTag());
+		this->stateInstanceTransform()->connect(transformer->inInstanceTransform());
+		this->animationPipeline()->pushModule(transformer);
+
         auto tm2ts = std::make_shared<TextureMeshToTriangleSet<TDataType>>();
         this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
+        transformer->outInstanceTransform()->connect(tm2ts->inTransform());
         this->animationPipeline()->pushModule(tm2ts);
 
-        mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
-        // mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
+        // mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
+        mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
         
         tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
         this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
@@ -74,11 +84,29 @@ namespace dyno
         cdBV->outContacts()->connect(merge->inContactsB());
         this->animationPipeline()->pushModule(merge);
 
+        // auto transformer1 = std::make_shared<InstanceTransform<DataType3f>>();
+		// this->stateCenter()->connect(transformer1->inCenter());
+		// this->stateRotationMatrix()->connect(transformer1->inRotationMatrix());
+		// this->stateBindingPair()->connect(transformer1->inBindingPair());
+		// this->stateBindingTag()->connect(transformer1->inBindingTag());
+		// this->stateInstanceTransform()->connect(transformer1->inInstanceTransform());
+		// this->graphicsPipeline()->pushModule(transformer1);
+
+        // auto tm2ts1 = std::make_shared<TextureMeshToTriangleSet<TDataType>>();
+        // this->stateTextureMesh()->connect(tm2ts1->inTextureMesh());
+        // transformer1->outInstanceTransform()->connect(tm2ts1->inTransform());
+        // this->graphicsPipeline()->pushModule(tm2ts1);
+
+        // auto triRender = std::make_shared<GLSurfaceVisualModule>();
+		// triRender->varBaseColor()->setValue(Color(0, 0, 1));
+		// tm2ts1->outTriangleSet()->connect(triRender->inTriangleSet());
+		// this->graphicsPipeline()->pushModule(triRender);
+
         auto contatcTriSet = std::make_shared<GLSurfaceVisualModule>();
         contatcTriSet->setColor(Color(1.0f, 0.0f, 1.0f));
 	    contatcTriSet->setAlpha(1.0f);
-	    contatcTriSet->varUseVertexNormal()->setValue(false);
-	    contatcTriSet->varForceUpdate()->setValue(true);
+	    // contatcTriSet->varUseVertexNormal()->setValue(false);
+	    // contatcTriSet->varForceUpdate()->setValue(true);
 		this->statePotentialTriSet()->connect(contatcTriSet->inTriangleSet());
         this->graphicsPipeline()->pushModule(contatcTriSet);
 
@@ -186,28 +214,35 @@ namespace dyno
             return localAabb;
         };
 
+        // Calculate Local AABBs, rest centers and rest rotations for each mesh shape
         for (size_t l = 0; l < urdfShapes.size(); ++l)
         {
             const auto& shape = urdfShapes[l];
-            const auto& bbWorld = this->varVisualOrCollision()->getValue()
-                ? shape.T_collision_bb_world
-                : shape.T_visual_bb_world;
 
-            int shapeId = static_cast<int>(shape.visualShapeId);
+            int shapeId;
+            if (this->varVisualOrCollision()->getValue()) {
+                shapeId = static_cast<int>(shape.collisionShapeId);
+            } else {
+                shapeId = static_cast<int>(shape.visualShapeId);
+            }
+
             if (shapeId < 0 || static_cast<size_t>(shapeId) >= meshShapeCount)
                 continue;
 
+            // Get rest center and rotation
+            const auto& bbWorld = meshShapes[shapeId]->boundingTransform;
             restShapeCenters[shapeId] = bbWorld.translation();
             restShapeRotations[shapeId] = bbWorld.rotation();
 
+            // Compute local AABB
             if (l < this->urdfInfo.linkAABBs.size())
             {
                 shapeAabbsLocal[shapeId] = toLocalAabb(this->urdfInfo.linkAABBs[l], restShapeRotations[shapeId], restShapeCenters[shapeId]);
             }
         }
 
+        // Compute triangle index offsets for each mesh shape
         std::vector<int> shape2TriOffsets(meshShapeCount + 1, 0);
-        // Compute triangle offsets for each mesh shape
         for (size_t i = 0; i < meshShapes.size(); ++i)
         {
             shape2TriOffsets[i + 1] = shape2TriOffsets[i] + static_cast<int>(meshShapes[i]->vertexIndex.size());

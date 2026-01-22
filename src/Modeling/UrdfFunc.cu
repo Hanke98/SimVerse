@@ -391,6 +391,8 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             Vec3f lo( REAL_MAX);
             Vec3f hi(-REAL_MAX);
 
+            link.T_world = T_world_mesh;// need double check here!!!!!!
+
             for (const auto& tshape : shapes)
             {
                 const auto& mesh = tshape.mesh;
@@ -474,7 +476,6 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             mergedShape->boundingBox       = TAlignedBox3D<Real>(lo, hi);
             mergedShape->boundingTransform = Transform3f(shapeCenter, Mat3f::identityMatrix(), Vec3f(1));
             urdfInfo.linkAABBs.push_back(TAlignedBox3D<Real>(lo, hi));
-            std::cout << "[loadURDFTextureMesh] linkAABBs.size()=" << urdfInfo.linkAABBs.size() << std::endl;
 
             // The posture of link under world space
             Transform3f T_w_link = link.T_world;

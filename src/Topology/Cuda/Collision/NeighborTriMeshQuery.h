@@ -59,8 +59,8 @@ namespace dyno
 		// CSR: length = shapeCount + 1
 		DEF_ARRAY_IN(int, Shape2PatchOffsets, DeviceType::GPU, "");
 
-		// Optional: length = shapeCount, used when Shape2PatchOffsets is not provided
-		DEF_ARRAY_IN(int, Shape2PatchCounts, DeviceType::GPU, "");
+		// // Optional: length = shapeCount, used when Shape2PatchOffsets is not provided
+		// DEF_ARRAY_IN(int, Shape2PatchCounts, DeviceType::GPU, "");
 
 		// CSR: length = patchCount + 1
 		DEF_ARRAY_IN(int, Patch2TriOffsets, DeviceType::GPU, "");
@@ -75,7 +75,10 @@ namespace dyno
 		DEF_ARRAY_IN(Matrix, RotationMatrix, DeviceType::GPU, "");
 
 		// External mapping from shapeId to rigid body id 
-		// DEF_ARRAY_IN(int, Shape2RigidBodyIds, DeviceType::GPU, "");
+		DEF_ARRAY_IN(int, Shape2RigidBodyIds, DeviceType::GPU, "");
+
+		// // Indices mapping from shapeId to discrete element id
+		DEF_ARRAY_IN(int, Shape2ElementIdsDense, DeviceType::GPU, "");
 		
 		// Optional: mapping from texture mesh shapeId to discrete elementId
 		DEF_ARRAY_IN(PairUU, Shape2ElementIds, DeviceType::GPU, "");

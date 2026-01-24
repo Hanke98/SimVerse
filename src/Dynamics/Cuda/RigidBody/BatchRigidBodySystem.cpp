@@ -241,9 +241,27 @@ namespace dyno
             }
         }
 
+        // Populate texture mesh shape to rigid body id mapping
+        // TODO: The multi environment version
+        // for (size_t chainIndex = 0; chainIndex < this->ctrl_mb_chains.size(); ++chainIndex)
+        // {
+        //     const auto& mb = this->ctrl_mb_chains[chainIndex];
+        //     for (size_t bodyIndexIdx = 0; bodyIndexIdx < mb.body_indices.size(); ++bodyIndexIdx)
+        //     {
+        //         int bodyId = mb.body_indices[bodyIndexIdx];
+        //         this->mTextureMeshShape2RigidBodyIds.push_back(bodyId);
+        //     }
+        // }
+        const auto& mb = this->ctrl_mb_chains[0];
+        for (size_t bodyIndexIdx = 0; bodyIndexIdx < mb.body_indices.size(); ++bodyIndexIdx)
+        {
+            int bodyId = mb.body_indices[bodyIndexIdx];
+            this->mTextureMeshShape2RigidBodyIds.push_back(bodyId);
+        }
+
         // Compute triangle index offsets for each mesh shape
         std::vector<int> shape2TriOffsets(meshShapeCount + 1, 0);
-        for (size_t i = 0; i < meshShapes.size(); ++i)
+        for (size_t i = 0; i < meshShapeCount; ++i)
         {
             shape2TriOffsets[i + 1] = shape2TriOffsets[i] + static_cast<int>(meshShapes[i]->vertexIndex.size());
         }
@@ -310,6 +328,8 @@ namespace dyno
         mNeighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
         mNeighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
         mNeighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
+        mNeighborTriMeshQuery->inShape2ElementIdsDense()->assign(mTextureMeshShape2ElementIdsDense);
+        mNeighborTriMeshQuery->inShape2RigidBodyIds()->assign(mTextureMeshShape2RigidBodyIds);
         mNeighborTriMeshQuery->inShape2TriOffsets()->assign(shape2TriOffsets);
         
         // if (!mUrdfShapeRigidBodyIds.empty() && mUrdfShapeRigidBodyIds.size() == urdfShapes.size())

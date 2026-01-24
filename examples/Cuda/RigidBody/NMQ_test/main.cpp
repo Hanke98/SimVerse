@@ -4,7 +4,8 @@
 #include <SceneGraph.h>
 
 #include <RigidBody/ArticulatedBody.h>
-#include <RigidBody/MultibodySystem.h>
+// #include <RigidBody/MultibodySystem.h>
+#include <RigidBody/BatchRigidBodySystem.h>
 
 #include <GLRenderEngine.h>
 #include <GLPointVisualModule.h>
@@ -40,7 +41,7 @@ std::shared_ptr<SceneGraph> creatScene()
 	std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
 
 	auto multiRobotArm = scn->addNode(std::make_shared<BatchRigidBodySystem<DataType3f>>());
-	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_cube_sphere_complex.urdf");
+	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_cube_sphere.urdf");
 
 	std::vector<Transform3f> vehiclesTransform;
 	Transform3f Transform0(Vec3f(0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
@@ -58,6 +59,7 @@ std::shared_ptr<SceneGraph> creatScene()
     multiRobotArm->mTextureMeshShape2ElementIds.clear();
 
 	for (int i = 0; i < instances.size(); i++) {
+		BatchRigidBodySystem<DataType3f>::MulitBodyChainIndices mb;
 		for (int it = 0; it < texMesh->shapes().size(); it++) {
 			RigidBodyInfo rigidbody;
 
@@ -81,6 +83,7 @@ std::shared_ptr<SceneGraph> creatScene()
 
 			multiRobotArm->bindBox(actor, box, 1000);
 			multiRobotArm->bindShape(actor, Pair<uint, uint>(it, i));
+			mb.body_indices.push_back(actor->idx);
 
             int newBoxCount = multiRobotArm->getHostBoxesSize();
             uint boxLocalId = -1;
@@ -101,8 +104,10 @@ std::shared_ptr<SceneGraph> creatScene()
             Pair<uint, uint> entry;
             entry.first = it;
             entry.second = boxLocalId;
-            multiRobotArm->mTextureMeshShape2ElementIds.push_back(entry);
+            // multiRobotArm->mTextureMeshShape2ElementIds.push_back(entry);
+			multiRobotArm->pushBackShape2ElementIds(entry);
 		}
+		multiRobotArm->pushBackCtrlMBChain(mb);
 	}
 
     {
@@ -115,23 +120,12 @@ std::shared_ptr<SceneGraph> creatScene()
         {
             auto elementOffset = topo->calculateElementOffset();
             uint boxStart = (uint)elementOffset.boxIndex();
-            uint validCount = 0;
-            uint invalidCount = 0;
-            uint minId = static_cast<uint>(-1);
-            uint maxId = 0;
             for (auto& entry : multiRobotArm->mTextureMeshShape2ElementIds)
             {
                 entry.second = boxStart + entry.second;
-                validCount++;
-                if (entry.second < minId) minId = entry.second;
-                if (entry.second > maxId) maxId = entry.second;
+				multiRobotArm->pushBackShape2ElementIdsDense(entry.second);
             }
-            printf("[BatchRigidBodySystem] TextureMesh shape to element mapping ready (valid=%u, invalid=%u, boxStart=%u, min=%u, max=%u).\n",
-                validCount,
-                invalidCount,
-                boxStart,
-                validCount > 0 ? minId : 0,
-                validCount > 0 ? maxId : 0);
+            printf("[BatchRigidBodySystem] TextureMesh shape to element mapping ready.\n");
         }
     }
     multiRobotArm->setupNeighborTriMeshQueryFromUrdf();
@@ -172,4 +166,3 @@ int main()
 
 	return 0;
 }
-

@@ -119,6 +119,22 @@ public:
     void setupNeighborTriMeshQueryFromUrdf();
     void setupNeighborMeshQueryFromUrdf();
 
+    void pushBackCtrlMBChain(MulitBodyChainIndices mb_chain) {
+      ctrl_mb_chains.push_back(mb_chain);
+    }
+
+    void pushBackShape2ElementIds(Pair<uint, uint> entry) {
+      mTextureMeshShape2ElementIds.push_back(entry);
+    }
+
+    std::vector<Pair<uint, uint>>* getTextureMeshShape2ElementIds() {
+      return &mTextureMeshShape2ElementIds;
+    }
+
+    void pushBackShape2ElementIdsDense(int ElementId) {
+      mTextureMeshShape2ElementIdsDense.push_back(ElementId);
+    }
+
     std::vector<Pair<uint, uint>> mTextureMeshShape2ElementIds;
     // ------------------------------------
 
@@ -170,7 +186,8 @@ protected:
     std::vector<Matrix> initialRotations; // initial rotation matrix of all rigid bodies
 
     // std::vector<Pair<uint, uint>> mTextureMeshShape2ElementIds;
-    std::vector<int> mTextureMeshShape2RigidBodyIds; // Deprecated: keep for backward compatibility
+    std::vector<int> mTextureMeshShape2ElementIdsDense;
+    std::vector<int> mTextureMeshShape2RigidBodyIds; 
 
     DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
 

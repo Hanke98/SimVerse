@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <iostream>
 
 namespace dyno
 {
@@ -267,7 +268,7 @@ namespace dyno
         }
 
         std::vector<int> shape2PatchOffsets(urdfShapes.size() + 1, 0);
-        std::vector<AABB> patchAabbsLocal;
+        std::vector<AABB> patchAabbsRestWorld;
         std::vector<int> patch2TriOffsets;
         std::vector<int> patch2TriIndices;
         patch2TriOffsets.push_back(0);
@@ -291,7 +292,16 @@ namespace dyno
             // Loop through patches
             for (size_t p = 0; p < patchCount; ++p)
             {
-                patchAabbsLocal.push_back(toLocalAabb(shape.patchAABBs[p], restShapeRotations[shapeId], restShapeCenters[shapeId]));
+                const bool useRestWorldPatchAabbs = true;
+                if (useRestWorldPatchAabbs)
+                {
+                    patchAabbsRestWorld.push_back(shape.patchAABBs[p]);
+                }
+                else
+                {
+                    // Legacy local-pose path (kept for comparison / fallback).
+                    patchAabbsRestWorld.push_back(toLocalAabb(shape.patchAABBs[p], restShapeRotations[shapeId], restShapeCenters[shapeId]));
+                }
 
                 int begin = shape.patchOffsets[p];
                 int end = shape.patchOffsets[p + 1];
@@ -321,7 +331,7 @@ namespace dyno
         }
 
         mNeighborTriMeshQuery->inShapeAABBs()->assign(shapeAabbsLocal);
-        mNeighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsLocal);
+        mNeighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsRestWorld);
         mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);
         mNeighborTriMeshQuery->inPatch2TriOffsets()->assign(patch2TriOffsets);
         mNeighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
@@ -370,27 +380,6 @@ namespace dyno
             }
             mNeighborTriMeshQuery->inAdjacentShapes()->assign(convertedArray);
         }
-
-#ifndef NDEBUG
-        printf("[NeighborTriMeshQuery] shapes=%zu patches=%zu patchTris=%zu\n",
-               urdfShapes.size(),
-               patchAabbsLocal.size(),
-               patch2TriIndices.size());
-        printf("[NeighborTriMeshQuery] contacts=%u\n",
-               static_cast<unsigned int>(mNeighborTriMeshQuery->outContacts()->size()));
-        if (!shape2PatchOffsets.empty() && shape2PatchOffsets.back() != static_cast<int>(patchAabbsLocal.size()))
-        {
-            printf("[NeighborTriMeshQuery] shape2PatchOffsets.back()=%d patchCount=%zu\n",
-                   shape2PatchOffsets.back(),
-                   patchAabbsLocal.size());
-        }
-        if (!patch2TriOffsets.empty() && patch2TriOffsets.back() != static_cast<int>(patch2TriIndices.size()))
-        {
-            printf("[NeighborTriMeshQuery] patch2TriOffsets.back()=%d triCount=%zu\n",
-                   patch2TriOffsets.back(),
-                   patch2TriIndices.size());
-        }
-#endif
     }
 
     template<typename TDataType>

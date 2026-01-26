@@ -3,6 +3,7 @@
 #include "CollisionDetectionAlgorithm.h"
 #include "Collision/CollisionDetectionBroadPhase.h"
 #include "../../../Dynamics/Cuda/RigidBody/RigidBodySystem.h"
+#include "Vector/Vector3D.h"
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -68,6 +69,25 @@ namespace dyno
 		return worldAabb;
 	}
 
+	// Transform a world-space AABB into a target rest-pose coordinate system.
+	__device__ inline AABB NLQ_TransformWorldAabbToRest(const AABB& worldAabb, const Mat3f& RRest, const Vec3f& tRest)
+	{
+		Vec3f centerWorld = (worldAabb.v0 + worldAabb.v1) * Real(0.5);
+		Vec3f extentWorld = (worldAabb.v1 - worldAabb.v0) * Real(0.5);
+
+		Vec3f centerLocal = RRest.transpose() * (centerWorld - tRest);
+
+		Vec3f extentLocal;
+		extentLocal[0] = fabs(RRest(0, 0)) * extentWorld[0] + fabs(RRest(1, 0)) * extentWorld[1] + fabs(RRest(2, 0)) * extentWorld[2];
+		extentLocal[1] = fabs(RRest(0, 1)) * extentWorld[0] + fabs(RRest(1, 1)) * extentWorld[1] + fabs(RRest(2, 1)) * extentWorld[2];
+		extentLocal[2] = fabs(RRest(0, 2)) * extentWorld[0] + fabs(RRest(1, 2)) * extentWorld[1] + fabs(RRest(2, 2)) * extentWorld[2];
+
+		AABB localAabb;
+		localAabb.v0 = centerLocal - extentLocal;
+		localAabb.v1 = centerLocal + extentLocal;
+		return localAabb;
+	}
+
 	// inline bool NLQ_BuildShape2RigidBodyIds(
 	// 	const DArray<Pair<uint, uint>>& mapping,
 	// 	int shapeCount,
@@ -90,16 +110,16 @@ namespace dyno
 	// 	return true;
 	// }
 
-	template<typename Real, typename Coord, typename Matrix>
+	// template<typename Real, typename Coord, typename Matrix>
 	__device__ inline void NLQ_GetRelativeTransform(
 		int shapeId,
 		const DArray<int>& shape2RigidBodyIds,
-		const DArray<Coord>& centers,
-		const DArray<Matrix>& rotations,
-		const DArray<Coord>& restShapeCenters,
-		const DArray<Matrix>& restShapeRotations,
-		Matrix& RRel,
-		Coord& tRel,
+		const DArray<Vec3f>& centers,
+		const DArray<Mat3f>& rotations,
+		const DArray<Vec3f>& restShapeCenters,
+		const DArray<Mat3f>& restShapeRotations,
+		Mat3f& RRel,
+		Vec3f& tRel,
 		int& bodyId)
 	{
 		bodyId = shapeId;
@@ -108,16 +128,16 @@ namespace dyno
 
 		if (bodyId < 0 || bodyId >= centers.size() || bodyId >= rotations.size())
 		{
-			RRel = Matrix::identityMatrix();
-			tRel = Coord(Real(0));
+			RRel = Mat3f::identityMatrix();
+			tRel = Vec3f(Real(0));
 			return;
 		}
 
-		Coord tCurr = centers[bodyId];
-		Matrix RCurr = rotations[bodyId];
+		Vec3f tCurr = centers[bodyId];
+		Mat3f RCurr = rotations[bodyId];
 
-		Coord tRest = Coord(Real(0));
-		Matrix RRest = Matrix::identityMatrix();
+		Vec3f tRest = Vec3f(Real(0));
+		Mat3f RRest = Mat3f::identityMatrix();
 		if (shapeId >= 0 && shapeId < restShapeCenters.size())
 			tRest = restShapeCenters[shapeId];
 		if (shapeId >= 0 && shapeId < restShapeRotations.size())
@@ -127,16 +147,16 @@ namespace dyno
 		tRel = tCurr - RRel * tRest;
 	}
 
-	template<typename Real, typename Coord, typename Matrix>
+	// template<typename Real, typename Coord, typename Matrix>
 	inline void NLQ_GetRelativeTransformHost(
 		int shapeId,
 		const CArray<int>& shape2RigidBodyIds,
-		const CArray<Coord>& centers,
-		const CArray<Matrix>& rotations,
-		const CArray<Coord>& restShapeCenters,
-		const CArray<Matrix>& restShapeRotations,
-		Matrix& RRel,
-		Coord& tRel,
+		const CArray<Vec3f>& centers,
+		const CArray<Mat3f>& rotations,
+		const CArray<Vec3f>& restShapeCenters,
+		const CArray<Mat3f>& restShapeRotations,
+		Mat3f& RRel,
+		Vec3f& tRel,
 		int& bodyId)
 	{
 		bodyId = shapeId;
@@ -145,16 +165,16 @@ namespace dyno
 
 		if (bodyId < 0 || bodyId >= (int)centers.size() || bodyId >= (int)rotations.size())
 		{
-			RRel = Matrix::identityMatrix();
-			tRel = Coord(Real(0));
+			RRel = Mat3f::identityMatrix();
+			tRel = Vec3f(Real(0));
 			return;
 		}
 
-		Coord tCurr = centers[bodyId];
-		Matrix RCurr = rotations[bodyId];
+		Vec3f tCurr = centers[bodyId];
+		Mat3f RCurr = rotations[bodyId];
 
-		Coord tRest = Coord(Real(0));
-		Matrix RRest = Matrix::identityMatrix();
+		Vec3f tRest = Vec3f(Real(0));
+		Mat3f RRest = Mat3f::identityMatrix();
 		if (shapeId >= 0 && shapeId < (int)restShapeCenters.size())
 			tRest = restShapeCenters[shapeId];
 		if (shapeId >= 0 && shapeId < (int)restShapeRotations.size())
@@ -162,6 +182,148 @@ namespace dyno
 
 		RRel = RCurr * RRest.transpose();
 		tRel = tCurr - RRel * tRest;
+	}
+
+	__global__ void NLQ_ComputeShapeRestTransforms(
+		DArray<Mat3f> outR,
+		DArray<Vec3f> outT,
+		DArray<Vec3f> centers,
+		DArray<Mat3f> rotations,
+		DArray<Vec3f> restShapeCenters,
+		DArray<Mat3f> restShapeRotations,
+		DArray<int> shape2RigidBodyIds)
+	{
+		int shapeId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (shapeId >= outR.size() || shapeId >= outT.size()) return;
+
+		Mat3f RRel = Mat3f::identityMatrix();
+		Vec3f tRel = Vec3f(Real(0));
+		int bodyId = shapeId;
+		NLQ_GetRelativeTransform(
+			shapeId,
+			shape2RigidBodyIds,
+			centers,
+			rotations,
+			restShapeCenters,
+			restShapeRotations,
+			RRel,
+			tRel,
+			bodyId);
+
+		outR[shapeId] = RRel;
+		outT[shapeId] = tRel;
+	}
+
+	__global__ void NLQ_MarkActiveTargets(
+		DArray<int> activeFlags,
+		DArray<int> targetCounts,
+		int shapeCount)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= shapeCount) return;
+		activeFlags[tId] = targetCounts[tId] > 0 ? 1 : 0;
+	}
+
+	__global__ void NLQ_CompactActiveTargets(
+		DArray<int> activeIds,
+		DArray<int> activeFlags,
+		DArray<int> activeOffsets,
+		int shapeCount)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= shapeCount) return;
+		if (activeFlags[tId] == 0) return;
+		int out = activeOffsets[tId];
+		if (out >= 0 && out < activeIds.size())
+			activeIds[out] = tId;
+	}
+
+	__global__ void NLQ_BuildActiveTargetInfos(
+		DArray<TargetGroupInfo> infos,
+		DArray<int> activeIds,
+		DArray<int> targetOffsets,
+		DArray<int> targetCounts,
+		DArray<int> shape2PatchOffsets,
+		int patchCount)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= activeIds.size() || tId >= infos.size()) return;
+		int target = activeIds[tId];
+		int groupStart = target >= 0 && target < targetOffsets.size() ? targetOffsets[target] : -1;
+		int groupCount = target >= 0 && target < targetCounts.size() ? targetCounts[target] : 0;
+		int tBegin = (target + 1 < shape2PatchOffsets.size()) ? NLQ_ClampInt(shape2PatchOffsets[target], 0, patchCount) : 0;
+		int tEnd = (target + 1 < shape2PatchOffsets.size()) ? NLQ_ClampInt(shape2PatchOffsets[target + 1], 0, patchCount) : 0;
+		int tCount = tEnd - tBegin;
+		TargetGroupInfo info;
+		info.targetId = target;
+		info.groupStart = groupStart;
+		info.groupCount = groupCount;
+		info.tBegin = tBegin;
+		info.tCount = tCount;
+		infos[tId] = info;
+	}
+
+	__global__ void NLQ_CountGroupSourcePatches(
+		DArray<int> counts,
+		DArray<int> groupedSources,
+		DArray<int> shape2PatchOffsets,
+		int patchCount,
+		int groupStart,
+		int groupCount)
+	{
+		int localId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (localId >= groupCount || localId >= counts.size()) return;
+		int idx = groupStart + localId;
+		if (idx < 0 || idx >= groupedSources.size())
+		{
+			counts[localId] = 0;
+			return;
+		}
+		int shapeId = groupedSources[idx];
+		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size())
+		{
+			counts[localId] = 0;
+			return;
+		}
+		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount);
+		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount);
+		int sCount = sEnd - sBegin;
+		counts[localId] = sCount > 0 ? sCount : 0;
+	}
+
+	__global__ void NLQ_FillGroupPatchData(
+		DArray<AABB> outAabbs,
+		DArray<uint> outIds,
+		DArray<AABB> patchAabbsWorld,
+		DArray<uint> patchGlobalIds,
+		DArray<int> groupedSources,
+		DArray<int> shape2PatchOffsets,
+		DArray<int> offsets,
+		int patchCount,
+		int groupStart,
+		int groupCount)
+	{
+		int localId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (localId >= groupCount || localId >= offsets.size()) return;
+		int idx = groupStart + localId;
+		if (idx < 0 || idx >= groupedSources.size()) return;
+		int shapeId = groupedSources[idx];
+		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size()) return;
+		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount);
+		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount);
+		int sCount = sEnd - sBegin;
+		if (sCount <= 0) return;
+		int outBase = offsets[localId];
+		for (int i = 0; i < sCount; ++i)
+		{
+			int srcIdx = sBegin + i;
+			int outIdx = outBase + i;
+			if (srcIdx < 0 || srcIdx >= patchAabbsWorld.size()) continue;
+			if (outIdx < 0 || outIdx >= outAabbs.size()) continue;
+			outAabbs[outIdx] = patchAabbsWorld[srcIdx];
+			if (outIdx < outIds.size() && srcIdx < patchGlobalIds.size())
+				outIds[outIdx] = patchGlobalIds[srcIdx];
+		}
 	}
 
 	// template<typename Real, typename Coord, typename Matrix, typename AABB>
@@ -242,6 +404,67 @@ namespace dyno
 			localAabbs[patchId],
 			rotations[bodyId],
 			centers[bodyId]);
+	}
+
+	__global__ void NLQ_UpdatePatchAabbsFromRestWorld(
+		DArray<AABB> worldAabbs,
+		DArray<Vec3f> relativeCenter,
+		DArray<Mat3f> relativeRotation,
+		DArray<AABB> restWorldAabbs,
+		DArray<uint> patch2Shape,
+		DArray<Vec3f> centers,
+		DArray<Mat3f> rotations,
+		DArray<Vec3f> restShapeCenters,
+		DArray<Mat3f> restShapeRotations,
+		DArray<int> shape2RigidBodyIds)
+	{
+		int patchId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (patchId >= restWorldAabbs.size() || patchId >= worldAabbs.size())
+			return;
+
+		int shapeId = patchId < patch2Shape.size() ? (int)patch2Shape[patchId] : -1;
+		if (shapeId < 0)
+		{
+			return;
+		}
+
+		Mat3f RRel = Mat3f::identityMatrix();
+		Vec3f tRel = Vec3f(Real(0));
+		int bodyId = shapeId;
+
+		NLQ_GetRelativeTransform(
+			shapeId,
+			shape2RigidBodyIds,
+			centers,
+			rotations,
+			restShapeCenters,
+			restShapeRotations,
+			RRel,
+			tRel,
+			bodyId);
+			
+		worldAabbs[patchId] = NLQ_TransformLocalAabbToWorld(
+			restWorldAabbs[patchId],
+			RRel,
+			tRel);
+		
+		relativeCenter[patchId] = tRel;
+		relativeRotation[patchId] = RRel;
+		
+	}
+
+	__global__ void NLQ_TransformPatchAabbsToTargetRest(
+		DArray<AABB> aabbs,
+		DArray<Mat3f> shapeRestR,
+		DArray<Vec3f> shapeRestT,
+		int targetId)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= aabbs.size()) return;
+		if (targetId < 0 || targetId >= shapeRestR.size() || targetId >= shapeRestT.size()) return;
+		Mat3f RRest = shapeRestR[targetId];
+		Vec3f tRest = shapeRestT[targetId];
+		aabbs[tId] = NLQ_TransformWorldAabbToRest(aabbs[tId], RRest, tRest);
 	}
 
 	__global__ void NLQ_MarkTouchedShapesFromPairs(
@@ -1024,7 +1247,7 @@ namespace dyno
 		if (warpId >= triContactList.size()) return;
 
 		int triIdCurrent = triListTriIds[warpId];
-		printf("Warp %d, Lane %d, TriIdCurrent %d\n", warpId, lane, triIdCurrent);
+
 		int side = triListSide[warpId];
 		if (triIdCurrent < 0 || triIdCurrent >= triCount)
 		{
@@ -1432,7 +1655,7 @@ namespace dyno
 		// if (shape0 >= 0)
 		// {	
 		// 	// Get relative transform of shape0
-		// 	NLQ_GetRelativeTransform<Real, Coord, Matrix>(
+		// 	NLQ_GetRelativeTransform(
 		// 		shape0,
 		// 		shape2RigidBodyIds,
 		// 		centers,
@@ -1447,7 +1670,7 @@ namespace dyno
 		// if (shape1 >= 0)
 		// {
 		// 	// Get relative transform of shape1
-		// 	NLQ_GetRelativeTransform<Real, Coord, Matrix>(
+		// 	NLQ_GetRelativeTransform(
 		// 		shape1,
 		// 		shape2RigidBodyIds,
 		// 		centers,
@@ -1557,7 +1780,7 @@ namespace dyno
 
 		// if (shape0 >= 0)
 		// {
-		// 	NLQ_GetRelativeTransform<Real, Coord, Matrix>(
+		// 	NLQ_GetRelativeTransform(
 		// 		shape0,
 		// 		shape2RigidBodyIds,
 		// 		centers,
@@ -1571,7 +1794,7 @@ namespace dyno
 
 		// if (shape1 >= 0)
 		// {
-		// 	NLQ_GetRelativeTransform<Real, Coord, Matrix>(
+		// 	NLQ_GetRelativeTransform(
 		// 		shape1,
 		// 		shape2RigidBodyIds,
 		// 		centers,
@@ -1656,6 +1879,7 @@ namespace dyno
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
 		this->varDHead()->setValue(Real(0));
+		this->mPatchBroadPhaseCD = std::make_shared<CollisionDetectionBroadPhase<TDataType>>();
 	}
 
 	template<typename TDataType>
@@ -2303,13 +2527,6 @@ namespace dyno
 
 		std::cout << "[NeighborTriMeshQuery] broadPhase found " << total << " shape pairs." << std::endl;
 
-		mUseBroadPhasePatchPairs = false;
-		if (this->varEnableBroadPhasePatchPairs()->getValue())
-		{
-			int patchCount = (int)this->inPatchAABBs()->size();
-			mUseBroadPhasePatchPairs = buildPatchPairsFromContactList(shapeCount, patchCount);
-		}
-
 		return true;
 	}
 
@@ -2317,11 +2534,8 @@ namespace dyno
 	bool NeighborTriMeshQuery<TDataType>::middlePhase()
 	{
 		printf("[NeighborTriMeshQuery] MiddlePhase started.\n");
-		if (mUseBroadPhasePatchPairs)
-		{
-			return this->outPotentialPatchPairs()->size() > 0;
-		}
 
+		// Get potential shape pairs from broad phase
 		auto& shapePairs = this->outPotentialShapePairs()->getData();
 		if (shapePairs.size() == 0)
 		{
@@ -2329,6 +2543,7 @@ namespace dyno
 			return false;
 		}
 
+		// Get all Patch AABBs in rest-world space
 		auto& patchAabbs = this->inPatchAABBs()->getData();
 		int patchCount = (int)patchAabbs.size();
 		if (patchCount <= 0)
@@ -2337,8 +2552,12 @@ namespace dyno
 			return false;
 		}
 
-		if (mPatchAabbsWorld.size() != (uint)patchCount)
-			mPatchAabbsWorld.resize(patchCount);
+		// Initialize Patch AABBs relative transforms from rest-world space to current-world space
+		if (mPatchRelCenterTrans.size() != (uint)patchCount)
+			mPatchRelCenterTrans.resize(patchCount);
+
+		if (mPatchRelRotationTrans.size() != (uint)patchCount)
+			mPatchRelRotationTrans.resize(patchCount);
 
 		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
 		if (shapeCount <= 0)
@@ -2347,19 +2566,44 @@ namespace dyno
 			return false;
 		}
 
-		// update patch aabbs in world space
-		// Full update is unnecessary; May replaced by selective update driven by outPotentialShapePairs.
-		{
-			cuExecute((uint)patchCount,
-				NLQ_UpdatePatchAabbs,
-				mPatchAabbsWorld,
-				patchAabbs,
-				mPatch2Shape,
-				this->inCenter()->getData(),
-				this->inRotationMatrix()->getData(),
-				mShape2RigidBodyIds);
-		}
-		printf ("[NeighborTriMeshQuery] Patch AABBs updated.\n");
+		// Compute per-shape AABBs relative transforms from rest-world space to current-world space 
+		if (mShapeRestR.size() != (uint)shapeCount)
+			mShapeRestR.resize(shapeCount);
+		if (mShapeRestT.size() != (uint)shapeCount)
+			mShapeRestT.resize(shapeCount);
+		cuExecute((uint)shapeCount,
+			NLQ_ComputeShapeRestTransforms,
+			mShapeRestR,
+			mShapeRestT,
+			this->inCenter()->getData(),
+			this->inRotationMatrix()->getData(),
+			this->inRestShapeCenter()->getData(),
+			this->inRestShapeRotation()->getData(),
+			mShape2RigidBodyIds);
+		cuSynchronize();
+
+		// Ensure mPatchAabbsWorld is properly sized before the kernel writes to it
+		if (mPatchAabbsWorld.size() != patchCount)
+			mPatchAabbsWorld.resize(patchCount);
+
+		// Update patch AABBs in world space (current pose) from rest-world patch AABBs.
+		// Notd: Is full update is necessary?
+		cuExecute((uint)patchCount,
+			NLQ_UpdatePatchAabbsFromRestWorld,
+			mPatchAabbsWorld,
+			mPatchRelCenterTrans,
+			mPatchRelRotationTrans,
+			patchAabbs,
+			mPatch2Shape,
+			this->inCenter()->getData(),
+			this->inRotationMatrix()->getData(),
+			this->inRestShapeCenter()->getData(),
+			this->inRestShapeRotation()->getData(),
+			mShape2RigidBodyIds);
+		cuSynchronize();
+
+
+		// Patch AABBs updated
 		// if (mTouchedShapeFlags.size() != (uint)shapeCount)
 		// 	mTouchedShapeFlags.resize(shapeCount);
 		// mTouchedShapeFlags.reset();
@@ -2407,10 +2651,6 @@ namespace dyno
 			mPatch2GlobalIds.resize(patchCount);
 			cuExecute((uint)patchCount, NLQ_BuildPatchGlobalIds, mPatch2GlobalIds);
 		}
-		printf ("[NeighborTriMeshQuery] Patch global IDs built.\n");
-#ifndef NDEBUG
-		printf("[NeighborTriMeshQuery] middlePhase shapePairs=%u\n", (uint)shapePairs.size());
-#endif
 
 		if (mTargetShapeCounts.size() != (uint)shapeCount)
 			mTargetShapeCounts.resize(shapeCount);
@@ -2422,7 +2662,7 @@ namespace dyno
 			mTargetShapeCounts,
 			shapePairs,
 			shapeCount);
-		printf("[NeighborTriMeshQuery] Target shape counts computed.\n");
+		// Target shape counts computed
 		// Exclusive scan to build target shape offsets
 		if (mTargetShapeOffsets.size() != (uint)shapeCount)
 			mTargetShapeOffsets.resize(shapeCount);
@@ -2446,15 +2686,48 @@ namespace dyno
 			mTargetShapeWrite,
 			shapePairs,
 			shapeCount);
-		printf("[NeighborTriMeshQuery] Target to source shape mapping built.\n");
-		CArray<int> hTargetCounts;
-		CArray<int> hTargetOffsets;
-		CArray<int> hGroupedSources;
-		CArray<int> hShape2PatchOffsets;
-		hTargetCounts.assign(mTargetShapeCounts); // Number of source shapes associated with each target shape
-		hTargetOffsets.assign(mTargetShapeOffsets); // Starting source-shape index for each target shape
-		hGroupedSources.assign(mTarget2SourceShapes); // Flattened source shapes grouped by target shapes
-		hShape2PatchOffsets.assign(mShape2PatchOffsets); // Shape to patch CSR offsets
+		// Target to source shape mapping built
+		// Build compact active target list on GPU to avoid large device->host copies
+		if (mTargetActiveFlags.size() != (uint)shapeCount)
+			mTargetActiveFlags.resize(shapeCount);
+		if (mTargetActiveOffsets.size() != (uint)shapeCount)
+			mTargetActiveOffsets.resize(shapeCount);
+		mTargetActiveFlags.reset();
+		cuExecute((uint)shapeCount,
+			NLQ_MarkActiveTargets,
+			mTargetActiveFlags,
+			mTargetShapeCounts,
+			shapeCount);
+		int activeTargetCount = mReduce.accumulate(mTargetActiveFlags.begin(), mTargetActiveFlags.size());
+		if (activeTargetCount <= 0)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+		mTargetActiveOffsets.assign(mTargetActiveFlags);
+		mScan.exclusive(mTargetActiveOffsets, true);
+		if (mTargetActiveIds.size() != (uint)activeTargetCount)
+			mTargetActiveIds.resize(activeTargetCount);
+		cuExecute((uint)shapeCount,
+			NLQ_CompactActiveTargets,
+			mTargetActiveIds,
+			mTargetActiveFlags,
+			mTargetActiveOffsets,
+			shapeCount);
+		if (mActiveTargetInfos.size() != (uint)activeTargetCount)
+			mActiveTargetInfos.resize(activeTargetCount);
+		cuExecute((uint)activeTargetCount,
+			NLQ_BuildActiveTargetInfos,
+			mActiveTargetInfos,
+			mTargetActiveIds,
+			mTargetShapeOffsets,
+			mTargetShapeCounts,
+			mShape2PatchOffsets,
+			patchCount);
+		cuSynchronize();
+
+		CArray<TargetGroupInfo> hActiveInfos;
+		hActiveInfos.assign(mActiveTargetInfos);
 
 		CArray<int> hTargetPairCounts;
 		hTargetPairCounts.assign((uint)shapeCount, 0);
@@ -2462,35 +2735,21 @@ namespace dyno
 		std::vector<std::unique_ptr<DArray<PairUU>>> targetPairs; // Patch pairs per target shape
 		targetPairs.resize(shapeCount);
 
-		auto clampInt = [](int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); };
-
 		// NOTE: CollisionDetectionBroadPhase uses internal buffers and is not thread-safe for
 		// concurrent update() calls, so targetShape groups are processed sequentially here.
 		// The target->sources grouping keeps the layout ready for batched parallelization.
-		for (int target = 0; target < shapeCount; ++target)
+		for (uint ai = 0; ai < hActiveInfos.size(); ++ai)
 		{
-			// Read how many source shapes are grouped for this target shape
-			int groupCount = hTargetCounts[target];
-			// Skip target shapes with no source shapes
+			TargetGroupInfo info = hActiveInfos[ai];
+			int target = info.targetId;       // target shape ID
+			int groupStart = info.groupStart; // start index in mTarget2SourceShapes
+			int groupCount = info.groupCount; // number of source shapes in group
+			int tBegin = info.tBegin;         // target shape's first patch index
+			int tCount = info.tCount;         // target shape's patch count
 			if (groupCount <= 0)
 				continue;
-
-			// Read starting source shape index for this target shape
-			int groupStart = hTargetOffsets[target];
-			// Skip invalid target shapes
-			if (groupStart < 0 || groupStart >= (int)hGroupedSources.size())
+			if (groupStart < 0 || groupStart >= (int)mTarget2SourceShapes.size())
 				continue;
-
-			// Calculate ending source shape index for this target shape
-			int groupEnd = groupStart + groupCount;
-			// Clamp ending index to valid range
-			if (groupEnd > (int)hGroupedSources.size())
-				groupEnd = (int)hGroupedSources.size();
-
-			// Calculate how many patches are associated with this target shape
-			int tBegin = clampInt(hShape2PatchOffsets[target], 0, patchCount);
-			int tEnd = clampInt(hShape2PatchOffsets[target + 1], 0, patchCount);
-			int tCount = tEnd - tBegin;
 			// Skip target shapes with no patches
 			if (tCount <= 0)
 				continue;
@@ -2498,73 +2757,62 @@ namespace dyno
 			// Assign target shape's patch AABBs
 			if (mTargetPatchAabbs.size() != (uint)tCount)
 				mTargetPatchAabbs.resize(tCount);
-			mTargetPatchAabbs.assign(mPatchAabbsWorld, tCount, 0, tBegin);
+			mTargetPatchAabbs.assign(patchAabbs, tCount, 0, tBegin);
 
-			int sourceTotal = 0;
-			for (int i = groupStart; i < groupEnd; ++i)
-			{
-				// Get source shape id
-				int sourceShape = hGroupedSources[i];
-				// Skip invalid source shapes
-				if (sourceShape < 0 || sourceShape + 1 >= (int)hShape2PatchOffsets.size())
-					continue;
-
-				int sBegin = clampInt(hShape2PatchOffsets[sourceShape], 0, patchCount);
-				int sEnd = clampInt(hShape2PatchOffsets[sourceShape + 1], 0, patchCount);
-				// Count number of patches for this source shape
-				if (sEnd > sBegin)
-					sourceTotal += (sEnd - sBegin);
-			}
-
-			// Skip target shapes with no source patches
+			// Build source patch lists on GPU for this target
+			if (groupCount <= 0)
+				continue;
+			if (mGroupSourcePatchCounts.size() != (uint)groupCount)
+				mGroupSourcePatchCounts.resize(groupCount);
+			if (mGroupSourcePatchOffsets.size() != (uint)groupCount)
+				mGroupSourcePatchOffsets.resize(groupCount);
+			cuExecute((uint)groupCount,
+				NLQ_CountGroupSourcePatches,
+				mGroupSourcePatchCounts,
+				mTarget2SourceShapes,
+				mShape2PatchOffsets,
+				patchCount,
+				groupStart,
+				groupCount);
+			int sourceTotal = mReduce.accumulate(mGroupSourcePatchCounts.begin(), mGroupSourcePatchCounts.size());
 			if (sourceTotal <= 0)
 				continue;
-
 			if (mSourcePatchAabbs.size() != (uint)sourceTotal)
 				mSourcePatchAabbs.resize(sourceTotal);
 			if (mSource2PatchIds.size() != (uint)sourceTotal)
 				mSource2PatchIds.resize(sourceTotal);
+			mGroupSourcePatchOffsets.assign(mGroupSourcePatchCounts);
+			mScan.exclusive(mGroupSourcePatchOffsets, true);
+			cuExecute((uint)groupCount,
+				NLQ_FillGroupPatchData,
+				mSourcePatchAabbs,
+				mSource2PatchIds,
+				mPatchAabbsWorld,
+				mPatch2GlobalIds,
+				mTarget2SourceShapes,
+				mShape2PatchOffsets,
+				mGroupSourcePatchOffsets,
+				patchCount,
+				groupStart,
+				groupCount);
 
-			int dstOffset = 0;
-			for (int i = groupStart; i < groupEnd; ++i)
+			// Keep source patch AABBs in world coordinates to match target rest-world frame.
+			if ( sourceTotal > 0) // useTargetRestLocal &&
 			{
-				// Get source shape id
-				int sourceShape = hGroupedSources[i];
-				if (sourceShape < 0 || sourceShape + 1 >= (int)hShape2PatchOffsets.size())
+				// Check if mSourcePatchAabbs is allocated
+				if (mSourcePatchAabbs.size() == 0 || mSourcePatchAabbs.isEmpty()) {
+					printf("[NeighborTriMeshQuery] ERROR: mSourcePatchAabbs is empty or not allocated\n");
 					continue;
-				// Get source shape's patch range
-				int sBegin = clampInt(hShape2PatchOffsets[sourceShape], 0, patchCount);
-				int sEnd = clampInt(hShape2PatchOffsets[sourceShape + 1], 0, patchCount);
-				int sCount = sEnd - sBegin;
-				if (sCount <= 0)
-					continue;
-
-				// Clamp count to avoid overflow
-				if (dstOffset + sCount > sourceTotal) {
-					sCount = sourceTotal - dstOffset;
-					printf("[NeighborTriMeshQuery] middlePhase: clamped source patch count for shape %d (sCount=%d).\n", sourceShape, sCount);
 				}
-				if (sCount <= 0)
-					break;
-
-				// Assign source shape's patch AABBs and global IDs
-				mSourcePatchAabbs.assign(mPatchAabbsWorld, sCount, (uint)dstOffset, (uint)sBegin);
-				mSource2PatchIds.assign(mPatch2GlobalIds, sCount, (uint)dstOffset, (uint)sBegin);
-				// TODO: update patch AABBs of mSource2PatchIds to world space
-				dstOffset += sCount;
+				
+				cuExecute((uint)sourceTotal,
+					NLQ_TransformPatchAabbsToTargetRest,
+					mSourcePatchAabbs,
+					mShapeRestR,
+					mShapeRestT,
+					target);
 			}
-
-			if (dstOffset <= 0)
-				continue;
-
-			// Shrink to actual filled size to avoid using uninitialized tail entries
-			if (dstOffset < sourceTotal)
-			{
-				mSourcePatchAabbs.resize(dstOffset);
-				mSource2PatchIds.resize(dstOffset);
-				sourceTotal = dstOffset;
-			}
-
+			
 			// BVH traversal assumes at least two target nodes; handle single-patch targets directly.
 			if (tCount == 1)
 			{
@@ -2605,7 +2853,7 @@ namespace dyno
 					contactCount,
 					contactCountCpy);
 
-				printf("[NeighborTriMeshQuery] Target shape %d: found %d patch pairs.\n", target, total);
+				// Patch pairs found for this target
 				targetPairs[target] = std::move(pairs);
 
 				contactCountCpy.clear();
@@ -2613,31 +2861,10 @@ namespace dyno
 				continue;
 			}
 
-			// // broad phase again at patch level between source patches and target patches
-			// this->mBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
-			// this->mBroadPhaseCD->varSelfCollision()->setValue(false);
-			// this->mBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
-			// this->mBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
-
-			// auto type = this->varSpatial()->getDataPtr()->currentKey();
-			// switch (type)
-			// {
-			// case Spatial::BVH:
-			// 	this->mBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
-			// 	break;
-			// case Spatial::OCTREE:
-			// 	this->mBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::Octree);
-			// 	break;
-			// default:
-			// 	break;
-			// }
-
-			// this->mBroadPhaseCD->update();
-			// auto& contactList = this->mBroadPhaseCD->outContactList()->getData();
-
-			auto patchBroadPhaseCD = std::make_shared<CollisionDetectionBroadPhase<TDataType>>();
-            patchBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
-            patchBroadPhaseCD->varSelfCollision()->setValue(false);
+			auto patchBroadPhaseCD = this->mPatchBroadPhaseCD;
+			patchBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
+			patchBroadPhaseCD->varSelfCollision()->setValue(false);
+			
             patchBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
             patchBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
 			patchBroadPhaseCD->inSource()->tick();
@@ -2658,19 +2885,11 @@ namespace dyno
             }
 
             patchBroadPhaseCD->update();
-			cudaError_t e = cudaGetLastError();
-			if (e != cudaSuccess) {
-				printf("[PatchBroadPhase] launch error: %s\n", cudaGetErrorString(e));
-			}
-			cuSynchronize();
-			printf("[NeighborTriMeshQuery] BroadPhase at patch level for target shape %d completed.\n", target);
-			// if contactList is empty, skip
+
 			auto& contactList = patchBroadPhaseCD->outContactList()->getData();
 			if (contactList.elementSize() == 0)
 			{
-				printf("[NeighborTriMeshQuery] No contact detected.\n");
-				// hTargetPairCounts[target] = 0;
-				// targetPairs[target] = nullptr;
+				// No contact detected
 				continue;
 			}
 
@@ -2683,8 +2902,7 @@ namespace dyno
 				NLQ_CountContactList,
 				contactCount,
 				contactList);
-			cuSynchronize();
-			printf("[NeighborTriMeshQuery] Contact list for target shape %d counted.\n", target);
+			// Contact list counted
 			// reduce contact counts to get total patch pairs for this target shape
 			int total = mReduce.accumulate(contactCount.begin(), contactCount.size());
 			hTargetPairCounts[target] = total; // Store total patch pairs for this target shape
@@ -2711,7 +2929,7 @@ namespace dyno
 				mSource2PatchIds,
 				tBegin,
 				tCount);
-			printf("[NeighborTriMeshQuery] Target shape %d: found %d patch pairs.\n", target, total);
+			// Patch pairs found for this target
 			targetPairs[target] = std::move(pairs);
 
 			contactCountCpy.clear();
@@ -2754,9 +2972,7 @@ namespace dyno
 			targetPairs[i].reset();
 		}
 
-#ifndef NDEBUG
-		printf("[NeighborTriMeshQuery] middlePhase patchPairs=%d\n", totalPairs);
-#endif
+
 		printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
 		return true;
 
@@ -2880,7 +3096,7 @@ namespace dyno
 
 		DArrayList<int> triContactList;
 		// Resize each list to capacity 32. Unused slots contain undefined values but are ignored by size().
-		// TODO: To optimize memory, a Two-Pass (Count-Scan-Write) approach could be used to build a compact CSR array.
+		// TODO: To optimize memory, a CSR approach could be used to build a compact array. However, maybe it will slow down the performance?
 		triContactList.resize((uint)totalTriLists, 32);
 
 		DArray<int> triListTriIds;
@@ -3153,7 +3369,7 @@ namespace dyno
 			int bodyId0 = shape0;
 			int bodyId1 = shape1;
 
-			// NLQ_GetRelativeTransformHost<Real, Coord, Matrix>(
+			// NLQ_GetRelativeTransformHost(
 			// 	shape0,
 			// 	hShape2Rigid,
 			// 	hCenters,
@@ -3164,7 +3380,7 @@ namespace dyno
 			// 	tRel0,
 			// 	bodyId0);
 
-			// NLQ_GetRelativeTransformHost<Real, Coord, Matrix>(
+			// NLQ_GetRelativeTransformHost(
 			// 	shape1,
 			// 	hShape2Rigid,
 			// 	hCenters,

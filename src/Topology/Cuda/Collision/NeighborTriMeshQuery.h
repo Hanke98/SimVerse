@@ -15,9 +15,20 @@
 #include "Topology/DiscreteElements.h"
 
 #include "NeighborElementQuery.h"
+#include "Vector/Vector3D.h"
+#include <memory>
 namespace dyno
 {
 	template<typename TDataType> class CollisionDetectionBroadPhase;
+
+	struct TargetGroupInfo
+	{
+		int targetId;
+		int groupStart;
+		int groupCount;
+		int tBegin;
+		int tCount;
+	};
 
 	/**
 	 * @brief A class implementation to find neighboring shapes for shape/rigid body collision
@@ -54,6 +65,7 @@ namespace dyno
 
 		DEF_ARRAY_IN(AABB, ShapeAABBs, DeviceType::GPU, "");
 
+		// Patch AABBs in world-space rest pose coordinates.
 		DEF_ARRAY_IN(AABB, PatchAABBs, DeviceType::GPU, "");
 
 		// CSR: length = shapeCount + 1
@@ -131,6 +143,17 @@ namespace dyno
 		DArray<int> mTargetShapeOffsets;
 		DArray<int> mTargetShapeWrite;
 		DArray<int> mTarget2SourceShapes;
+		DArray<Vec3f> mPatchRelCenterTrans;
+		DArray<Mat3f> mPatchRelRotationTrans;
+		DArray<Vec3f> mShapeRestT;
+		DArray<Mat3f> mShapeRestR;
+		DArray<int> mTargetActiveFlags;
+		DArray<int> mTargetActiveOffsets;
+		DArray<int> mTargetActiveIds;
+		DArray<TargetGroupInfo> mActiveTargetInfos;
+		DArray<int> mGroupSourcePatchCounts;
+		DArray<int> mGroupSourcePatchOffsets;
+		std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> mPatchBroadPhaseCD;
 
 		bool mMappingReady = false;
 		bool mWarnedEmptyMapping = false;

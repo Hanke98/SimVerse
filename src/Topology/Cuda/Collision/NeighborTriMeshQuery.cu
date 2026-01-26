@@ -412,11 +412,8 @@ namespace dyno
 		DArray<Mat3f> relativeRotation,
 		DArray<AABB> restWorldAabbs,
 		DArray<uint> patch2Shape,
-		DArray<Vec3f> centers,
-		DArray<Mat3f> rotations,
-		DArray<Vec3f> restShapeCenters,
-		DArray<Mat3f> restShapeRotations,
-		DArray<int> shape2RigidBodyIds)
+		DArray<Mat3f> shapeRestR,
+		DArray<Vec3f> shapeRestT)
 	{
 		int patchId = threadIdx.x + (blockIdx.x * blockDim.x);
 		if (patchId >= restWorldAabbs.size() || patchId >= worldAabbs.size())
@@ -430,18 +427,11 @@ namespace dyno
 
 		Mat3f RRel = Mat3f::identityMatrix();
 		Vec3f tRel = Vec3f(Real(0));
-		int bodyId = shapeId;
-
-		NLQ_GetRelativeTransform(
-			shapeId,
-			shape2RigidBodyIds,
-			centers,
-			rotations,
-			restShapeCenters,
-			restShapeRotations,
-			RRel,
-			tRel,
-			bodyId);
+		if (shapeId >= 0 && shapeId < shapeRestR.size() && shapeId < shapeRestT.size())
+		{
+			RRel = shapeRestR[shapeId];
+			tRel = shapeRestT[shapeId];
+		}
 			
 		worldAabbs[patchId] = NLQ_TransformLocalAabbToWorld(
 			restWorldAabbs[patchId],
@@ -2595,11 +2585,8 @@ namespace dyno
 			mPatchRelRotationTrans,
 			patchAabbs,
 			mPatch2Shape,
-			this->inCenter()->getData(),
-			this->inRotationMatrix()->getData(),
-			this->inRestShapeCenter()->getData(),
-			this->inRestShapeRotation()->getData(),
-			mShape2RigidBodyIds);
+			mShapeRestR,
+			mShapeRestT);
 		cuSynchronize();
 
 

@@ -295,7 +295,6 @@ namespace dyno
 		DArray<AABB> outAabbs,
 		DArray<uint> outIds,
 		DArray<AABB> patchAabbsWorld,
-		DArray<uint> patchGlobalIds,
 		DArray<int> groupedSources,
 		DArray<int> shape2PatchOffsets,
 		DArray<int> offsets,
@@ -305,24 +304,25 @@ namespace dyno
 	{
 		int localId = threadIdx.x + (blockIdx.x * blockDim.x);
 		if (localId >= groupCount || localId >= offsets.size()) return;
-		int idx = groupStart + localId;
+		int idx = groupStart + localId; // global group index
 		if (idx < 0 || idx >= groupedSources.size()) return;
-		int shapeId = groupedSources[idx];
+		int shapeId = groupedSources[idx]; // source shape idx
 		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size()) return;
-		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount);
-		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount);
-		int sCount = sEnd - sBegin;
+		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount); // source patch begin
+		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount); // source patch end
+		int sCount = sEnd - sBegin;// source patch count
 		if (sCount <= 0) return;
-		int outBase = offsets[localId];
+		int outBase = offsets[localId]; // source patch's begin in the souce patch output array
+		// TODO: parallel
 		for (int i = 0; i < sCount; ++i)
 		{
-			int srcIdx = sBegin + i;
-			int outIdx = outBase + i;
+			int srcIdx = sBegin + i; // source patch index
+			int outIdx = outBase + i; // source patch output array index
 			if (srcIdx < 0 || srcIdx >= patchAabbsWorld.size()) continue;
 			if (outIdx < 0 || outIdx >= outAabbs.size()) continue;
-			outAabbs[outIdx] = patchAabbsWorld[srcIdx];
-			if (outIdx < outIds.size() && srcIdx < patchGlobalIds.size())
-				outIds[outIdx] = patchGlobalIds[srcIdx];
+			outAabbs[outIdx] = patchAabbsWorld[srcIdx]; // output source patch aabb
+			if (outIdx < outIds.size())
+				outIds[outIdx] = (uint)srcIdx; 		 // output source patch id
 		}
 	}
 
@@ -362,7 +362,7 @@ namespace dyno
 	// }
 
 	// template<typename Real, typename Coord, typename Matrix, typename AABB>
-	// Deprecated: full update is unnecessary; replaced by selective update driven by outPotentialShapePairs.
+	// Update Patch AABBs from rest-local space to current-world space
 	__global__ void NLQ_UpdatePatchAabbs(
 		DArray<AABB> worldAabbs,
 		DArray<AABB> localAabbs,
@@ -408,8 +408,6 @@ namespace dyno
 
 	__global__ void NLQ_UpdatePatchAabbsFromRestWorld(
 		DArray<AABB> worldAabbs,
-		DArray<Vec3f> relativeCenter,
-		DArray<Mat3f> relativeRotation,
 		DArray<AABB> restWorldAabbs,
 		DArray<uint> patch2Shape,
 		DArray<Mat3f> shapeRestR,
@@ -436,11 +434,7 @@ namespace dyno
 		worldAabbs[patchId] = NLQ_TransformLocalAabbToWorld(
 			restWorldAabbs[patchId],
 			RRel,
-			tRel);
-		
-		relativeCenter[patchId] = tRel;
-		relativeRotation[patchId] = RRel;
-		
+			tRel);	
 	}
 
 	__global__ void NLQ_TransformPatchAabbsToTargetRest(
@@ -1053,15 +1047,6 @@ namespace dyno
 		{
 			patch2Shape[p] = (uint)shapeId;
 		}
-	}
-
-	__global__ void NLQ_BuildPatchGlobalIds(
-		DArray<uint> patchIds)
-	{
-		int pId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (pId >= patchIds.size()) return;
-
-		patchIds[pId] = (uint)pId;
 	}
 
 	// Calculate the number of triangle-lists to be generated for each patch pair.
@@ -2542,13 +2527,6 @@ namespace dyno
 			return false;
 		}
 
-		// Initialize Patch AABBs relative transforms from rest-world space to current-world space
-		if (mPatchRelCenterTrans.size() != (uint)patchCount)
-			mPatchRelCenterTrans.resize(patchCount);
-
-		if (mPatchRelRotationTrans.size() != (uint)patchCount)
-			mPatchRelRotationTrans.resize(patchCount);
-
 		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
 		if (shapeCount <= 0)
 		{
@@ -2581,8 +2559,6 @@ namespace dyno
 		cuExecute((uint)patchCount,
 			NLQ_UpdatePatchAabbsFromRestWorld,
 			mPatchAabbsWorld,
-			mPatchRelCenterTrans,
-			mPatchRelRotationTrans,
 			patchAabbs,
 			mPatch2Shape,
 			mShapeRestR,
@@ -2632,18 +2608,11 @@ namespace dyno
 		// 		mShape2RigidBodyIds);
 		// }
 
-		// Build patch global IDs
-		if (mPatch2GlobalIds.size() != (uint)patchCount)
-		{
-			mPatch2GlobalIds.resize(patchCount);
-			cuExecute((uint)patchCount, NLQ_BuildPatchGlobalIds, mPatch2GlobalIds);
-		}
-
 		if (mTargetShapeCounts.size() != (uint)shapeCount)
 			mTargetShapeCounts.resize(shapeCount);
 		mTargetShapeCounts.reset();
 
-		// Count how many times a shape is a target from shapePairs
+		// Count how many souce shapes each target shape has from shapePairs
 		cuExecute(shapePairs.size(),
 			NLQ_CountTargetShapes,
 			mTargetShapeCounts,
@@ -2674,7 +2643,9 @@ namespace dyno
 			shapePairs,
 			shapeCount);
 		// Target to source shape mapping built
-		// Build compact active target list on GPU to avoid large device->host copies
+
+		// Build compact active target list
+		// Mark active target shapes that have at least one source shape
 		if (mTargetActiveFlags.size() != (uint)shapeCount)
 			mTargetActiveFlags.resize(shapeCount);
 		if (mTargetActiveOffsets.size() != (uint)shapeCount)
@@ -2693,6 +2664,8 @@ namespace dyno
 		}
 		mTargetActiveOffsets.assign(mTargetActiveFlags);
 		mScan.exclusive(mTargetActiveOffsets, true);
+
+		// Setup active target ids
 		if (mTargetActiveIds.size() != (uint)activeTargetCount)
 			mTargetActiveIds.resize(activeTargetCount);
 		cuExecute((uint)shapeCount,
@@ -2701,6 +2674,8 @@ namespace dyno
 			mTargetActiveFlags,
 			mTargetActiveOffsets,
 			shapeCount);
+
+		// Build active target infos for each target shape	
 		if (mActiveTargetInfos.size() != (uint)activeTargetCount)
 			mActiveTargetInfos.resize(activeTargetCount);
 		cuExecute((uint)activeTargetCount,
@@ -2733,13 +2708,21 @@ namespace dyno
 			int groupCount = info.groupCount; // number of source shapes in group
 			int tBegin = info.tBegin;         // target shape's first patch index
 			int tCount = info.tCount;         // target shape's patch count
-			if (groupCount <= 0)
+			// skip empty groups
+			if (groupCount <= 0) {
+				printf("[NeighborTriMeshQuery] WARNING: target shape %d has empty source group, skipping.\n", target);
 				continue;
-			if (groupStart < 0 || groupStart >= (int)mTarget2SourceShapes.size())
+			}
+			// skip invalid target shape
+			if (groupStart < 0 || groupStart >= (int)mTarget2SourceShapes.size()) {
+				printf("[NeighborTriMeshQuery] WARNING: target shape %d has invalid groupStart %d, skipping.\n", target, groupStart);
 				continue;
+			}
 			// Skip target shapes with no patches
-			if (tCount <= 0)
+			if (tCount <= 0) {
+				printf("[NeighborTriMeshQuery] WARNING: target shape %d has no patches, skipping.\n", target);
 				continue;
+			}
 
 			// Assign target shape's patch AABBs
 			if (mTargetPatchAabbs.size() != (uint)tCount)
@@ -2747,8 +2730,6 @@ namespace dyno
 			mTargetPatchAabbs.assign(patchAabbs, tCount, 0, tBegin);
 
 			// Build source patch lists on GPU for this target
-			if (groupCount <= 0)
-				continue;
 			if (mGroupSourcePatchCounts.size() != (uint)groupCount)
 				mGroupSourcePatchCounts.resize(groupCount);
 			if (mGroupSourcePatchOffsets.size() != (uint)groupCount)
@@ -2775,7 +2756,6 @@ namespace dyno
 				mSourcePatchAabbs,
 				mSource2PatchIds,
 				mPatchAabbsWorld,
-				mPatch2GlobalIds,
 				mTarget2SourceShapes,
 				mShape2PatchOffsets,
 				mGroupSourcePatchOffsets,
@@ -2959,55 +2939,8 @@ namespace dyno
 			targetPairs[i].reset();
 		}
 
-
 		printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
 		return true;
-
-// #else
-		// // Legacy O(n^2) middlePhase. Kept for reference/regression fallback.
-		// DArray<int> pairCount;
-		// pairCount.resize(shapePairs.size());
-		// pairCount.reset();
-
-		// DArray<int> pairCountCpy;
-
-		// cuExecute(shapePairs.size(),
-		// 	NLQ_CountPatchPairs,
-		// 	pairCount,
-		// 	shapePairs,
-		// 	mShape2PatchOffsets,
-		// 	mPatchAabbsWorld,
-		// 	patchCount);
-
-		// int total = mReduce.accumulate(pairCount.begin(), pairCount.size());
-		// if (total <= 0)
-		// {
-		// 	this->outPotentialPatchPairs()->resize(0);
-		// 	pairCount.clear();
-		// 	pairCountCpy.clear();
-		// 	return false;
-		// }
-
-		// pairCountCpy.assign(pairCount);
-		// mScan.exclusive(pairCount, true);
-
-		// this->outPotentialPatchPairs()->resize(total);
-
-		// cuExecute(shapePairs.size(),
-		// 	NLQ_SetPatchPairs,
-		// 	this->outPotentialPatchPairs()->getData(),
-		// 	shapePairs,
-		// 	mShape2PatchOffsets,
-		// 	mPatchAabbsWorld,
-		// 	pairCount,
-		// 	pairCountCpy,
-		// 	patchCount);
-
-		// pairCountCpy.clear();
-		// pairCount.clear();
-
-		// return true;
-// #endif
 	}
 
 	template<typename TDataType>

@@ -132,7 +132,6 @@ namespace dyno
 		DArray<int> mShape2RigidBodyIds;
 		DArray<AABB> mShapeAabbsWorld;
 		DArray<AABB> mPatchAabbsWorld;
-		DArray<uint> mPatch2GlobalIds;
 		DArray<AABB> mTargetPatchAabbs;
 		DArray<AABB> mSourcePatchAabbs;
 		DArray<uint> mSource2PatchIds;

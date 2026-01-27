@@ -1888,7 +1888,6 @@ namespace dyno
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
 		this->varDHead()->setValue(Real(0));
-		this->mPatchBroadPhaseCD = std::make_shared<CollisionDetectionBroadPhase<TDataType>>();
 	}
 
 	template<typename TDataType>
@@ -2742,10 +2741,7 @@ namespace dyno
 		std::vector<std::unique_ptr<DArray<PairUU>>> targetPairs; // Patch pairs per target shape
 		targetPairs.resize(shapeCount);
 		DArray<uint> localBroadPhaseCounter;
-
-		// NOTE: CollisionDetectionBroadPhase uses internal buffers and is not thread-safe for
-		// concurrent update() calls, so targetShape groups are processed sequentially here.
-		// The target->sources grouping keeps the layout ready for batched parallelization.
+		
 		for (uint ai = 0; ai < hActiveInfos.size(); ++ai)
 		{
 			TargetGroupInfo info = hActiveInfos[ai];
@@ -2875,41 +2871,6 @@ namespace dyno
 				continue;
 			}
 
-			/*
-			auto patchBroadPhaseCD = this->mPatchBroadPhaseCD;
-			patchBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
-			patchBroadPhaseCD->varSelfCollision()->setValue(false);
-			
-			patchBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
-			patchBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
-			patchBroadPhaseCD->inSource()->tick();
-			patchBroadPhaseCD->inTarget()->tick();
-			patchBroadPhaseCD->varForceUpdate()->setValue(true);
-
-			auto type = this->varSpatial()->getDataPtr()->currentKey();
-			switch (type)
-			{
-			case Spatial::BVH:
-				patchBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
-				break;
-			case Spatial::OCTREE:
-				patchBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::Octree);
-				break;
-			default:
-				break;
-			}
-
-			patchBroadPhaseCD->update();
-
-			auto& contactList = patchBroadPhaseCD->outContactList()->getData();
-			*/
-
-			auto patchBroadPhaseCD = this->mPatchBroadPhaseCD;
-			if (patchBroadPhaseCD->outContactList()->isEmpty())
-			{
-				patchBroadPhaseCD->outContactList()->allocate();
-			}
-
 			auto targetBVH = this->getShapeBVH(target);
 			if (!targetBVH)
 			{
@@ -2938,7 +2899,7 @@ namespace dyno
 				targetLeafCount = bvhLeafCount < tCount ? bvhLeafCount : tCount;
 			}
 
-			auto& contactList = patchBroadPhaseCD->outContactList()->getData();
+			DArrayList<int> contactList;
 
 			if (localBroadPhaseCounter.size() != (uint)mSourcePatchAabbs.size())
 				localBroadPhaseCounter.resize(mSourcePatchAabbs.size());

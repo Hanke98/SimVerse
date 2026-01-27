@@ -166,8 +166,14 @@ namespace dyno
 		DArray<int> mTargetActiveOffsets;
 		DArray<int> mTargetActiveIds;
 		DArray<TargetGroupInfo> mActiveTargetInfos;
-		DArray<int> mGroupSourcePatchCounts;
-		DArray<int> mGroupSourcePatchOffsets;
+		DArray<int> mGroup2PatchCounts;
+		DArray<int> mGroup2PatchOffsets;
+		DArray<int> mTarget2SourceCounts;
+		DArray<int> mTarget2SourceOffsets;
+		DArray<int> mGroup2TargetIds;
+		DArray<int> mSource2TargetIds;
+		DArray<LinearBVH<TDataType>> mTargetBVHs2;
+		DArray<int> mTargetBVHValid2;
 		std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> mPatchBroadPhaseCD;
 
 		bool mMappingReady = false;

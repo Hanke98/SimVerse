@@ -327,6 +327,119 @@ namespace dyno
 		}
 	}
 
+	__global__ void NLQ_CountGroup2PatchCounts(
+		DArray<int> counts,
+		DArray<int> groupedSources,
+		DArray<int> shape2PatchOffsets,
+		int patchCount)
+	{
+		int idx = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (idx >= groupedSources.size() || idx >= counts.size()) return;
+		int shapeId = groupedSources[idx];
+		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size())
+		{
+			counts[idx] = 0;
+			return;
+		}
+		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount);
+		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount);
+		int sCount = sEnd - sBegin;
+		counts[idx] = sCount > 0 ? sCount : 0;
+	}
+
+	__global__ void NLQ_BuildTarget2SourceCountsAndGroupOffsets(
+		DArray<int> target2SourceCounts,
+		DArray<int> group2PatchOffsets,
+		DArray<int> group2PatchCounts,
+		DArray<int> group2TargetIds,
+		DArray<int> target2GroupOffsets,
+		DArray<int> target2GroupCounts,
+		int shapeCount)
+	{
+		int target = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (target >= shapeCount) return;
+		if (target >= target2SourceCounts.size()) return;
+
+		int groupStart = target < target2GroupOffsets.size() ? target2GroupOffsets[target] : -1;
+		int groupCount = target < target2GroupCounts.size() ? target2GroupCounts[target] : 0;
+		if (groupStart < 0 || groupCount <= 0)
+		{
+			target2SourceCounts[target] = 0;
+			return;
+		}
+
+		int sum = 0;
+		for (int i = 0; i < groupCount; ++i)
+		{
+			int g = groupStart + i;
+			if (g < 0 || g >= group2PatchCounts.size() || g >= group2PatchOffsets.size() || g >= group2TargetIds.size())
+				continue;
+			group2PatchOffsets[g] = sum;
+			group2TargetIds[g] = target;
+			int c = group2PatchCounts[g];
+			if (c > 0)
+				sum += c;
+		}
+		target2SourceCounts[target] = sum;
+	}
+
+	__global__ void NLQ_FillGroup2PatchData(
+		DArray<AABB> outAabbs,
+		DArray<uint> outIds,
+		DArray<int> outTargetIds,
+		DArray<AABB> patchAabbsWorld,
+		DArray<int> groupedSources,
+		DArray<int> shape2PatchOffsets,
+		DArray<int> group2PatchOffsets,
+		DArray<int> group2TargetIds,
+		DArray<int> target2SourceOffsets,
+		int patchCount)
+	{
+		int g = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (g >= groupedSources.size() || g >= group2PatchOffsets.size() || g >= group2TargetIds.size())
+			return;
+		int target = group2TargetIds[g];
+		if (target < 0 || target >= target2SourceOffsets.size())
+			return;
+		int shapeId = groupedSources[g];
+		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size())
+			return;
+
+		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount);
+		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount);
+		int sCount = sEnd - sBegin;
+		if (sCount <= 0) return;
+
+		int outBase = target2SourceOffsets[target] + group2PatchOffsets[g];
+		for (int i = 0; i < sCount; ++i)
+		{
+			int srcIdx = sBegin + i;
+			int outIdx = outBase + i;
+			if (srcIdx < 0 || srcIdx >= patchAabbsWorld.size()) continue;
+			if (outIdx < 0 || outIdx >= outAabbs.size()) continue;
+			outAabbs[outIdx] = patchAabbsWorld[srcIdx];
+			if (outIdx < outIds.size())
+				outIds[outIdx] = (uint)srcIdx;
+			if (outIdx < outTargetIds.size())
+				outTargetIds[outIdx] = target;
+		}
+	}
+
+	__global__ void NLQ_TransformPatchAabbsToTargetRest2(
+		DArray<AABB> aabbs,
+		DArray<int> source2TargetIds,
+		DArray<Mat3f> shapeRestR,
+		DArray<Vec3f> shapeRestT)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= aabbs.size() || tId >= source2TargetIds.size()) return;
+		int targetId = source2TargetIds[tId];
+		if (targetId < 0 || targetId >= shapeRestR.size() || targetId >= shapeRestT.size()) return;
+		Mat3f RRest = shapeRestR[targetId];
+		Vec3f tRest = shapeRestT[targetId];
+		aabbs[tId] = NLQ_TransformWorldAabbToRest(aabbs[tId], RRest, tRest);
+	}
+
 	// template<typename Real, typename Coord, typename Matrix, typename AABB>
 	// __global__ void NLQ_UpdateShapeAabbs(
 	// 	DArray<AABB> worldAabbs,
@@ -482,6 +595,101 @@ namespace dyno
 			bvh.requestIntersectionIds(idLists[tId], aabbs[tId], tId);
 		else
 			bvh.requestIntersectionIds(idLists[tId], aabbs[tId]);
+	}
+
+	template<typename TDataType, typename AABB>
+	__global__ void NLQ_RequestIntersectionNumberBVH2(
+		DArray<uint> count,
+		DArray<AABB> sourceAabbs,
+		DArray<int> source2TargetIds,
+		DArray<LinearBVH<TDataType>> targetBVHs2,
+		DArray<int> targetBVHValid2,
+		DArray<int> shape2PatchOffsets,
+		DArray<AABB> patchAabbs)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= sourceAabbs.size() || tId >= source2TargetIds.size() || tId >= count.size())
+			return;
+
+		int target = source2TargetIds[tId];
+		if (target < 0 || target + 1 >= shape2PatchOffsets.size())
+		{
+			count[tId] = 0;
+			return;
+		}
+
+		int tBegin = NLQ_ClampInt(shape2PatchOffsets[target], 0, patchAabbs.size());
+		int tEnd = NLQ_ClampInt(shape2PatchOffsets[target + 1], 0, patchAabbs.size());
+		int tCount = tEnd - tBegin;
+		if (tCount <= 0)
+		{
+			count[tId] = 0;
+			return;
+		}
+
+		if (tCount == 1)
+		{
+			if (tBegin >= 0 && tBegin < patchAabbs.size())
+				count[tId] = sourceAabbs[tId].checkOverlap(patchAabbs[tBegin]) ? 1 : 0;
+			else
+				count[tId] = 0;
+			return;
+		}
+
+		if (target < 0 || target >= targetBVHs2.size() || target >= targetBVHValid2.size())
+		{
+			count[tId] = 0;
+			return;
+		}
+		if (targetBVHValid2[target] == 0)
+		{
+			count[tId] = 0;
+			return;
+		}
+
+		count[tId] = targetBVHs2[target].requestIntersectionNumber(sourceAabbs[tId]);
+	}
+
+	template<typename TDataType, typename AABB>
+	__global__ void NLQ_RequestIntersectionIdsBVH2(
+		DArrayList<int> idLists,
+		DArray<AABB> sourceAabbs,
+		DArray<int> source2TargetIds,
+		DArray<LinearBVH<TDataType>> targetBVHs2,
+		DArray<int> targetBVHValid2,
+		DArray<int> shape2PatchOffsets,
+		DArray<AABB> patchAabbs)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= sourceAabbs.size() || tId >= source2TargetIds.size() || tId >= idLists.size())
+			return;
+
+		int target = source2TargetIds[tId];
+		if (target < 0 || target + 1 >= shape2PatchOffsets.size())
+			return;
+
+		int tBegin = NLQ_ClampInt(shape2PatchOffsets[target], 0, patchAabbs.size());
+		int tEnd = NLQ_ClampInt(shape2PatchOffsets[target + 1], 0, patchAabbs.size());
+		int tCount = tEnd - tBegin;
+		if (tCount <= 0)
+			return;
+
+		if (tCount == 1)
+		{
+			if (tBegin >= 0 && tBegin < patchAabbs.size())
+			{
+				if (sourceAabbs[tId].checkOverlap(patchAabbs[tBegin]))
+					idLists[tId].insert(0);
+			}
+			return;
+		}
+
+		if (target < 0 || target >= targetBVHs2.size() || target >= targetBVHValid2.size())
+			return;
+		if (targetBVHValid2[target] == 0)
+			return;
+
+		targetBVHs2[target].requestIntersectionIds(idLists[tId], sourceAabbs[tId]);
 	}
 
 	__global__ void NLQ_MarkTouchedShapesFromPairs(
@@ -894,6 +1102,49 @@ namespace dyno
 			{
 				// (targetBase + targetIdx): global target patch id
 				patchPairs[offset + write] = Pair<uint, uint>(srcId, (uint)(targetBase + targetIdx));
+				write++;
+			}
+		}
+	}
+
+	__global__ void NLQ_SetPatchPairsFromContactList2(
+		DArray<Pair<uint, uint>> patchPairs,
+		DArrayList<int> contactList,
+		DArray<int> prefix,
+		DArray<int> counts,
+		DArray<uint> source2PatchIds,
+		DArray<int> source2TargetIds,
+		DArray<int> shape2PatchOffsets)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= contactList.size() || tId >= source2PatchIds.size() || tId >= source2TargetIds.size())
+			return;
+
+		int target = source2TargetIds[tId];
+		if (target < 0 || target + 1 >= shape2PatchOffsets.size())
+			return;
+
+		int tBegin = shape2PatchOffsets[target];
+		int tEnd = shape2PatchOffsets[target + 1];
+		int tCount = tEnd - tBegin;
+		if (tCount <= 0)
+			return;
+
+		int offset = prefix[tId];
+		int size = counts[tId];
+		int write = 0;
+		uint srcId = source2PatchIds[tId];
+
+		List<int>& list_i = contactList[tId];
+		for (int j = 0; j < list_i.size(); j++)
+		{
+			int targetIdx = list_i[j];
+			if (targetIdx < 0 || targetIdx >= tCount)
+				continue;
+
+			if (write < size && (offset + write) < patchPairs.size())
+			{
+				patchPairs[offset + write] = Pair<uint, uint>(srcId, (uint)(tBegin + targetIdx));
 				write++;
 			}
 		}
@@ -2731,284 +2982,185 @@ namespace dyno
 			mShape2PatchOffsets,
 			patchCount);
 		cuSynchronize();
+		// Build GPU-accessible BVH table
+		auto& shapeBVHs = this->inShapeBVHs()->constDataPtr();
+		if (mTargetBVHs2.size() != (uint)shapeCount)
+			mTargetBVHs2.resize(shapeCount);
+		if (mTargetBVHValid2.size() != (uint)shapeCount)
+			mTargetBVHValid2.resize(shapeCount);
 
-		CArray<TargetGroupInfo> hActiveInfos;
-		hActiveInfos.assign(mActiveTargetInfos);
+		CArray<LinearBVH<TDataType>> hTargetBVHs2;
+		hTargetBVHs2.resize(shapeCount);
+		CArray<int> hTargetBVHValid2;
+		hTargetBVHValid2.assign((uint)shapeCount, 0);
 
-		CArray<int> hTargetPairCounts;
-		hTargetPairCounts.assign((uint)shapeCount, 0);
-
-		std::vector<std::unique_ptr<DArray<PairUU>>> targetPairs; // Patch pairs per target shape
-		targetPairs.resize(shapeCount);
-		DArray<uint> localBroadPhaseCounter;
-		
-		for (uint ai = 0; ai < hActiveInfos.size(); ++ai)
+		if (shapeBVHs != nullptr)
 		{
-			TargetGroupInfo info = hActiveInfos[ai];
-			int target = info.targetId;       // target shape ID
-			int groupStart = info.groupStart; // start index in mTarget2SourceShapes
-			int groupCount = info.groupCount; // number of source shapes in group
-			int tBegin = info.tBegin;         // target shape's first patch index
-			int tCount = info.tCount;         // target shape's patch count
-			// skip empty groups
-			if (groupCount <= 0) {
-				printf("[NeighborTriMeshQuery] WARNING: target shape %d has empty source group, skipping.\n", target);
-				continue;
-			}
-			// skip invalid target shape
-			if (groupStart < 0 || groupStart >= (int)mTarget2SourceShapes.size()) {
-				printf("[NeighborTriMeshQuery] WARNING: target shape %d has invalid groupStart %d, skipping.\n", target, groupStart);
-				continue;
-			}
-			// Skip target shapes with no patches
-			if (tCount <= 0) {
-				printf("[NeighborTriMeshQuery] WARNING: target shape %d has no patches, skipping.\n", target);
-				continue;
-			}
-
-			// Assign target shape's patch AABBs
-			if (mTargetPatchAabbs.size() != (uint)tCount)
-				mTargetPatchAabbs.resize(tCount);
-			mTargetPatchAabbs.assign(patchAabbs, tCount, 0, tBegin);
-
-			// Build source patch lists on GPU for this target
-			if (mGroupSourcePatchCounts.size() != (uint)groupCount)
-				mGroupSourcePatchCounts.resize(groupCount);
-			if (mGroupSourcePatchOffsets.size() != (uint)groupCount)
-				mGroupSourcePatchOffsets.resize(groupCount);
-			cuExecute((uint)groupCount,
-				NLQ_CountGroupSourcePatches,
-				mGroupSourcePatchCounts,
-				mTarget2SourceShapes,
-				mShape2PatchOffsets,
-				patchCount,
-				groupStart,
-				groupCount);
-			int sourceTotal = mReduce.accumulate(mGroupSourcePatchCounts.begin(), mGroupSourcePatchCounts.size());
-			if (sourceTotal <= 0)
-				continue;
-			if (mSourcePatchAabbs.size() != (uint)sourceTotal)
-				mSourcePatchAabbs.resize(sourceTotal);
-			if (mSource2PatchIds.size() != (uint)sourceTotal)
-				mSource2PatchIds.resize(sourceTotal);
-			mGroupSourcePatchOffsets.assign(mGroupSourcePatchCounts);
-			mScan.exclusive(mGroupSourcePatchOffsets, true);
-			cuExecute((uint)groupCount,
-				NLQ_FillGroupPatchData,
-				mSourcePatchAabbs,
-				mSource2PatchIds,
-				mPatchAabbsWorld,
-				mTarget2SourceShapes,
-				mShape2PatchOffsets,
-				mGroupSourcePatchOffsets,
-				patchCount,
-				groupStart,
-				groupCount);
-
-			// Keep source patch AABBs in world coordinates to match target rest-world frame.
-			if ( sourceTotal > 0) // useTargetRestLocal &&
+			for (int i = 0; i < shapeCount; ++i)
 			{
-				// Check if mSourcePatchAabbs is allocated
-				if (mSourcePatchAabbs.size() == 0 || mSourcePatchAabbs.isEmpty()) {
-					printf("[NeighborTriMeshQuery] ERROR: mSourcePatchAabbs is empty or not allocated\n");
+				if (i >= (int)shapeBVHs->size())
 					continue;
-				}
-				
-				cuExecute((uint)sourceTotal,
-					NLQ_TransformPatchAabbsToTargetRest,
-					mSourcePatchAabbs,
-					mShapeRestR,
-					mShapeRestT,
-					target);
-			}
-			
-			// BVH traversal assumes at least two target nodes; handle single-patch targets directly.
-			if (tCount == 1)
-			{
-				DArray<int> contactCount;
-				contactCount.resize(sourceTotal);
-				contactCount.reset();
-
-				cuExecute((uint)sourceTotal,
-					NLQ_CountPatchPairsSingleTarget,
-					contactCount,
-					mSourcePatchAabbs,
-					mTargetPatchAabbs,
-					0);
-
-				int total = mReduce.accumulate(contactCount.begin(), contactCount.size());
-				hTargetPairCounts[target] = total;
-				printf("[NeighborTriMeshQuery] Target %d broadphase pairs=%d (single-patch)\n", target, total);
-				if (total <= 0)
-				{
-					contactCount.clear();
+				auto& bvh = (*shapeBVHs)[i];
+				if (!bvh)
 					continue;
-				}
-
-				DArray<int> contactCountCpy;
-				contactCountCpy.assign(contactCount);
-				mScan.exclusive(contactCount, true);
-
-				auto pairs = std::make_unique<DArray<PairUU>>();
-				pairs->resize(total);
-
-				cuExecute((uint)sourceTotal,
-					NLQ_SetPatchPairsSingleTarget,
-					*pairs,
-					mSourcePatchAabbs,
-					mTargetPatchAabbs,
-					mSource2PatchIds,
-					0,
-					tBegin,
-					contactCount,
-					contactCountCpy);
-
-				// Patch pairs found for this target
-				targetPairs[target] = std::move(pairs);
-
-				contactCountCpy.clear();
-				contactCount.clear();
-				continue;
+				hTargetBVHs2[i] = *bvh;
+				int nodeCount = (int)bvh->getSortedAABBs().size();
+				hTargetBVHValid2[i] = (nodeCount > 0 && (nodeCount % 2) == 1) ? 1 : 0;
 			}
-
-			auto targetBVH = this->getShapeBVH(target);
-			if (!targetBVH)
-			{
-				printf("[NeighborTriMeshQuery] WARNING: target shape %d has no prebuilt BVH, skipping.\n", target);
-				continue;
-			}
-			int bvhNodeCount = (int)targetBVH->getSortedAABBs().size();
-			if (bvhNodeCount <= 0 || (bvhNodeCount % 2) == 0)
-			{
-				printf("[NeighborTriMeshQuery] WARNING: target shape %d has invalid BVH node count (%d), skipping.\n",
-					target, bvhNodeCount);
-				continue;
-			}
-			int bvhLeafCount = (bvhNodeCount + 1) / 2;
-			if (bvhLeafCount <= 1)
-			{
-				printf("[NeighborTriMeshQuery] WARNING: target shape %d has BVH leaf count %d, skipping.\n",
-					target, bvhLeafCount);
-				continue;
-			}
-			int targetLeafCount = bvhLeafCount;
-			if (bvhLeafCount != tCount)
-			{
-				printf("[NeighborTriMeshQuery] WARNING: target shape %d BVH leaf count %d != tCount %d, clamping.\n",
-					target, bvhLeafCount, tCount);
-				targetLeafCount = bvhLeafCount < tCount ? bvhLeafCount : tCount;
-			}
-
-			DArrayList<int> contactList;
-
-			if (localBroadPhaseCounter.size() != (uint)mSourcePatchAabbs.size())
-				localBroadPhaseCounter.resize(mSourcePatchAabbs.size());
-
-			cuExecute(mSourcePatchAabbs.size(),
-				NLQ_RequestIntersectionNumberBVH,
-				localBroadPhaseCounter,
-				mSourcePatchAabbs,
-				*targetBVH,
-				false);
-
-			contactList.resize(localBroadPhaseCounter);
-
-			cuExecute(mSourcePatchAabbs.size(),
-				NLQ_RequestIntersectionIdsBVH,
-				contactList,
-				mSourcePatchAabbs,
-				*targetBVH,
-				false);
-
-			printf("[NeighborTriMeshQuery] Target %d middle phase contacts=%u (lists=%u)\n",
-				target,
-				(unsigned int)contactList.elementSize(),
-				(unsigned int)contactList.size());
-			if (contactList.elementSize() == 0)
-			{
-				// No contact detected
-				continue;
-			}
-
-			DArray<int> contactCount;
-			contactCount.resize(contactList.size());
-			contactCount.reset();
-
-			// count contacts for each source patch
-			cuExecute(contactList.size(),
-				NLQ_CountContactList,
-				contactCount,
-				contactList);
-			// Contact list counted
-			// reduce contact counts to get total patch pairs for this target shape
-			int total = mReduce.accumulate(contactCount.begin(), contactCount.size());
-			hTargetPairCounts[target] = total; // Store total patch pairs for this target shape
-			if (total <= 0)
-			{
-				contactCount.clear();
-				continue;
-			}
-
-			DArray<int> contactCountCpy;
-			contactCountCpy.assign(contactCount);
-			mScan.exclusive(contactCount, true);
-
-			auto pairs = std::make_unique<DArray<PairUU>>();
-			pairs->resize(total);
-
-			// Set patch pairs of this target shape
-			cuExecute(contactList.size(),
-				NLQ_SetPatchPairsFromContactList,
-				*pairs,
-				contactList,
-				contactCount,
-				contactCountCpy,
-				mSource2PatchIds,
-				tBegin,
-				targetLeafCount);
-			// Patch pairs found for this target
-			targetPairs[target] = std::move(pairs);
-
-			contactCountCpy.clear();
-			contactCount.clear();
 		}
 
-		int totalPairs = 0;
-		CArray<int> hTargetPairOffsets;
-		hTargetPairOffsets.resize(shapeCount);
-		// Build target shape patch pair offsets and count total patch pairs
-		for (int i = 0; i < shapeCount; ++i)
-		{
-			hTargetPairOffsets[i] = totalPairs;
-			int count = hTargetPairCounts[i];
-			if (count > 0)
-				totalPairs += count;
-		}
+		mTargetBVHs2.assign(hTargetBVHs2);
+		mTargetBVHValid2.assign(hTargetBVHValid2);
 
-		if (totalPairs <= 0)
+		int groupCountAll = (int)mTarget2SourceShapes.size();
+		if (groupCountAll <= 0)
 		{
 			this->outPotentialPatchPairs()->resize(0);
 			return false;
 		}
 
-		std::cout << "[NeighborTriMeshQuery] middlePhase found " << totalPairs << " patch pairs." << std::endl;
+		if (mGroup2PatchCounts.size() != (uint)groupCountAll)
+			mGroup2PatchCounts.resize(groupCountAll);
+		mGroup2PatchCounts.reset();
 
-		this->outPotentialPatchPairs()->resize(totalPairs);
-		auto& patchPairs = this->outPotentialPatchPairs()->getData();
+		cuExecute((uint)groupCountAll,
+			NLQ_CountGroup2PatchCounts,
+			mGroup2PatchCounts,
+			mTarget2SourceShapes,
+			mShape2PatchOffsets,
+			patchCount);
 
-		// Flatten patch pairs from all target shapes into outPotentialPatchPairs()
-		for (int i = 0; i < shapeCount; ++i)
+		if (mGroup2PatchOffsets.size() != (uint)groupCountAll)
+			mGroup2PatchOffsets.resize(groupCountAll);
+		if (mGroup2TargetIds.size() != (uint)groupCountAll)
+			mGroup2TargetIds.resize(groupCountAll);
+		if (mTarget2SourceCounts.size() != (uint)shapeCount)
+			mTarget2SourceCounts.resize(shapeCount);
+		mTarget2SourceCounts.reset();
+
+		cuExecute((uint)shapeCount,
+			NLQ_BuildTarget2SourceCountsAndGroupOffsets,
+			mTarget2SourceCounts,
+			mGroup2PatchOffsets,
+			mGroup2PatchCounts,
+			mGroup2TargetIds,
+			mTargetShapeOffsets,
+			mTargetShapeCounts,
+			shapeCount);
+
+		int totalSource = mReduce.accumulate(mTarget2SourceCounts.begin(), mTarget2SourceCounts.size());
+		if (totalSource <= 0)
 		{
-			int count = hTargetPairCounts[i];
-			if (count <= 0 || !targetPairs[i])
-				continue;
-
-			int offset = hTargetPairOffsets[i];
-			patchPairs.assign(*targetPairs[i], (uint)count, (uint)offset, 0);
-			targetPairs[i]->clear();
-			targetPairs[i].reset();
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
 		}
 
+		if (mTarget2SourceOffsets.size() != (uint)shapeCount)
+			mTarget2SourceOffsets.resize(shapeCount);
+		mTarget2SourceOffsets.assign(mTarget2SourceCounts);
+		mScan.exclusive(mTarget2SourceOffsets, true);
+
+		if (mSourcePatchAabbs.size() != (uint)totalSource)
+			mSourcePatchAabbs.resize(totalSource);
+		if (mSource2PatchIds.size() != (uint)totalSource)
+			mSource2PatchIds.resize(totalSource);
+		if (mSource2TargetIds.size() != (uint)totalSource)
+			mSource2TargetIds.resize(totalSource);
+
+		cuExecute((uint)groupCountAll,
+			NLQ_FillGroup2PatchData,
+			mSourcePatchAabbs,
+			mSource2PatchIds,
+			mSource2TargetIds,
+			mPatchAabbsWorld,
+			mTarget2SourceShapes,
+			mShape2PatchOffsets,
+			mGroup2PatchOffsets,
+			mGroup2TargetIds,
+			mTarget2SourceOffsets,
+			patchCount);
+
+		if (totalSource > 0)
+		{
+			cuExecute((uint)totalSource,
+				NLQ_TransformPatchAabbsToTargetRest2,
+				mSourcePatchAabbs,
+				mSource2TargetIds,
+				mShapeRestR,
+				mShapeRestT);
+		}
+
+		DArray<uint> localBroadPhaseCounter2;
+		localBroadPhaseCounter2.resize(totalSource);
+
+		cuExecute((uint)totalSource,
+			NLQ_RequestIntersectionNumberBVH2,
+			localBroadPhaseCounter2,
+			mSourcePatchAabbs,
+			mSource2TargetIds,
+			mTargetBVHs2,
+			mTargetBVHValid2,
+			mShape2PatchOffsets,
+			patchAabbs);
+
+		DArrayList<int> contactList;
+		contactList.resize(localBroadPhaseCounter2);
+
+		cuExecute((uint)totalSource,
+			NLQ_RequestIntersectionIdsBVH2,
+			contactList,
+			mSourcePatchAabbs,
+			mSource2TargetIds,
+			mTargetBVHs2,
+			mTargetBVHValid2,
+			mShape2PatchOffsets,
+			patchAabbs);
+
+		printf("[NeighborTriMeshQuery] middle phase contacts=%u (lists=%u)\n",
+			(unsigned int)contactList.elementSize(),
+			(unsigned int)contactList.size());
+		if (contactList.elementSize() == 0)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+
+		DArray<int> contactCount;
+		contactCount.resize(contactList.size());
+		contactCount.reset();
+
+		cuExecute(contactList.size(),
+			NLQ_CountContactList,
+			contactCount,
+			contactList);
+
+		int totalPairs = mReduce.accumulate(contactCount.begin(), contactCount.size());
+		if (totalPairs <= 0)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			contactCount.clear();
+			return false;
+		}
+
+		DArray<int> contactCountCpy;
+		contactCountCpy.assign(contactCount);
+		mScan.exclusive(contactCount, true);
+
+		this->outPotentialPatchPairs()->resize(totalPairs);
+		cuExecute(contactList.size(),
+			NLQ_SetPatchPairsFromContactList2,
+			this->outPotentialPatchPairs()->getData(),
+			contactList,
+			contactCount,
+			contactCountCpy,
+			mSource2PatchIds,
+			mSource2TargetIds,
+			mShape2PatchOffsets);
+
+		contactCountCpy.clear();
+		contactCount.clear();
+
+		std::cout << "[NeighborTriMeshQuery] middlePhase found " << totalPairs << " patch pairs." << std::endl;
 		printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
 		return true;
 	}

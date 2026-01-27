@@ -343,11 +343,12 @@ namespace dyno
             if (count <= 0)
                 continue;
 
-            if (begin < 0 || end > static_cast<int>(patchAabbsRestWorld.size()))
-                continue;
+			if (begin < 0 || end > static_cast<int>(patchAabbsRestWorld.size()))
+				continue;
 
-            DArray<AABB> patchAabbsDevice;
-            patchAabbsDevice.assign(patchAabbsRestWorld, static_cast<uint>(count), 0, static_cast<uint>(begin));
+			DArray<AABB> patchAabbsDevice;
+			patchAabbsDevice.resize(static_cast<uint>(count));
+			patchAabbsDevice.assign(patchAabbsRestWorld, static_cast<uint>(count), 0, static_cast<uint>(begin));
 
             auto bvh = std::make_shared<LinearBVH<TDataType>>();
             bvh->construct(patchAabbsDevice);

@@ -1,3 +1,4 @@
+#include "Array/ArrayList.h"
 #include "NeighborTriMeshQuery.h"
 
 #include "CollisionDetectionAlgorithm.h"
@@ -449,6 +450,38 @@ namespace dyno
 		Mat3f RRest = shapeRestR[targetId];
 		Vec3f tRest = shapeRestT[targetId];
 		aabbs[tId] = NLQ_TransformWorldAabbToRest(aabbs[tId], RRest, tRest);
+	}
+
+	template<typename TDataType, typename AABB>
+	__global__ void NLQ_RequestIntersectionNumberBVH(
+		DArray<uint> count,
+		DArray<AABB> aabbs,
+		LinearBVH<TDataType> bvh,
+		bool self_collision)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= aabbs.size()) return;
+
+		if (self_collision)
+			count[tId] = bvh.requestIntersectionNumber(aabbs[tId], tId);
+		else
+			count[tId] = bvh.requestIntersectionNumber(aabbs[tId]);
+	}
+
+	template<typename TDataType, typename AABB>
+	__global__ void NLQ_RequestIntersectionIdsBVH(
+		DArrayList<int> idLists,
+		DArray<AABB> aabbs,
+		LinearBVH<TDataType> bvh,
+		bool self_collision)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= aabbs.size()) return;
+
+		if (self_collision)
+			bvh.requestIntersectionIds(idLists[tId], aabbs[tId], tId);
+		else
+			bvh.requestIntersectionIds(idLists[tId], aabbs[tId]);
 	}
 
 	__global__ void NLQ_MarkTouchedShapesFromPairs(
@@ -2708,6 +2741,7 @@ namespace dyno
 
 		std::vector<std::unique_ptr<DArray<PairUU>>> targetPairs; // Patch pairs per target shape
 		targetPairs.resize(shapeCount);
+		DArray<uint> localBroadPhaseCounter;
 
 		// NOTE: CollisionDetectionBroadPhase uses internal buffers and is not thread-safe for
 		// concurrent update() calls, so targetShape groups are processed sequentially here.
@@ -2808,6 +2842,7 @@ namespace dyno
 
 				int total = mReduce.accumulate(contactCount.begin(), contactCount.size());
 				hTargetPairCounts[target] = total;
+				printf("[NeighborTriMeshQuery] Target %d broadphase pairs=%d (single-patch)\n", target, total);
 				if (total <= 0)
 				{
 					contactCount.clear();
@@ -2840,32 +2875,94 @@ namespace dyno
 				continue;
 			}
 
+			/*
 			auto patchBroadPhaseCD = this->mPatchBroadPhaseCD;
 			patchBroadPhaseCD->varGridSizeLimit()->setValue(this->varGridSizeLimit()->getValue());
 			patchBroadPhaseCD->varSelfCollision()->setValue(false);
 			
-            patchBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
-            patchBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
+			patchBroadPhaseCD->inSource()->assign(mSourcePatchAabbs);
+			patchBroadPhaseCD->inTarget()->assign(mTargetPatchAabbs);
 			patchBroadPhaseCD->inSource()->tick();
 			patchBroadPhaseCD->inTarget()->tick();
 			patchBroadPhaseCD->varForceUpdate()->setValue(true);
 
-            auto type = this->varSpatial()->getDataPtr()->currentKey();
-            switch (type)
-            {
-            case Spatial::BVH:
-                patchBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
-                break;
-            case Spatial::OCTREE:
-                patchBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::Octree);
-                break;
-            default:
-                break;
-            }
+			auto type = this->varSpatial()->getDataPtr()->currentKey();
+			switch (type)
+			{
+			case Spatial::BVH:
+				patchBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
+				break;
+			case Spatial::OCTREE:
+				patchBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::Octree);
+				break;
+			default:
+				break;
+			}
 
-            patchBroadPhaseCD->update();
+			patchBroadPhaseCD->update();
 
 			auto& contactList = patchBroadPhaseCD->outContactList()->getData();
+			*/
+
+			auto patchBroadPhaseCD = this->mPatchBroadPhaseCD;
+			if (patchBroadPhaseCD->outContactList()->isEmpty())
+			{
+				patchBroadPhaseCD->outContactList()->allocate();
+			}
+
+			auto targetBVH = this->getShapeBVH(target);
+			if (!targetBVH)
+			{
+				printf("[NeighborTriMeshQuery] WARNING: target shape %d has no prebuilt BVH, skipping.\n", target);
+				continue;
+			}
+			int bvhNodeCount = (int)targetBVH->getSortedAABBs().size();
+			if (bvhNodeCount <= 0 || (bvhNodeCount % 2) == 0)
+			{
+				printf("[NeighborTriMeshQuery] WARNING: target shape %d has invalid BVH node count (%d), skipping.\n",
+					target, bvhNodeCount);
+				continue;
+			}
+			int bvhLeafCount = (bvhNodeCount + 1) / 2;
+			if (bvhLeafCount <= 1)
+			{
+				printf("[NeighborTriMeshQuery] WARNING: target shape %d has BVH leaf count %d, skipping.\n",
+					target, bvhLeafCount);
+				continue;
+			}
+			int targetLeafCount = bvhLeafCount;
+			if (bvhLeafCount != tCount)
+			{
+				printf("[NeighborTriMeshQuery] WARNING: target shape %d BVH leaf count %d != tCount %d, clamping.\n",
+					target, bvhLeafCount, tCount);
+				targetLeafCount = bvhLeafCount < tCount ? bvhLeafCount : tCount;
+			}
+
+			auto& contactList = patchBroadPhaseCD->outContactList()->getData();
+
+			if (localBroadPhaseCounter.size() != (uint)mSourcePatchAabbs.size())
+				localBroadPhaseCounter.resize(mSourcePatchAabbs.size());
+
+			cuExecute(mSourcePatchAabbs.size(),
+				NLQ_RequestIntersectionNumberBVH,
+				localBroadPhaseCounter,
+				mSourcePatchAabbs,
+				*targetBVH,
+				false);
+
+			contactList.resize(localBroadPhaseCounter);
+
+			cuExecute(mSourcePatchAabbs.size(),
+				NLQ_RequestIntersectionIdsBVH,
+				contactList,
+				mSourcePatchAabbs,
+				*targetBVH,
+				false);
+
+			printf("[NeighborTriMeshQuery] Target %d middle phase contacts=%u (lists=%u)\n",
+				target,
+				(unsigned int)contactList.elementSize(),
+				(unsigned int)contactList.size());
 			if (contactList.elementSize() == 0)
 			{
 				// No contact detected
@@ -2907,7 +3004,7 @@ namespace dyno
 				contactCountCpy,
 				mSource2PatchIds,
 				tBegin,
-				tCount);
+				targetLeafCount);
 			// Patch pairs found for this target
 			targetPairs[target] = std::move(pairs);
 

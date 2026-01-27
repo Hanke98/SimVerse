@@ -23,15 +23,6 @@ namespace dyno
 {
 	template<typename TDataType> class CollisionDetectionBroadPhase;
 
-	struct TargetGroupInfo
-	{
-		int targetId;
-		int groupStart;
-		int groupCount;
-		int tBegin;
-		int tCount;
-	};
-
 	/**
 	 * @brief A class implementation to find neighboring shapes for shape/rigid body collision
 	 *
@@ -148,7 +139,6 @@ namespace dyno
 		DArray<int> mShape2RigidBodyIds;
 		DArray<AABB> mShapeAabbsWorld;
 		DArray<AABB> mPatchAabbsWorld;
-		DArray<AABB> mTargetPatchAabbs;
 		DArray<AABB> mSourcePatchAabbs;
 		DArray<uint> mSource2PatchIds;
 		DArray<int> mTouchedShapeFlags;
@@ -162,18 +152,15 @@ namespace dyno
 		DArray<Mat3f> mPatchRelRotationTrans;
 		DArray<Vec3f> mShapeRestT;
 		DArray<Mat3f> mShapeRestR;
-		DArray<int> mTargetActiveFlags;
-		DArray<int> mTargetActiveOffsets;
-		DArray<int> mTargetActiveIds;
-		DArray<TargetGroupInfo> mActiveTargetInfos;
 		DArray<int> mGroup2PatchCounts;
 		DArray<int> mGroup2PatchOffsets;
+		DArray<int> mGroup2GlobalOffsets;
 		DArray<int> mTarget2SourceCounts;
 		DArray<int> mTarget2SourceOffsets;
 		DArray<int> mGroup2TargetIds;
 		DArray<int> mSource2TargetIds;
-		DArray<LinearBVH<TDataType>> mTargetBVHs2;
-		DArray<int> mTargetBVHValid2;
+		DArray<LinearBVH<TDataType>> mTargetBVHs;
+		DArray<int> mTargetBVHValid;
 		std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> mPatchBroadPhaseCD;
 
 		bool mMappingReady = false;

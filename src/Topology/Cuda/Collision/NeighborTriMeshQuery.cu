@@ -215,55 +215,6 @@ namespace dyno
 		outT[shapeId] = tRel;
 	}
 
-	__global__ void NLQ_MarkActiveTargets(
-		DArray<int> activeFlags,
-		DArray<int> targetCounts,
-		int shapeCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= shapeCount) return;
-		activeFlags[tId] = targetCounts[tId] > 0 ? 1 : 0;
-	}
-
-	__global__ void NLQ_CompactActiveTargets(
-		DArray<int> activeIds,
-		DArray<int> activeFlags,
-		DArray<int> activeOffsets,
-		int shapeCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= shapeCount) return;
-		if (activeFlags[tId] == 0) return;
-		int out = activeOffsets[tId];
-		if (out >= 0 && out < activeIds.size())
-			activeIds[out] = tId;
-	}
-
-	__global__ void NLQ_BuildActiveTargetInfos(
-		DArray<TargetGroupInfo> infos,
-		DArray<int> activeIds,
-		DArray<int> targetOffsets,
-		DArray<int> targetCounts,
-		DArray<int> shape2PatchOffsets,
-		int patchCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= activeIds.size() || tId >= infos.size()) return;
-		int target = activeIds[tId];
-		int groupStart = target >= 0 && target < targetOffsets.size() ? targetOffsets[target] : -1;
-		int groupCount = target >= 0 && target < targetCounts.size() ? targetCounts[target] : 0;
-		int tBegin = (target + 1 < shape2PatchOffsets.size()) ? NLQ_ClampInt(shape2PatchOffsets[target], 0, patchCount) : 0;
-		int tEnd = (target + 1 < shape2PatchOffsets.size()) ? NLQ_ClampInt(shape2PatchOffsets[target + 1], 0, patchCount) : 0;
-		int tCount = tEnd - tBegin;
-		TargetGroupInfo info;
-		info.targetId = target;
-		info.groupStart = groupStart;
-		info.groupCount = groupCount;
-		info.tBegin = tBegin;
-		info.tCount = tCount;
-		infos[tId] = info;
-	}
-
 	__global__ void NLQ_CountGroupSourcePatches(
 		DArray<int> counts,
 		DArray<int> groupedSources,
@@ -383,6 +334,55 @@ namespace dyno
 		target2SourceCounts[target] = sum;
 	}
 
+	__global__ void NLQ_BuildGroup2GlobalOffsets(
+		DArray<int> group2GlobalOffsets,
+		DArray<int> group2PatchOffsets,
+		DArray<int> group2TargetIds,
+		DArray<int> target2SourceOffsets)
+	{
+		int g = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (g >= group2GlobalOffsets.size() || g >= group2PatchOffsets.size() || g >= group2TargetIds.size())
+			return;
+		int target = group2TargetIds[g];
+		if (target < 0 || target >= target2SourceOffsets.size())
+		{
+			group2GlobalOffsets[g] = 0;
+			return;
+		}
+		group2GlobalOffsets[g] = target2SourceOffsets[target] + group2PatchOffsets[g];
+	}
+
+	__device__ inline int NLQ_FindGroupByOffset(
+		int idx,
+		const DArray<int>& group2GlobalOffsets,
+		const DArray<int>& group2PatchCounts)
+	{
+		int lo = 0;
+		int hi = (int)group2GlobalOffsets.size() - 1;
+		int res = -1;
+		while (lo <= hi)
+		{
+			int mid = (lo + hi) >> 1;
+			int start = group2GlobalOffsets[mid];
+			if (start <= idx)
+			{
+				res = mid;
+				lo = mid + 1;
+			}
+			else
+			{
+				hi = mid - 1;
+			}
+		}
+		if (res < 0)
+			return -1;
+		int start = group2GlobalOffsets[res];
+		int count = group2PatchCounts[res];
+		if (idx >= start && idx < (start + count))
+			return res;
+		return -1;
+	}
+
 	__global__ void NLQ_FillGroup2PatchData(
 		DArray<AABB> outAabbs,
 		DArray<uint> outIds,
@@ -390,17 +390,20 @@ namespace dyno
 		DArray<AABB> patchAabbsWorld,
 		DArray<int> groupedSources,
 		DArray<int> shape2PatchOffsets,
-		DArray<int> group2PatchOffsets,
+		DArray<int> group2GlobalOffsets,
+		DArray<int> group2PatchCounts,
 		DArray<int> group2TargetIds,
-		DArray<int> target2SourceOffsets,
 		int patchCount)
 	{
-		int g = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (g >= groupedSources.size() || g >= group2PatchOffsets.size() || g >= group2TargetIds.size())
+		int outIdx = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (outIdx >= outAabbs.size() || outIdx >= outIds.size() || outIdx >= outTargetIds.size())
 			return;
+
+		int g = NLQ_FindGroupByOffset(outIdx, group2GlobalOffsets, group2PatchCounts);
+		if (g < 0 || g >= groupedSources.size() || g >= group2TargetIds.size())
+			return;
+
 		int target = group2TargetIds[g];
-		if (target < 0 || target >= target2SourceOffsets.size())
-			return;
 		int shapeId = groupedSources[g];
 		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size())
 			return;
@@ -408,24 +411,23 @@ namespace dyno
 		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount);
 		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount);
 		int sCount = sEnd - sBegin;
-		if (sCount <= 0) return;
+		if (sCount <= 0)
+			return;
 
-		int outBase = target2SourceOffsets[target] + group2PatchOffsets[g];
-		for (int i = 0; i < sCount; ++i)
-		{
-			int srcIdx = sBegin + i;
-			int outIdx = outBase + i;
-			if (srcIdx < 0 || srcIdx >= patchAabbsWorld.size()) continue;
-			if (outIdx < 0 || outIdx >= outAabbs.size()) continue;
-			outAabbs[outIdx] = patchAabbsWorld[srcIdx];
-			if (outIdx < outIds.size())
-				outIds[outIdx] = (uint)srcIdx;
-			if (outIdx < outTargetIds.size())
-				outTargetIds[outIdx] = target;
-		}
+		int localIdx = outIdx - group2GlobalOffsets[g];
+		if (localIdx < 0 || localIdx >= sCount)
+			return;
+
+		int srcIdx = sBegin + localIdx;
+		if (srcIdx < 0 || srcIdx >= patchAabbsWorld.size())
+			return;
+
+		outAabbs[outIdx] = patchAabbsWorld[srcIdx];
+		outIds[outIdx] = (uint)srcIdx;
+		outTargetIds[outIdx] = target;
 	}
 
-	__global__ void NLQ_TransformPatchAabbsToTargetRest2(
+	__global__ void NLQ_TransformPatchAabbsToTargetRest(
 		DArray<AABB> aabbs,
 		DArray<int> source2TargetIds,
 		DArray<Mat3f> shapeRestR,
@@ -551,59 +553,13 @@ namespace dyno
 			tRel);	
 	}
 
-	__global__ void NLQ_TransformPatchAabbsToTargetRest(
-		DArray<AABB> aabbs,
-		DArray<Mat3f> shapeRestR,
-		DArray<Vec3f> shapeRestT,
-		int targetId)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= aabbs.size()) return;
-		if (targetId < 0 || targetId >= shapeRestR.size() || targetId >= shapeRestT.size()) return;
-		Mat3f RRest = shapeRestR[targetId];
-		Vec3f tRest = shapeRestT[targetId];
-		aabbs[tId] = NLQ_TransformWorldAabbToRest(aabbs[tId], RRest, tRest);
-	}
-
 	template<typename TDataType, typename AABB>
 	__global__ void NLQ_RequestIntersectionNumberBVH(
 		DArray<uint> count,
-		DArray<AABB> aabbs,
-		LinearBVH<TDataType> bvh,
-		bool self_collision)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= aabbs.size()) return;
-
-		if (self_collision)
-			count[tId] = bvh.requestIntersectionNumber(aabbs[tId], tId);
-		else
-			count[tId] = bvh.requestIntersectionNumber(aabbs[tId]);
-	}
-
-	template<typename TDataType, typename AABB>
-	__global__ void NLQ_RequestIntersectionIdsBVH(
-		DArrayList<int> idLists,
-		DArray<AABB> aabbs,
-		LinearBVH<TDataType> bvh,
-		bool self_collision)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= aabbs.size()) return;
-
-		if (self_collision)
-			bvh.requestIntersectionIds(idLists[tId], aabbs[tId], tId);
-		else
-			bvh.requestIntersectionIds(idLists[tId], aabbs[tId]);
-	}
-
-	template<typename TDataType, typename AABB>
-	__global__ void NLQ_RequestIntersectionNumberBVH2(
-		DArray<uint> count,
 		DArray<AABB> sourceAabbs,
 		DArray<int> source2TargetIds,
-		DArray<LinearBVH<TDataType>> targetBVHs2,
-		DArray<int> targetBVHValid2,
+		DArray<LinearBVH<TDataType>> targetBVHs,
+		DArray<int> targetBVHValid,
 		DArray<int> shape2PatchOffsets,
 		DArray<AABB> patchAabbs)
 	{
@@ -636,27 +592,27 @@ namespace dyno
 			return;
 		}
 
-		if (target < 0 || target >= targetBVHs2.size() || target >= targetBVHValid2.size())
+		if (target < 0 || target >= targetBVHs.size() || target >= targetBVHValid.size())
 		{
 			count[tId] = 0;
 			return;
 		}
-		if (targetBVHValid2[target] == 0)
+		if (targetBVHValid[target] == 0)
 		{
 			count[tId] = 0;
 			return;
 		}
 
-		count[tId] = targetBVHs2[target].requestIntersectionNumber(sourceAabbs[tId]);
+		count[tId] = targetBVHs[target].requestIntersectionNumber(sourceAabbs[tId]);
 	}
 
 	template<typename TDataType, typename AABB>
-	__global__ void NLQ_RequestIntersectionIdsBVH2(
+	__global__ void NLQ_RequestIntersectionIdsBVH(
 		DArrayList<int> idLists,
 		DArray<AABB> sourceAabbs,
 		DArray<int> source2TargetIds,
-		DArray<LinearBVH<TDataType>> targetBVHs2,
-		DArray<int> targetBVHValid2,
+		DArray<LinearBVH<TDataType>> targetBVHs,
+		DArray<int> targetBVHValid,
 		DArray<int> shape2PatchOffsets,
 		DArray<AABB> patchAabbs)
 	{
@@ -684,12 +640,12 @@ namespace dyno
 			return;
 		}
 
-		if (target < 0 || target >= targetBVHs2.size() || target >= targetBVHValid2.size())
+		if (target < 0 || target >= targetBVHs.size() || target >= targetBVHValid.size())
 			return;
-		if (targetBVHValid2[target] == 0)
+		if (targetBVHValid[target] == 0)
 			return;
 
-		targetBVHs2[target].requestIntersectionIds(idLists[tId], sourceAabbs[tId]);
+		targetBVHs[target].requestIntersectionIds(idLists[tId], sourceAabbs[tId]);
 	}
 
 	__global__ void NLQ_MarkTouchedShapesFromPairs(
@@ -1069,45 +1025,6 @@ namespace dyno
 	}
 
 	__global__ void NLQ_SetPatchPairsFromContactList(
-		DArray<Pair<uint, uint>> patchPairs,
-		DArrayList<int> contactList,
-		DArray<int> prefix,
-		DArray<int> counts,
-		DArray<uint> source2PatchIds,
-		int targetBase,
-		int targetCount)
-	{
-		// tId: local source patch id
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= contactList.size())
-			return;
-		if (tId >= source2PatchIds.size())
-			return;
-
-		int offset = prefix[tId];
-		int size = counts[tId];
-		int write = 0;
-		uint srcId = source2PatchIds[tId];// global source patch id
-
-		List<int>& list_i = contactList[tId];
-		for (int j = 0; j < list_i.size(); j++)
-		{
-			// targetIdx: local target patch id
-			int targetIdx = list_i[j];
-			// ignore invalid local target indices
-			if (targetIdx < 0 || targetIdx >= targetCount)
-				continue;
-
-			if (write < size && (offset + write) < patchPairs.size())
-			{
-				// (targetBase + targetIdx): global target patch id
-				patchPairs[offset + write] = Pair<uint, uint>(srcId, (uint)(targetBase + targetIdx));
-				write++;
-			}
-		}
-	}
-
-	__global__ void NLQ_SetPatchPairsFromContactList2(
 		DArray<Pair<uint, uint>> patchPairs,
 		DArrayList<int> contactList,
 		DArray<int> prefix,
@@ -2834,6 +2751,7 @@ namespace dyno
 			mShapeRestR.resize(shapeCount);
 		if (mShapeRestT.size() != (uint)shapeCount)
 			mShapeRestT.resize(shapeCount);
+		// Launch kernel to compute per-shape rest transforms.
 		cuExecute((uint)shapeCount,
 			NLQ_ComputeShapeRestTransforms,
 			mShapeRestR,
@@ -2851,6 +2769,7 @@ namespace dyno
 
 		// Update patch AABBs in world space (current pose) from rest-world patch AABBs.
 		// Notd: Is full update is necessary?
+		// Launch kernel to update patch AABBs to world space.
 		cuExecute((uint)patchCount,
 			NLQ_UpdatePatchAabbsFromRestWorld,
 			mPatchAabbsWorld,
@@ -2908,6 +2827,7 @@ namespace dyno
 		mTargetShapeCounts.reset();
 
 		// Count how many souce shapes each target shape has from shapePairs
+		// Launch kernel to count target shapes per shape pair.
 		cuExecute(shapePairs.size(),
 			NLQ_CountTargetShapes,
 			mTargetShapeCounts,
@@ -2930,6 +2850,7 @@ namespace dyno
 		mTarget2SourceShapes.reset();
 
 		// Group source shapes by target shapes from shapePairs
+		// Launch kernel to group source shapes by target.
 		cuExecute(shapePairs.size(),
 			NLQ_GroupShapePairsByTarget,
 			mTarget2SourceShapes,
@@ -2939,61 +2860,20 @@ namespace dyno
 			shapeCount);
 		// Target to source shape mapping built
 
-		// Build compact active target list
-		// Mark active target shapes that have at least one source shape
-		if (mTargetActiveFlags.size() != (uint)shapeCount)
-			mTargetActiveFlags.resize(shapeCount);
-		if (mTargetActiveOffsets.size() != (uint)shapeCount)
-			mTargetActiveOffsets.resize(shapeCount);
-		mTargetActiveFlags.reset();
-		cuExecute((uint)shapeCount,
-			NLQ_MarkActiveTargets,
-			mTargetActiveFlags,
-			mTargetShapeCounts,
-			shapeCount);
-		int activeTargetCount = mReduce.accumulate(mTargetActiveFlags.begin(), mTargetActiveFlags.size());
-		if (activeTargetCount <= 0)
-		{
-			this->outPotentialPatchPairs()->resize(0);
-			return false;
-		}
-		mTargetActiveOffsets.assign(mTargetActiveFlags);
-		mScan.exclusive(mTargetActiveOffsets, true);
-
-		// Setup active target ids
-		if (mTargetActiveIds.size() != (uint)activeTargetCount)
-			mTargetActiveIds.resize(activeTargetCount);
-		cuExecute((uint)shapeCount,
-			NLQ_CompactActiveTargets,
-			mTargetActiveIds,
-			mTargetActiveFlags,
-			mTargetActiveOffsets,
-			shapeCount);
-
-		// Build active target infos for each target shape	
-		if (mActiveTargetInfos.size() != (uint)activeTargetCount)
-			mActiveTargetInfos.resize(activeTargetCount);
-		cuExecute((uint)activeTargetCount,
-			NLQ_BuildActiveTargetInfos,
-			mActiveTargetInfos,
-			mTargetActiveIds,
-			mTargetShapeOffsets,
-			mTargetShapeCounts,
-			mShape2PatchOffsets,
-			patchCount);
-		cuSynchronize();
+		// Active target compaction is no longer needed in GPU-parallel middle phase.
 		// Build GPU-accessible BVH table
 		auto& shapeBVHs = this->inShapeBVHs()->constDataPtr();
-		if (mTargetBVHs2.size() != (uint)shapeCount)
-			mTargetBVHs2.resize(shapeCount);
-		if (mTargetBVHValid2.size() != (uint)shapeCount)
-			mTargetBVHValid2.resize(shapeCount);
+		if (mTargetBVHs.size() != (uint)shapeCount)
+			mTargetBVHs.resize(shapeCount);
+		if (mTargetBVHValid.size() != (uint)shapeCount)
+			mTargetBVHValid.resize(shapeCount);
 
-		CArray<LinearBVH<TDataType>> hTargetBVHs2;
-		hTargetBVHs2.resize(shapeCount);
-		CArray<int> hTargetBVHValid2;
-		hTargetBVHValid2.assign((uint)shapeCount, 0);
+		CArray<LinearBVH<TDataType>> hTargetBVHs;
+		hTargetBVHs.resize(shapeCount);
+		CArray<int> hTargetBVHValid;
+		hTargetBVHValid.assign((uint)shapeCount, 0);
 
+		// TODO: move ouside
 		if (shapeBVHs != nullptr)
 		{
 			for (int i = 0; i < shapeCount; ++i)
@@ -3003,16 +2883,16 @@ namespace dyno
 				auto& bvh = (*shapeBVHs)[i];
 				if (!bvh)
 					continue;
-				hTargetBVHs2[i] = *bvh;
+				hTargetBVHs[i] = *bvh;
 				int nodeCount = (int)bvh->getSortedAABBs().size();
-				hTargetBVHValid2[i] = (nodeCount > 0 && (nodeCount % 2) == 1) ? 1 : 0;
+				hTargetBVHValid[i] = (nodeCount > 0 && (nodeCount % 2) == 1) ? 1 : 0;
 			}
 		}
 
-		mTargetBVHs2.assign(hTargetBVHs2);
-		mTargetBVHValid2.assign(hTargetBVHValid2);
+		mTargetBVHs.assign(hTargetBVHs);
+		mTargetBVHValid.assign(hTargetBVHValid);
 
-		int groupCountAll = (int)mTarget2SourceShapes.size();
+		int groupCountAll = (int)mTarget2SourceShapes.size(); // the number of groups
 		if (groupCountAll <= 0)
 		{
 			this->outPotentialPatchPairs()->resize(0);
@@ -3023,6 +2903,10 @@ namespace dyno
 			mGroup2PatchCounts.resize(groupCountAll);
 		mGroup2PatchCounts.reset();
 
+		// ======= flatten the source patches =======
+		// flatten the (target, sourceShape) to (target, sourcePatch)
+
+		// Launch kernel to count patches for each source shape in each target group.
 		cuExecute((uint)groupCountAll,
 			NLQ_CountGroup2PatchCounts,
 			mGroup2PatchCounts,
@@ -3038,6 +2922,14 @@ namespace dyno
 			mTarget2SourceCounts.resize(shapeCount);
 		mTarget2SourceCounts.reset();
 
+		// Launch kernel to build per-target source counts and per-source offsets.
+		// mTarget2SourceCounts, mGroup2PatchOffsets and mGroup2TargetIds are computed here.
+		// mTarget2SourceCounts：how many patches of source shapes are in each target shape
+		// mGroup2PatchOffsets: offsets of patches for each source shape in a target shape
+		// mGroup2TargetIds: target shape id for each patch of source shape
+		// mTarget2SourceCounts[target]：该 target 的所有 sourceShape 的 patch 数之和
+		// mGroup2PatchOffsets[g]：group g 在其 target 内部的 patch 起始偏移
+		// mGroup2TargetIds[g]：group g 属于哪个 target
 		cuExecute((uint)shapeCount,
 			NLQ_BuildTarget2SourceCountsAndGroupOffsets,
 			mTarget2SourceCounts,
@@ -3060,6 +2952,16 @@ namespace dyno
 		mTarget2SourceOffsets.assign(mTarget2SourceCounts);
 		mScan.exclusive(mTarget2SourceOffsets, true);
 
+		if (mGroup2GlobalOffsets.size() != (uint)groupCountAll)
+			mGroup2GlobalOffsets.resize(groupCountAll);
+		// Launch kernel to compute global source offsets per group.
+		cuExecute((uint)groupCountAll,
+			NLQ_BuildGroup2GlobalOffsets,
+			mGroup2GlobalOffsets,
+			mGroup2PatchOffsets,
+			mGroup2TargetIds,
+			mTarget2SourceOffsets);
+
 		if (mSourcePatchAabbs.size() != (uint)totalSource)
 			mSourcePatchAabbs.resize(totalSource);
 		if (mSource2PatchIds.size() != (uint)totalSource)
@@ -3067,7 +2969,8 @@ namespace dyno
 		if (mSource2TargetIds.size() != (uint)totalSource)
 			mSource2TargetIds.resize(totalSource);
 
-		cuExecute((uint)groupCountAll,
+		// Launch kernel to fill global source patch arrays (patch-level).
+		cuExecute((uint)totalSource,
 			NLQ_FillGroup2PatchData,
 			mSourcePatchAabbs,
 			mSource2PatchIds,
@@ -3075,44 +2978,47 @@ namespace dyno
 			mPatchAabbsWorld,
 			mTarget2SourceShapes,
 			mShape2PatchOffsets,
-			mGroup2PatchOffsets,
+			mGroup2GlobalOffsets,
+			mGroup2PatchCounts,
 			mGroup2TargetIds,
-			mTarget2SourceOffsets,
 			patchCount);
 
 		if (totalSource > 0)
 		{
+			// Launch kernel to transform source patch AABBs into target rest space.
 			cuExecute((uint)totalSource,
-				NLQ_TransformPatchAabbsToTargetRest2,
+				NLQ_TransformPatchAabbsToTargetRest,
 				mSourcePatchAabbs,
 				mSource2TargetIds,
 				mShapeRestR,
 				mShapeRestT);
 		}
 
-		DArray<uint> localBroadPhaseCounter2;
-		localBroadPhaseCounter2.resize(totalSource);
+		DArray<uint> localBroadPhaseCounter;
+		localBroadPhaseCounter.resize(totalSource);
 
+		// Launch kernel to count BVH intersections for each source patch.
 		cuExecute((uint)totalSource,
-			NLQ_RequestIntersectionNumberBVH2,
-			localBroadPhaseCounter2,
+			NLQ_RequestIntersectionNumberBVH,
+			localBroadPhaseCounter,
 			mSourcePatchAabbs,
 			mSource2TargetIds,
-			mTargetBVHs2,
-			mTargetBVHValid2,
+			mTargetBVHs,
+			mTargetBVHValid,
 			mShape2PatchOffsets,
 			patchAabbs);
 
 		DArrayList<int> contactList;
-		contactList.resize(localBroadPhaseCounter2);
+		contactList.resize(localBroadPhaseCounter);
 
+		// Launch kernel to fetch BVH intersection ids for each source patch.
 		cuExecute((uint)totalSource,
-			NLQ_RequestIntersectionIdsBVH2,
+			NLQ_RequestIntersectionIdsBVH,
 			contactList,
 			mSourcePatchAabbs,
 			mSource2TargetIds,
-			mTargetBVHs2,
-			mTargetBVHValid2,
+			mTargetBVHs,
+			mTargetBVHValid,
 			mShape2PatchOffsets,
 			patchAabbs);
 
@@ -3129,6 +3035,7 @@ namespace dyno
 		contactCount.resize(contactList.size());
 		contactCount.reset();
 
+		// Launch kernel to count contacts per source patch.
 		cuExecute(contactList.size(),
 			NLQ_CountContactList,
 			contactCount,
@@ -3147,8 +3054,9 @@ namespace dyno
 		mScan.exclusive(contactCount, true);
 
 		this->outPotentialPatchPairs()->resize(totalPairs);
+		// Launch kernel to write patch pairs from contact lists.
 		cuExecute(contactList.size(),
-			NLQ_SetPatchPairsFromContactList2,
+			NLQ_SetPatchPairsFromContactList,
 			this->outPotentialPatchPairs()->getData(),
 			contactList,
 			contactCount,

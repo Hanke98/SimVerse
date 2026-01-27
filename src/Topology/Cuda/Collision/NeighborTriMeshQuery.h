@@ -13,10 +13,12 @@
 #include "Algorithm/Scan.h"
 
 #include "Topology/DiscreteElements.h"
+#include "Topology/LinearBVH.h"
 
 #include "NeighborElementQuery.h"
 #include "Vector/Vector3D.h"
 #include <memory>
+#include <vector>
 namespace dyno
 {
 	template<typename TDataType> class CollisionDetectionBroadPhase;
@@ -49,6 +51,7 @@ namespace dyno
 		typedef typename ::dyno::TAlignedBox3D<Real> AABB;
 		typedef typename ::dyno::TContactPair<Real> ContactPair;
 		typedef typename ::dyno::Pair<uint, uint> PairUU;
+		using ShapeBVHList = std::vector<std::shared_ptr<LinearBVH<TDataType>>>;
 
 		NeighborTriMeshQuery();
 		~NeighborTriMeshQuery() override;
@@ -104,11 +107,24 @@ namespace dyno
 
 		DEF_ARRAY_IN(int, Shape2TriOffsets, DeviceType::GPU, "");
 
+		DEF_VAR_IN(ShapeBVHList, ShapeBVHs, "");
+
 		DEF_ARRAY_OUT(PairUU, PotentialShapePairs, DeviceType::GPU, "");
 
 		DEF_ARRAY_OUT(PairUU, PotentialPatchPairs, DeviceType::GPU, "");
 
 		DEF_INSTANCE_OUT(TriangleSet<TDataType>, PotentialTriSet, "");
+
+	public:
+		std::shared_ptr<LinearBVH<TDataType>> getShapeBVH(int shapeId)
+		{
+			auto& shapeBVHs = this->inShapeBVHs()->constDataPtr();
+			if (shapeBVHs == nullptr)
+				return nullptr;
+			if (shapeId < 0 || shapeId >= static_cast<int>(shapeBVHs->size()))
+				return nullptr;
+			return (*shapeBVHs)[shapeId];
+		}
 
 	protected:
 		void compute() override;
@@ -159,6 +175,5 @@ namespace dyno
 		bool mUseBroadPhasePatchPairs = false;
 		bool mWarnedEmptyPatchMapping = false;
 		bool mWarnedEmptyElementMapping = false;
-
 	};
 }

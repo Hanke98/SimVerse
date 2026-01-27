@@ -10,6 +10,7 @@
 #include "Collision/CollistionDetectionBoundingBox.h"
 #include "Collision/NeighborTriMeshQuery.h"
 #include "Collision/NeighborMeshQuery.h"
+#include "Topology/LinearBVH.h"
 
 #include "RigidBody/Module/ContactsUnion.h"
 #include "RigidBody/Module/InstanceTransform.h"
@@ -329,6 +330,37 @@ namespace dyno
 
             shape2PatchOffsets[l + 1] = patchTotal;
         }
+
+        std::vector<std::shared_ptr<LinearBVH<TDataType>>> shapeBVHs;
+        shapeBVHs.resize(urdfShapes.size());
+
+        size_t builtShapeBvhCount = 0;
+        for (size_t shapeId = 0; shapeId < urdfShapes.size(); ++shapeId)
+        {
+            int begin = shape2PatchOffsets[shapeId];
+            int end = shape2PatchOffsets[shapeId + 1];
+            int count = end - begin;
+            if (count <= 0)
+                continue;
+
+            if (begin < 0 || end > static_cast<int>(patchAabbsRestWorld.size()))
+                continue;
+
+            DArray<AABB> patchAabbsDevice;
+            patchAabbsDevice.assign(patchAabbsRestWorld, static_cast<uint>(count), 0, static_cast<uint>(begin));
+
+            auto bvh = std::make_shared<LinearBVH<TDataType>>();
+            bvh->construct(patchAabbsDevice);
+            patchAabbsDevice.clear();
+
+            shapeBVHs[shapeId] = bvh;
+            ++builtShapeBvhCount;
+        }
+
+        mNeighborTriMeshQuery->inShapeBVHs()->setValue(shapeBVHs);
+        printf("[NeighborTriMeshQuery] Built %zu shape BVHs (shapeCount=%zu)\n",
+               builtShapeBvhCount,
+               urdfShapes.size());
 
         mNeighborTriMeshQuery->inShapeAABBs()->assign(shapeAabbsLocal);
         mNeighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsRestWorld);

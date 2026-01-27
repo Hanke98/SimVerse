@@ -1851,6 +1851,7 @@ namespace dyno
 		// this->inShape2PatchCounts()->tagOptional(true);
 		// this->inShape2RigidBodyIds()->tagOptional(true);
 		this->inShape2ElementIds()->tagOptional(true);
+		this->inShapeBVHs()->tagOptional(true);
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
 		this->varDHead()->setValue(Real(0));
@@ -1860,6 +1861,17 @@ namespace dyno
 	template<typename TDataType>
 	NeighborTriMeshQuery<TDataType>::~NeighborTriMeshQuery()
 	{
+		auto& shapeBVHs = this->inShapeBVHs()->constDataPtr();
+		if (shapeBVHs != nullptr)
+		{
+			for (const auto& bvh : *shapeBVHs)
+			{
+				if (bvh)
+				{
+					bvh->release();
+				}
+			}
+		}
 	}
 
 	// template<typename TDataType>

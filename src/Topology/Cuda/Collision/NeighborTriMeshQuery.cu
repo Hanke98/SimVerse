@@ -6,6 +6,7 @@
 #include "../../../Dynamics/Cuda/RigidBody/RigidBodySystem.h"
 #include "Vector/Vector3D.h"
 #include <cmath>
+#include <cassert>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -36,6 +37,34 @@ namespace dyno
 		return v;
 	}
 
+	__device__ inline Vec3f NLQ_WarpReduceMinVec3(Vec3f v)
+	{
+		for (int offset = 16; offset > 0; offset >>= 1)
+		{
+			Real other = __shfl_down_sync(0xffffffff, v[0], offset);
+			v[0] = v[0] < other ? v[0] : other;
+			other = __shfl_down_sync(0xffffffff, v[1], offset);
+			v[1] = v[1] < other ? v[1] : other;
+			other = __shfl_down_sync(0xffffffff, v[2], offset);
+			v[2] = v[2] < other ? v[2] : other;
+		}
+		return v;
+	}
+
+	__device__ inline Vec3f NLQ_WarpReduceMaxVec3(Vec3f v)
+	{
+		for (int offset = 16; offset > 0; offset >>= 1)
+		{
+			Real other = __shfl_down_sync(0xffffffff, v[0], offset);
+			v[0] = v[0] > other ? v[0] : other;
+			other = __shfl_down_sync(0xffffffff, v[1], offset);
+			v[1] = v[1] > other ? v[1] : other;
+			other = __shfl_down_sync(0xffffffff, v[2], offset);
+			v[2] = v[2] > other ? v[2] : other;
+		}
+		return v;
+	}
+
 	__device__ inline int NLQ_WarpExclusivePrefix(int v, int lane)
 	{
 		int sum = v;
@@ -46,6 +75,16 @@ namespace dyno
 				sum += n;
 		}
 		return sum - v;
+	}
+
+	// Transform a point from current world space to target rest-world space.
+	// p_rest = RRest^T * (p_world - tRest)
+	__device__ inline Vec3f NLQ_TransformWorldPointToRest(
+		const Vec3f& pWorld,
+		const Mat3f& RRest,
+		const Vec3f& tRest)
+	{
+		return RRest.transpose() * (pWorld - tRest);
 	}
 
 	// NOTE: localAabb is actually the patch AABB in rest world space (restWorldAabb).
@@ -323,7 +362,7 @@ namespace dyno
 		for (int i = 0; i < groupCount; ++i)
 		{
 			int g = groupStart + i;
-			if (g < 0 || g >= group2PatchCounts.size() || g >= group2PatchOffsets.size() || g >= group2TargetIds.size())
+			if (g < 0 || g >= group2PatchCounts.size())
 				continue;
 			group2PatchOffsets[g] = sum;
 			group2TargetIds[g] = target;
@@ -440,6 +479,105 @@ namespace dyno
 		Mat3f RRest = shapeRestR[targetId];
 		Vec3f tRest = shapeRestT[targetId];
 		aabbs[tId] = NLQ_TransformWorldAabbToRest(aabbs[tId], RRest, tRest);
+	}
+
+	// Warp-per-patch: build source patch AABBs directly from triangles (current world) in target rest-world space.
+	template<typename Coord, typename Triangle>
+	__global__ void NLQ_UpdateSourcePatchAabbsFromTrianglesWarp(
+		DArray<AABB> outAabbs,
+		DArray<uint> source2PatchIds,
+		DArray<int> source2TargetIds,
+		DArray<int> patch2TriOffsets,
+		DArray<int> patch2TriIndices,
+		DArray<Triangle> triangles,
+		DArray<Coord> vertices,
+		DArray<uint> patch2Shape,
+		DArray<Mat3f> targetRestR,
+		DArray<Vec3f> targetRestT,
+		int patchTriCount,
+		int triCount,
+		int vertexCount)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		int warpId = tId / 32;
+		int lane = tId % 32; 
+
+		if (warpId >= outAabbs.size())
+			return;
+
+		int patchId = (int)source2PatchIds[warpId];
+		if (patchId < 0 || patchId + 1 >= patch2TriOffsets.size())
+			return;
+
+		int targetId = source2TargetIds[warpId];
+		if (targetId < 0 || targetId >= targetRestR.size() || targetId >= targetRestT.size())
+			return;
+
+		int start = NLQ_ClampInt(patch2TriOffsets[patchId], 0, patchTriCount);
+		int end = NLQ_ClampInt(patch2TriOffsets[patchId + 1], 0, patchTriCount);
+		int triCountLocal = end - start;
+		if (triCountLocal <= 0 || triCountLocal > 32)
+		{
+			if (lane == 0)
+			{
+				AABB box;
+				auto zero = Vec3f(Real(0));
+				box.v0 = zero;
+				box.v1 = zero;
+				outAabbs[warpId] = box;
+			}
+			printf("[NeighborTriMeshQuery] Invalid triCountLocal: %d\n", 
+				triCountLocal);
+			return;
+		}
+
+		Mat3f RRest = targetRestR[targetId];
+		Vec3f tRest = targetRestT[targetId];
+
+		Vec3f localMin(REAL_MAX);
+		Vec3f localMax(-REAL_MAX);
+
+		if (lane < triCountLocal)
+		{
+			int triId = patch2TriIndices[start + lane];
+			bool triValid = (triId >= 0 && triId < triCount);
+			if (triValid)
+			{
+				Triangle tri = triangles[triId];
+				int v0 = tri[0];
+				int v1 = tri[1];
+				int v2 = tri[2];
+
+				bool vValid = (v0 >= 0 && v0 < vertexCount
+					&& v1 >= 0 && v1 < vertexCount
+					&& v2 >= 0 && v2 < vertexCount);
+				if (vValid)
+				{
+					// get triangle vertices
+					Vec3f p0c = vertices[v0];
+					Vec3f p1c = vertices[v1];
+					Vec3f p2c = vertices[v2];
+
+					Vec3f p0 = NLQ_TransformWorldPointToRest(p0c, RRest, tRest);
+					Vec3f p1 = NLQ_TransformWorldPointToRest(p1c, RRest, tRest);
+					Vec3f p2 = NLQ_TransformWorldPointToRest(p2c, RRest, tRest);
+
+					localMin = p0.minimum(p1).minimum(p2);
+					localMax = p0.maximum(p1).maximum(p2);
+				}
+			}
+		}
+
+		Vec3f warpMin = NLQ_WarpReduceMinVec3(localMin);
+		Vec3f warpMax = NLQ_WarpReduceMaxVec3(localMax);
+
+		if (lane == 0)
+		{
+			AABB box;
+			box.v0 = warpMin;
+			box.v1 = warpMax;
+			outAabbs[warpId] = box;
+		}
 	}
 
 	// template<typename Real, typename Coord, typename Matrix, typename AABB>
@@ -1484,8 +1622,8 @@ namespace dyno
 		int triCount)
 	{
 		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		int warpId = tId >> 5;
-		int lane = tId & 31;
+		int warpId = tId / 32; // representing 
+		int lane = tId % 32;   // representing 
 		if (warpId >= triContactList.size()) return;
 
 		int triIdCurrent = triListTriIds[warpId];
@@ -2739,6 +2877,32 @@ namespace dyno
 			return false;
 		}
 
+		// Patch -> triangle mapping and triangle set (current world coordinates, same as narrowPhase)
+		auto& patch2TriOffsets = this->inPatch2TriOffsets()->getData();
+		auto& patch2TriIndices = this->inPatch2TriIndices()->getData();
+		if (patch2TriOffsets.size() < (uint)(patchCount + 1) || patch2TriIndices.size() == 0)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+
+		auto ts = this->inTriangleSet()->constDataPtr();
+		if (ts == nullptr)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+		auto& vertices = ts->getPoints();
+		auto& triIndices = ts->triangleIndices();
+		int triCount = (int)triIndices.size();
+		int vertexCount = (int)vertices.size();
+		if (triCount <= 0 || vertexCount <= 0)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+		int patchTriCount = (int)patch2TriIndices.size();
+
 		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
 		if (shapeCount <= 0)
 		{
@@ -2763,6 +2927,9 @@ namespace dyno
 			mShape2RigidBodyIds);
 		cuSynchronize();
 
+		// Legacy: update patch AABBs by transforming rest-world AABB corners.
+		// Kept for comparison/backward reference (do not delete).
+		/*
 		// Ensure mPatchAabbsWorld is properly sized before the kernel writes to it
 		if (mPatchAabbsWorld.size() != patchCount)
 			mPatchAabbsWorld.resize(patchCount);
@@ -2778,6 +2945,7 @@ namespace dyno
 			mShapeRestR,
 			mShapeRestT);
 		cuSynchronize();
+		*/
 
 
 		// Patch AABBs updated
@@ -2927,7 +3095,6 @@ namespace dyno
 		// mTarget2SourceCounts：how many patches of source shapes are in each target shape
 		// mGroup2PatchOffsets: offsets of patches for each source shape in a target shape
 		// mGroup2TargetIds: target shape id for each patch of source shape
-		// mTarget2SourceCounts[target]：该 target 的所有 sourceShape 的 patch 数之和
 		// mGroup2PatchOffsets[g]：group g 在其 target 内部的 patch 起始偏移
 		// mGroup2TargetIds[g]：group g 属于哪个 target
 		cuExecute((uint)shapeCount,
@@ -2975,7 +3142,7 @@ namespace dyno
 			mSourcePatchAabbs,
 			mSource2PatchIds,
 			mSource2TargetIds,
-			mPatchAabbsWorld,
+			patchAabbs,
 			mTarget2SourceShapes,
 			mShape2PatchOffsets,
 			mGroup2GlobalOffsets,
@@ -2985,6 +3152,9 @@ namespace dyno
 
 		if (totalSource > 0)
 		{
+			// Legacy: transform AABBs into target rest space by transforming AABB corners.
+			// Kept for comparison/backward reference (do not delete).
+			/*
 			// Launch kernel to transform source patch AABBs into target rest space.
 			cuExecute((uint)totalSource,
 				NLQ_TransformPatchAabbsToTargetRest,
@@ -2992,6 +3162,26 @@ namespace dyno
 				mSource2TargetIds,
 				mShapeRestR,
 				mShapeRestT);
+			*/
+
+			// Build patch AABBs directly from triangles (current world space) in target rest-world space.
+			// p_world comes from triangleSet; transform to target rest with RRest^T * (p_world - tRest).
+			uint totalThreads = (uint)totalSource * 32;
+			cuExecute(totalThreads,
+				NLQ_UpdateSourcePatchAabbsFromTrianglesWarp,
+				mSourcePatchAabbs,
+				mSource2PatchIds,
+				mSource2TargetIds,
+				patch2TriOffsets,
+				patch2TriIndices,
+				triIndices,
+				vertices,
+				mPatch2Shape,
+				mShapeRestR,
+				mShapeRestT,
+				patchTriCount,
+				triCount,
+				vertexCount);
 		}
 
 		DArray<uint> localBroadPhaseCounter;

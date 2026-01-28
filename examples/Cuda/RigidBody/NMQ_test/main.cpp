@@ -129,6 +129,9 @@ std::shared_ptr<SceneGraph> creatScene()
         }
     }
     multiRobotArm->setupNeighborTriMeshQueryFromUrdf();
+
+
+
 	// multiRobotArm->setupNeighborMeshQueryFromUrdf();
 
 	// auto multibody = scn->addNode(std::make_shared<MultibodySystem<DataType3f>>());

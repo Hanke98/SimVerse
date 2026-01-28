@@ -174,7 +174,7 @@ protected:
 
     DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
 
-    std::shared_ptr<NeighborTriMeshQuery<TDataType>> mNeighborTriMeshQuery;
+    std::shared_ptr<NeighborMeshQuery<TDataType>> mNeighborTriMeshQuery;
   };
 
 } // namespace dyno

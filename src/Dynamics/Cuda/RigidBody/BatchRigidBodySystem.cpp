@@ -62,8 +62,8 @@ namespace dyno
         transformer->outInstanceTransform()->connect(tm2ts->inTransform());
         this->animationPipeline()->pushModule(tm2ts);
 
-        // mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
-        mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
+        mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
+        // mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
         
         tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
         this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());

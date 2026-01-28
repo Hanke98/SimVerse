@@ -1124,8 +1124,8 @@ namespace dyno
 					cp.normal2 = manifold.normal;
 					cp.contactType = ContactType::CT_NONPENETRATION;
 					cp.interpenetration = -manifold.contacts[n].penetration;
-					printf("[NeighborTriMeshQuery] Contact found between shape %d (tri %d) and shape %d (tri %d), penetration=%f\n",
-                            shape0, triId0, shape1, triId1, cp.interpenetration);
+					// printf("[NeighborTriMeshQuery] Contact found between shape %d (tri %d) and shape %d (tri %d), penetration=%f\n",
+                            // shape0, triId0, shape1, triId1, cp.interpenetration);
 
 					contacts[offset + write] = cp;
 					write++;

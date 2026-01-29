@@ -2164,47 +2164,80 @@ namespace dyno
         auto checkAxisE = [&](Segment3D edgeA, Segment3D edgeB) { checkAxisEdge(sat, triA, triB, radiusA, radiusB, edgeA, edgeB); };
         auto checkAxisT = [&](Triangle3D face, auto type) { checkAxisTri(sat, triA, triB, radiusA, radiusB, face, type); };
 
-        // auto checkSeparated = [&](Vec3f axis) {
-        //     Vec3f N = axis;
-        //     Real D = 0;
-        //     Real bA, bB;
-        //     if (N.norm() <= EPSILON) return false;
-        //     N /= N.norm();
-        //     checkSignedDistanceAxis(D, bA, bB, N, triA, triB, radiusA, radiusB);
-        //     if (REAL_GREAT(D, 0))
-        //     {
-        //         sat.update(SeparationType::CT_POINT, bA, bB, D, N, triA.v[0], triB.v[0]);
-        //         return true;
-        //     }
-        //     return false;
-        // };
+        auto handleCoplanarOverlap = [&]() -> bool
+        {
+            Vec3f nA = triA.normal();
+            Vec3f nB = triB.normal();
+            Real nALen = nA.norm();
+            Real nBLen = nB.norm();
+            if (nALen <= EPSILON || nBLen <= EPSILON) return false;
 
-        // // Fast separating-axis reject without feature checks.
-        // if (checkSeparated(triA.normal())) return;
-        // if (checkSeparated(triB.normal())) return;
-		// for (int i = 0; i < 3; i++)
-		// 	for (int j = 0; j < 3; j++)
-		// 	{
-        //         int ni = (i == 2) ? 0 : i + 1;
-        //         int nj = (j == 2) ? 0 : j + 1;
-        //         Vec3f dirA = triA.v[ni] - triA.v[i];
-        //         Vec3f dirB = triB.v[nj] - triB.v[j];
-        //         if (checkSeparated(dirA.cross(dirB))) return;
-		// 	}
-        // for (int j = 0; j < 3; j++)
-        // {
-        //     Vec3f pA = triA.v[j];
-        //     Point3D queryP(pA);
-        //     Point3D projP = queryP.project(triB);
-        //     if (checkSeparated(projP.origin - pA)) return;
-        // }
-        // for (int j = 0; j < 3; j++)
-        // {
-        //     Vec3f pB = triB.v[j];
-        //     Point3D queryP(pB);
-        //     Point3D projP = queryP.project(triA);
-        //     if (checkSeparated(pB - projP.origin)) return;
-        // }
+            Vec3f nAUnit = nA / nALen;
+            Vec3f nBUnit = nB / nBLen;
+            Real ndot = abs(nAUnit.dot(nBUnit));
+            if (REAL_LESS(ndot, Real(1) - Real(1e-4))) return false;
+
+            Real maxL = triA.maximumEdgeLength() + triB.maximumEdgeLength();
+            Real planeEps = EPSILON * (maxL + Real(1));
+            Real planeDist = abs((triB.v[0] - triA.v[0]).dot(nAUnit));
+            if (REAL_GREAT(planeDist, planeEps)) return false;
+
+            using Coord2D = Vector<Real, 2>;
+            int dropAxis = 2;
+            Real ax = abs(nAUnit.x);
+            Real ay = abs(nAUnit.y);
+            Real az = abs(nAUnit.z);
+            if (ax >= ay && ax >= az) dropAxis = 0;
+            else if (ay >= az) dropAxis = 1;
+
+            auto to2D = [&](const Vec3f& v) -> Coord2D
+            {
+                return (dropAxis == 0) ? Coord2D(v.y, v.z)
+                    : (dropAxis == 1) ? Coord2D(v.x, v.z)
+                    : Coord2D(v.x, v.y);
+            };
+
+            Coord2D a2[3] = { to2D(triA.v[0]), to2D(triA.v[1]), to2D(triA.v[2]) };
+            Coord2D b2[3] = { to2D(triB.v[0]), to2D(triB.v[1]), to2D(triB.v[2]) };
+
+            auto overlapOnAxis = [&](const Coord2D& axis) -> bool
+            {
+                if (axis.normSquared() <= EPSILON * EPSILON) return true;
+                Real minA = a2[0].dot(axis), maxA = minA;
+                Real minB = b2[0].dot(axis), maxB = minB;
+                for (int i = 1; i < 3; ++i)
+                {
+                    Real pa = a2[i].dot(axis);
+                    Real pb = b2[i].dot(axis);
+                    if (pa < minA) minA = pa;
+                    if (pa > maxA) maxA = pa;
+                    if (pb < minB) minB = pb;
+                    if (pb > maxB) maxB = pb;
+                }
+                return !(REAL_GREAT(minA, maxB) || REAL_GREAT(minB, maxA));
+            };
+
+            for (int i = 0; i < 3; ++i)
+            {
+                Coord2D e = a2[(i + 1) % 3] - a2[i];
+                Coord2D axis(e.y, -e.x);
+                if (!overlapOnAxis(axis)) return false;
+            }
+            for (int i = 0; i < 3; ++i)
+            {
+                Coord2D e = b2[(i + 1) % 3] - b2[i];
+                Coord2D axis(e.y, -e.x);
+                if (!overlapOnAxis(axis)) return false;
+            }
+
+            Real depth = -(radiusA + radiusB);
+            if (!REAL_LESS(depth, 0)) depth = -planeEps;
+            Real boundary = triA.v[0].dot(nAUnit);
+            sat.update(SeparationType::CT_TRIA, boundary, boundary, depth, nAUnit, triA.v[0], triA.v[1], triA.v[2]);
+            return true;
+        };
+
+        if (handleCoplanarOverlap()) return;
         
         // Minkowski Face Normal
         // tri face

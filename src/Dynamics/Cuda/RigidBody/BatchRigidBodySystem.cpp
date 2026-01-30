@@ -43,84 +43,76 @@ namespace dyno
         auto defaultTopo = std::make_shared<DiscreteElements<TDataType>>();
         this->stateTopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
 
-        // NeighborElementQuery path (kept for quick rollback)
-        // auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
-        // elementQuery->varSelfCollision()->setValue(true);
-        // this->stateTopology()->connect(elementQuery->inDiscreteElements());
-        // this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
-        // this->stateAttribute()->connect(elementQuery->inAttribute());
-        // this->animationPipeline()->pushModule(elementQuery);
-
-        auto transformer = std::make_shared<InstanceTransform<DataType3f>>();
-		this->stateCenter()->connect(transformer->inCenter());
-		this->stateRotationMatrix()->connect(transformer->inRotationMatrix());
-		this->stateBindingPair()->connect(transformer->inBindingPair());
-		this->stateBindingTag()->connect(transformer->inBindingTag());
-		this->stateInstanceTransform()->connect(transformer->inInstanceTransform());
-		this->animationPipeline()->pushModule(transformer);
-
-        auto tm2ts = std::make_shared<TextureMeshToTriangleSet<TDataType>>();
-        this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
-        transformer->outInstanceTransform()->connect(tm2ts->inTransform());
-        this->animationPipeline()->pushModule(tm2ts);
-
-        // mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
-        mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
-        
-        tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
-        this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
-        this->stateRotationMatrix()->connect(mNeighborTriMeshQuery->inRotationMatrix());
-        this->stateTopology()->connect(mNeighborTriMeshQuery->inDiscreteElements());
-        this->animationPipeline()->pushModule(mNeighborTriMeshQuery);
-
-		// Bridge module output to a Node field so GraphicsPipeline can discover render modules.
-		mNeighborTriMeshQuery->outPotentialTriSet()->connect(this->statePotentialTriSet());
+        auto merge = std::make_shared<ContactsUnion<TDataType>>();
 
         auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
         this->stateTopology()->connect(cdBV->inDiscreteElements());
         this->animationPipeline()->pushModule(cdBV);
 
-        auto merge = std::make_shared<ContactsUnion<TDataType>>();
-        mNeighborTriMeshQuery->outContacts()->connect(merge->inContactsA());
-        // elementQuery->outContacts()->connect(merge->inContactsA());
-        cdBV->outContacts()->connect(merge->inContactsB());
-        this->animationPipeline()->pushModule(merge);
+        if (this->varCollisionDetectionType()->getValue() == TriMesh)
+        {
+            auto transformer = std::make_shared<InstanceTransform<DataType3f>>();
+            this->stateCenter()->connect(transformer->inCenter());
+            this->stateRotationMatrix()->connect(transformer->inRotationMatrix());
+            this->stateBindingPair()->connect(transformer->inBindingPair());
+            this->stateBindingTag()->connect(transformer->inBindingTag());
+            this->stateInstanceTransform()->connect(transformer->inInstanceTransform());
+            this->animationPipeline()->pushModule(transformer);
 
-        // auto transformer1 = std::make_shared<InstanceTransform<DataType3f>>();
-		// this->stateCenter()->connect(transformer1->inCenter());
-		// this->stateRotationMatrix()->connect(transformer1->inRotationMatrix());
-		// this->stateBindingPair()->connect(transformer1->inBindingPair());
-		// this->stateBindingTag()->connect(transformer1->inBindingTag());
-		// this->stateInstanceTransform()->connect(transformer1->inInstanceTransform());
-		// this->graphicsPipeline()->pushModule(transformer1);
+            auto tm2ts = std::make_shared<TextureMeshToTriangleSet<TDataType>>();
+            this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
+            transformer->outInstanceTransform()->connect(tm2ts->inTransform());
+            this->animationPipeline()->pushModule(tm2ts);
 
-        // auto tm2ts1 = std::make_shared<TextureMeshToTriangleSet<TDataType>>();
-        // this->stateTextureMesh()->connect(tm2ts1->inTextureMesh());
-        // transformer1->outInstanceTransform()->connect(tm2ts1->inTransform());
-        // this->graphicsPipeline()->pushModule(tm2ts1);
+            // mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
+            mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
+            
+            tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
+            this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
+            this->stateRotationMatrix()->connect(mNeighborTriMeshQuery->inRotationMatrix());
+            this->stateTopology()->connect(mNeighborTriMeshQuery->inDiscreteElements());
+            this->animationPipeline()->pushModule(mNeighborTriMeshQuery);
 
-        // auto triRender = std::make_shared<GLSurfaceVisualModule>();
-		// triRender->varBaseColor()->setValue(Color(0, 0, 1));
-		// tm2ts1->outTriangleSet()->connect(triRender->inTriangleSet());
-		// this->graphicsPipeline()->pushModule(triRender);
+            // Bridge module output to a Node field so GraphicsPipeline can discover render modules.
+            mNeighborTriMeshQuery->outPotentialTriSet()->connect(this->statePotentialTriSet());
 
-        auto contatcTriSet = std::make_shared<GLSurfaceVisualModule>();
-        contatcTriSet->setColor(Color(1.0f, 0.0f, 1.0f));
-	    contatcTriSet->setAlpha(1.0f);
-	    // contatcTriSet->varUseVertexNormal()->setValue(false);
-	    // contatcTriSet->varForceUpdate()->setValue(true);
-		this->statePotentialTriSet()->connect(contatcTriSet->inTriangleSet());
-        this->graphicsPipeline()->pushModule(contatcTriSet);
+            mNeighborTriMeshQuery->outContacts()->connect(merge->inContactsA());
+            cdBV->outContacts()->connect(merge->inContactsB());
+            this->animationPipeline()->pushModule(merge);
 
-        auto contactPointMapper = std::make_shared<ContactsToPointSet<DataType3f>>();
-        mNeighborTriMeshQuery->outContacts()->connect(contactPointMapper->inContacts());
-        this->graphicsPipeline()->pushModule(contactPointMapper);
+            if (this->varEnableVisualizeCollisionTriSet()->getValue()) {
+                mNeighborTriMeshQuery->inEnableVisualizeCollisionTriSet()->setValue(true);
 
-        auto pointRender = std::make_shared<GLPointVisualModule>();
-        pointRender->setColor(Color(1, 0, 0));
-        pointRender->varPointSize()->setValue(0.03f);
-        contactPointMapper->outPointSet()->connect(pointRender->inPointSet());
-        this->graphicsPipeline()->pushModule(pointRender);
+                auto contactTriSet = std::make_shared<GLSurfaceVisualModule>();
+                contactTriSet->setColor(Color(1.0f, 0.0f, 1.0f));
+                contactTriSet->setAlpha(1.0f);
+                this->statePotentialTriSet()->connect(contactTriSet->inTriangleSet());
+                this->graphicsPipeline()->pushModule(contactTriSet);
+
+                auto contactPointMapper = std::make_shared<ContactsToPointSet<DataType3f>>();
+                mNeighborTriMeshQuery->outContacts()->connect(contactPointMapper->inContacts());
+                this->graphicsPipeline()->pushModule(contactPointMapper);
+
+                auto pointRender = std::make_shared<GLPointVisualModule>();
+                pointRender->setColor(Color(1, 0, 0));
+                pointRender->varPointSize()->setValue(0.03f);
+                contactPointMapper->outPointSet()->connect(pointRender->inPointSet());
+                this->graphicsPipeline()->pushModule(pointRender);
+            } else {
+                mNeighborTriMeshQuery->inEnableVisualizeCollisionTriSet()->setValue(false);
+            }
+        } else if (this->varCollisionDetectionType()->getValue() == Element) {
+            auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
+            elementQuery->varSelfCollision()->setValue(true);
+            this->stateTopology()->connect(elementQuery->inDiscreteElements());
+            this->stateCollisionMask()->connect(elementQuery->inCollisionMask());
+            this->stateAttribute()->connect(elementQuery->inAttribute());
+            this->animationPipeline()->pushModule(elementQuery);
+
+            elementQuery->outContacts()->connect(merge->inContactsA());
+            cdBV->outContacts()->connect(merge->inContactsB());
+            this->animationPipeline()->pushModule(merge);
+        }
 
         auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
         // auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
@@ -180,41 +172,8 @@ namespace dyno
         using Matrix = typename TDataType::Matrix;
         using AABB = TAlignedBox3D<Real>;
 
-        if (this->urdfInfo.linkAABBs.size() != urdfShapes.size())
-        {
-            printf("[NeighborTriMeshQuery] shapeAABBs size mismatch: %zu vs %zu\n",
-                   this->urdfInfo.linkAABBs.size(),
-                   urdfShapes.size());
-            // return;
-        }
-
-        std::vector<AABB> shapeAabbsLocal(meshShapeCount);
-
         std::vector<Coord> restShapeCenters(meshShapeCount, Coord(Real(0)));
         std::vector<Matrix> restShapeRotations(meshShapeCount, Matrix::identityMatrix());
-
-        auto toLocalAabb = [](const AABB& worldAabb, const Matrix& RRest, const Coord& tRest) -> AABB {
-            Coord centerWorld = (worldAabb.v0 + worldAabb.v1) * Real(0.5);
-            Coord extentWorld = (worldAabb.v1 - worldAabb.v0) * Real(0.5);
-
-            Coord centerLocal = RRest.transpose() * (centerWorld - tRest);
-
-            Coord extentLocal;
-            extentLocal[0] = std::fabs(RRest(0, 0)) * extentWorld[0]
-                           + std::fabs(RRest(1, 0)) * extentWorld[1]
-                           + std::fabs(RRest(2, 0)) * extentWorld[2];
-            extentLocal[1] = std::fabs(RRest(0, 1)) * extentWorld[0]
-                           + std::fabs(RRest(1, 1)) * extentWorld[1]
-                           + std::fabs(RRest(2, 1)) * extentWorld[2];
-            extentLocal[2] = std::fabs(RRest(0, 2)) * extentWorld[0]
-                           + std::fabs(RRest(1, 2)) * extentWorld[1]
-                           + std::fabs(RRest(2, 2)) * extentWorld[2];
-
-            AABB localAabb;
-            localAabb.v0 = centerLocal - extentLocal;
-            localAabb.v1 = centerLocal + extentLocal;
-            return localAabb;
-        };
 
         // Calculate Local AABBs, rest centers and rest rotations for each mesh shape
         for (size_t l = 0; l < urdfShapes.size(); ++l)
@@ -236,11 +195,6 @@ namespace dyno
             restShapeCenters[shapeId] = bbWorld.translation();
             restShapeRotations[shapeId] = bbWorld.rotation();
 
-            // Compute local AABB
-            if (l < this->urdfInfo.linkAABBs.size())
-            {
-                shapeAabbsLocal[shapeId] = toLocalAabb(this->urdfInfo.linkAABBs[l], restShapeRotations[shapeId], restShapeCenters[shapeId]);
-            }
         }
 
         // Populate texture mesh shape to rigid body id mapping
@@ -298,11 +252,11 @@ namespace dyno
                 {
                     patchAabbsRestWorld.push_back(shape.patchAABBs[p]);
                 }
-                else
-                {
-                    // Legacy local-pose path (kept for comparison / fallback).
-                    patchAabbsRestWorld.push_back(toLocalAabb(shape.patchAABBs[p], restShapeRotations[shapeId], restShapeCenters[shapeId]));
-                }
+                // else
+                // {
+                //     // Legacy local-pose path (kept for comparison / fallback).
+                //     patchAabbsRestWorld.push_back(toLocalAabb(shape.patchAABBs[p], restShapeRotations[shapeId], restShapeCenters[shapeId]));
+                // }
 
                 int begin = shape.patchOffsets[p];
                 int end = shape.patchOffsets[p + 1];
@@ -363,7 +317,6 @@ namespace dyno
                builtShapeBvhCount,
                urdfShapes.size());
 
-        mNeighborTriMeshQuery->inShapeAABBs()->assign(shapeAabbsLocal);
         mNeighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsRestWorld);
         mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);
         mNeighborTriMeshQuery->inPatch2TriOffsets()->assign(patch2TriOffsets);

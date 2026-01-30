@@ -497,6 +497,14 @@ namespace dyno
 	template<typename TDataType>
 	void NeighborElementQuery<TDataType>::compute()
 	{
+		CTimer broadTimer;
+		broadTimer.start();
+
+		// auto finishTiming = [&]() {
+		// 	timer.stop();
+		// 	std::cout << "[NeighborElementQuery] compute time: " << timer.getElapsedTime() << " ms" << std::endl;
+		// };
+
 		auto inTopo = this->inDiscreteElements()->getDataPtr();
 
 		if (this->outContacts()->isEmpty())
@@ -510,6 +518,7 @@ namespace dyno
 		{
 			auto& contacts = this->outContacts()->getData();
 			contacts.resize(0);
+			// finishTiming();
 			return;
 		}
 
@@ -554,6 +563,7 @@ namespace dyno
 
 		auto& contactList = mBroadPhaseCD->outContactList()->getData();
 		if (contactList.elementSize() == 0) {
+			// finishTiming();
 			return;
 		}
 
@@ -567,6 +577,7 @@ namespace dyno
 
 		if (totalSize <= 0) {
 			this->outContacts()->clear();
+			// finishTiming();
 			return;
 		}
 
@@ -579,6 +590,12 @@ namespace dyno
 			deviceIds,
 			count,
 			contactList);
+
+		broadTimer.stop();
+		std::cout << "[NeighborElementQuery] compute broad phase time: " << broadTimer.getElapsedTime() << " ms" << std::endl;
+
+		CTimer narrowTimer;
+		narrowTimer.start();
 
 		count.clear();
 
@@ -722,6 +739,11 @@ namespace dyno
 		contactNum.clear();
 		deviceIds.clear();
 		nbr_cons_tmp.clear();
+
+		// finishTiming();
+		narrowTimer.stop();
+		std::cout << "[NeighborElementQuery] compute narrow phase time: " << narrowTimer.getElapsedTime() << " ms" << std::endl;
+
 	}
 
 	DEFINE_CLASS(NeighborElementQuery);

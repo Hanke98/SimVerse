@@ -82,6 +82,12 @@ public:
       std::vector<std::vector<Real>> theta;
     };
 
+    enum CollisionDetectionType
+    {
+        Element,
+        TriMesh
+    };
+
     BatchRigidBodySystem();
     ~BatchRigidBodySystem() override;
 
@@ -163,6 +169,14 @@ public:
     std::vector<Vec3f> getCentersByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     std::vector<Real> getMassByLocalIndex(BatchRigidBodySystemLocalIndexParam& param);
     // ------------------------------------
+
+public:
+
+    DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
+    
+    DEF_VAR(CollisionDetectionType, CollisionDetectionType, TriMesh, "CollisionDetectionType");
+
+    DEF_VAR(Bool, EnableVisualizeCollisionTriSet, true, "Enable visualize collision triSet mesh");
     
 protected:
 
@@ -189,7 +203,7 @@ protected:
     std::vector<int> mTextureMeshShape2ElementIdsDense;
     std::vector<int> mTextureMeshShape2RigidBodyIds; 
 
-    DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
+    
 
     std::shared_ptr<NeighborTriMeshQuery<TDataType>> mNeighborTriMeshQuery;
   };

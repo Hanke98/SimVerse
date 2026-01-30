@@ -5,6 +5,7 @@
 #include "Collision/CollisionDetectionBroadPhase.h"
 #include "../../../Dynamics/Cuda/RigidBody/RigidBodySystem.h"
 #include "Vector/Vector3D.h"
+#include "Timer.h"
 #include <cmath>
 #include <cassert>
 #include <iostream>
@@ -87,47 +88,6 @@ namespace dyno
 		return RRest.transpose() * (pWorld - tRest);
 	}
 
-	// NOTE: localAabb is actually the patch AABB in rest world space (restWorldAabb).
-	// R represents the rotation from rest to current (or an equivalent world rotation).
-	// t represents the current world-space center of the patch AABB.
-	// x_1 = R \cdot (x_0 - c_0) + t
-	__device__ inline AABB NLQ_TransformLocalAabbToWorld(const AABB& localAabb, const Mat3f& R, const Vec3f& t)
-	{
-		Vec3f centerLocal = (localAabb.v0 + localAabb.v1) * Real(0.5);
-		Vec3f extentLocal = (localAabb.v1 - localAabb.v0) * Real(0.5);
-
-		Vec3f centerWorld = R * centerLocal + t;
-
-		Vec3f extentWorld;
-		extentWorld[0] = fabs(R(0, 0)) * extentLocal[0] + fabs(R(0, 1)) * extentLocal[1] + fabs(R(0, 2)) * extentLocal[2];
-		extentWorld[1] = fabs(R(1, 0)) * extentLocal[0] + fabs(R(1, 1)) * extentLocal[1] + fabs(R(1, 2)) * extentLocal[2];
-		extentWorld[2] = fabs(R(2, 0)) * extentLocal[0] + fabs(R(2, 1)) * extentLocal[1] + fabs(R(2, 2)) * extentLocal[2];
-
-		AABB worldAabb;
-		worldAabb.v0 = centerWorld - extentWorld;
-		worldAabb.v1 = centerWorld + extentWorld;
-		return worldAabb;
-	}
-
-	// Transform a world-space AABB into a target rest-pose coordinate system.
-	__device__ inline AABB NLQ_TransformWorldAabbToRest(const AABB& worldAabb, const Mat3f& RRest, const Vec3f& tRest)
-	{
-		Vec3f centerWorld = (worldAabb.v0 + worldAabb.v1) * Real(0.5);
-		Vec3f extentWorld = (worldAabb.v1 - worldAabb.v0) * Real(0.5);
-
-		Vec3f centerLocal = RRest.transpose() * (centerWorld - tRest);
-
-		Vec3f extentLocal;
-		extentLocal[0] = fabs(RRest(0, 0)) * extentWorld[0] + fabs(RRest(1, 0)) * extentWorld[1] + fabs(RRest(2, 0)) * extentWorld[2];
-		extentLocal[1] = fabs(RRest(0, 1)) * extentWorld[0] + fabs(RRest(1, 1)) * extentWorld[1] + fabs(RRest(2, 1)) * extentWorld[2];
-		extentLocal[2] = fabs(RRest(0, 2)) * extentWorld[0] + fabs(RRest(1, 2)) * extentWorld[1] + fabs(RRest(2, 2)) * extentWorld[2];
-
-		AABB localAabb;
-		localAabb.v0 = centerLocal - extentLocal;
-		localAabb.v1 = centerLocal + extentLocal;
-		return localAabb;
-	}
-
 	// inline bool NLQ_BuildShape2RigidBodyIds(
 	// 	const DArray<Pair<uint, uint>>& mapping,
 	// 	int shapeCount,
@@ -187,43 +147,6 @@ namespace dyno
 		tRel = tCurr - RRel * tRest;
 	}
 
-	// template<typename Real, typename Coord, typename Matrix>
-	inline void NLQ_GetRelativeTransformHost(
-		int shapeId,
-		const CArray<int>& shape2RigidBodyIds,
-		const CArray<Vec3f>& centers,
-		const CArray<Mat3f>& rotations,
-		const CArray<Vec3f>& restShapeCenters,
-		const CArray<Mat3f>& restShapeRotations,
-		Mat3f& RRel,
-		Vec3f& tRel,
-		int& bodyId)
-	{
-		bodyId = shapeId;
-		if (shape2RigidBodyIds.size() > 0 && shapeId >= 0 && shapeId < (int)shape2RigidBodyIds.size())
-			bodyId = shape2RigidBodyIds[shapeId];
-
-		if (bodyId < 0 || bodyId >= (int)centers.size() || bodyId >= (int)rotations.size())
-		{
-			RRel = Mat3f::identityMatrix();
-			tRel = Vec3f(Real(0));
-			return;
-		}
-
-		Vec3f tCurr = centers[bodyId];
-		Mat3f RCurr = rotations[bodyId];
-
-		Vec3f tRest = Vec3f(Real(0));
-		Mat3f RRest = Mat3f::identityMatrix();
-		if (shapeId >= 0 && shapeId < (int)restShapeCenters.size())
-			tRest = restShapeCenters[shapeId];
-		if (shapeId >= 0 && shapeId < (int)restShapeRotations.size())
-			RRest = restShapeRotations[shapeId];
-
-		RRel = RCurr * RRest.transpose();
-		tRel = tCurr - RRel * tRest;
-	}
-
 	__global__ void NLQ_ComputeShapeRestTransforms(
 		DArray<Mat3f> outR,
 		DArray<Vec3f> outT,
@@ -252,69 +175,6 @@ namespace dyno
 
 		outR[shapeId] = RRel;
 		outT[shapeId] = tRel;
-	}
-
-	__global__ void NLQ_CountGroupSourcePatches(
-		DArray<int> counts,
-		DArray<int> groupedSources,
-		DArray<int> shape2PatchOffsets,
-		int patchCount,
-		int groupStart,
-		int groupCount)
-	{
-		int localId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (localId >= groupCount || localId >= counts.size()) return;
-		int idx = groupStart + localId;
-		if (idx < 0 || idx >= groupedSources.size())
-		{
-			counts[localId] = 0;
-			return;
-		}
-		int shapeId = groupedSources[idx];
-		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size())
-		{
-			counts[localId] = 0;
-			return;
-		}
-		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount);
-		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount);
-		int sCount = sEnd - sBegin;
-		counts[localId] = sCount > 0 ? sCount : 0;
-	}
-
-	__global__ void NLQ_FillGroupPatchData(
-		DArray<AABB> outAabbs,
-		DArray<uint> outIds,
-		DArray<AABB> patchAabbsWorld,
-		DArray<int> groupedSources,
-		DArray<int> shape2PatchOffsets,
-		DArray<int> offsets,
-		int patchCount,
-		int groupStart,
-		int groupCount)
-	{
-		int localId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (localId >= groupCount || localId >= offsets.size()) return;
-		int idx = groupStart + localId; // global group index
-		if (idx < 0 || idx >= groupedSources.size()) return;
-		int shapeId = groupedSources[idx]; // source shape idx
-		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size()) return;
-		int sBegin = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount); // source patch begin
-		int sEnd = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount); // source patch end
-		int sCount = sEnd - sBegin;// source patch count
-		if (sCount <= 0) return;
-		int outBase = offsets[localId]; // source patch's begin in the souce patch output array
-		// TODO: parallel
-		for (int i = 0; i < sCount; ++i)
-		{
-			int srcIdx = sBegin + i; // source patch index
-			int outIdx = outBase + i; // source patch output array index
-			if (srcIdx < 0 || srcIdx >= patchAabbsWorld.size()) continue;
-			if (outIdx < 0 || outIdx >= outAabbs.size()) continue;
-			outAabbs[outIdx] = patchAabbsWorld[srcIdx]; // output source patch aabb
-			if (outIdx < outIds.size())
-				outIds[outIdx] = (uint)srcIdx; 		 // output source patch id
-		}
 	}
 
 	__global__ void NLQ_CountGroup2PatchCounts(
@@ -466,21 +326,6 @@ namespace dyno
 		outTargetIds[outIdx] = target;
 	}
 
-	__global__ void NLQ_TransformPatchAabbsToTargetRest(
-		DArray<AABB> aabbs,
-		DArray<int> source2TargetIds,
-		DArray<Mat3f> shapeRestR,
-		DArray<Vec3f> shapeRestT)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= aabbs.size() || tId >= source2TargetIds.size()) return;
-		int targetId = source2TargetIds[tId];
-		if (targetId < 0 || targetId >= shapeRestR.size() || targetId >= shapeRestT.size()) return;
-		Mat3f RRest = shapeRestR[targetId];
-		Vec3f tRest = shapeRestT[targetId];
-		aabbs[tId] = NLQ_TransformWorldAabbToRest(aabbs[tId], RRest, tRest);
-	}
-
 	// Warp-per-patch: build source patch AABBs directly from triangles (current world) in target rest-world space.
 	template<typename Coord, typename Triangle>
 	__global__ void NLQ_UpdateSourcePatchAabbsFromTrianglesWarp(
@@ -615,82 +460,6 @@ namespace dyno
 	// 		centers[bodyId]);
 	// }
 
-	// template<typename Real, typename Coord, typename Matrix, typename AABB>
-	// Update Patch AABBs from rest-local space to current-world space
-	__global__ void NLQ_UpdatePatchAabbs(
-		DArray<AABB> worldAabbs,
-		DArray<AABB> localAabbs,
-		DArray<uint> patch2Shape,
-		DArray<Vec3f> centers,
-		DArray<Mat3f> rotations,
-		DArray<int> shape2RigidBodyIds)
-	{
-		int patchId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (patchId >= localAabbs.size() || patchId >= worldAabbs.size())
-			return;
-
-		int shapeId = patchId < patch2Shape.size() ? (int)patch2Shape[patchId] : -1;
-		if (shapeId < 0)
-		{
-			worldAabbs[patchId] = localAabbs[patchId];
-			printf("[NeighborTriMeshQuery] UpdatePatchAabbs failure, patchId: %d, shapeId: %d\n", patchId, shapeId);
-			return;
-		}
-
-		int bodyId = shapeId;
-		if (shape2RigidBodyIds.size() > 0)
-		{
-			if (shapeId >= shape2RigidBodyIds.size())
-			{
-				worldAabbs[patchId] = localAabbs[patchId];
-				return;
-			}
-			bodyId = shape2RigidBodyIds[shapeId];
-		}
-
-		if (bodyId < 0 || bodyId >= centers.size() || bodyId >= rotations.size())
-		{
-			worldAabbs[patchId] = localAabbs[patchId];
-			return;
-		}
-
-		worldAabbs[patchId] = NLQ_TransformLocalAabbToWorld(
-			localAabbs[patchId],
-			rotations[bodyId],
-			centers[bodyId]);
-	}
-
-	__global__ void NLQ_UpdatePatchAabbsFromRestWorld(
-		DArray<AABB> worldAabbs,
-		DArray<AABB> restWorldAabbs,
-		DArray<uint> patch2Shape,
-		DArray<Mat3f> shapeRestR,
-		DArray<Vec3f> shapeRestT)
-	{
-		int patchId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (patchId >= restWorldAabbs.size() || patchId >= worldAabbs.size())
-			return;
-
-		int shapeId = patchId < patch2Shape.size() ? (int)patch2Shape[patchId] : -1;
-		if (shapeId < 0)
-		{
-			return;
-		}
-
-		Mat3f RRel = Mat3f::identityMatrix();
-		Vec3f tRel = Vec3f(Real(0));
-		if (shapeId >= 0 && shapeId < shapeRestR.size() && shapeId < shapeRestT.size())
-		{
-			RRel = shapeRestR[shapeId];
-			tRel = shapeRestT[shapeId];
-		}
-			
-		worldAabbs[patchId] = NLQ_TransformLocalAabbToWorld(
-			restWorldAabbs[patchId],
-			RRel,
-			tRel);	
-	}
-
 	template<typename TDataType, typename AABB>
 	__global__ void NLQ_RequestIntersectionNumberBVH(
 		DArray<uint> count,
@@ -784,154 +553,6 @@ namespace dyno
 			return;
 
 		targetBVHs[target].requestIntersectionIds(idLists[tId], sourceAabbs[tId]);
-	}
-
-	__global__ void NLQ_MarkTouchedShapesFromPairs(
-		DArray<int> shapeTouched,
-		DArray<Pair<uint, uint>> shapePairs,
-		int shapeCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= shapePairs.size()) return;
-
-		Pair<uint, uint> lp = shapePairs[tId];
-		int s0 = (int)lp.first;
-		int s1 = (int)lp.second;
-
-		if (s0 >= 0 && s0 < shapeCount)
-			atomicExch(&shapeTouched[s0], 1);
-		if (s1 >= 0 && s1 < shapeCount)
-			atomicExch(&shapeTouched[s1], 1);
-	}
-
-	__global__ void NLQ_CompactTouchedShapes(
-		DArray<int> touchedShapeIds,
-		DArray<int> shapeTouched,
-		DArray<int> prefix,
-		int shapeCount)
-	{
-		int shapeId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (shapeId >= shapeCount) return;
-
-		if (shapeTouched[shapeId] == 0)
-			return;
-
-		int out = prefix[shapeId];
-		if (out >= 0 && out < touchedShapeIds.size())
-			touchedShapeIds[out] = shapeId;
-	}
-
-	__global__ void NLQ_UpdatePatchAabbsForTouchedShapes(
-		DArray<AABB> worldAabbs,
-		DArray<AABB> localAabbs,
-		DArray<int> shape2PatchOffsets,
-		DArray<int> touchedShapeIds,
-		DArray<Vec3f> centers,
-		DArray<Mat3f> rotations,
-		DArray<int> shape2RigidBodyIds)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= touchedShapeIds.size()) return;
-
-		int patchCount = (int)localAabbs.size();
-		int worldCount = (int)worldAabbs.size();
-		int safeCount = patchCount < worldCount ? patchCount : worldCount;
-		if (safeCount <= 0)
-			return;
-
-		int shapeId = touchedShapeIds[tId];
-		if (shapeId < 0 || shapeId + 1 >= shape2PatchOffsets.size())
-			return;
-
-		int start = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, safeCount);
-		int end = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, safeCount);
-		if (end <= start)
-			return;
-
-		int bodyId = shapeId;
-		if (shape2RigidBodyIds.size() > 0)
-		{
-			if (shapeId >= shape2RigidBodyIds.size())
-			{
-				for (int p = start; p < end; ++p)
-					worldAabbs[p] = localAabbs[p];
-				return;
-			}
-			bodyId = shape2RigidBodyIds[shapeId];
-		}
-
-		if (bodyId < 0 || bodyId >= centers.size() || bodyId >= rotations.size())
-		{
-			for (int p = start; p < end; ++p)
-				worldAabbs[p] = localAabbs[p];
-			return;
-		}
-
-		Mat3f R = rotations[bodyId];
-		Vec3f t = centers[bodyId];
-		for (int p = start; p < end; ++p)
-		{
-			worldAabbs[p] = NLQ_TransformLocalAabbToWorld(
-				localAabbs[p],
-				R,
-				t);
-		}
-	}
-
-	template<typename Box3D>
-	__global__ void NTQ_SetupAABB(
-		DArray<AABB> boundingBox,
-		DArray<Box3D> boxes,
-		DArray<Sphere3D> spheres,
-		DArray<Tet3D> tets,
-		DArray<Capsule3D> caps,
-		DArray<Triangle3D> tris,
-		ElementOffset elementOffset,
-		Real boundary_expand)
-	{
-		uint tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= boundingBox.size()) return;
-
-		ElementType eleType = elementOffset.checkElementType(tId);
-
-		AABB box;
-		switch (eleType)
-		{
-		case ET_SPHERE:
-		{
-			// FIX: elementId is global, need offset
-			box = spheres[tId - elementOffset.sphereIndex()].aabb();
-			break;
-		}
-		case ET_BOX:
-		{
-			box = boxes[tId - elementOffset.boxIndex()].aabb();
-			break;
-		}
-		case ET_TET:
-		{
-			box = tets[tId - elementOffset.tetIndex()].aabb();
-			break;
-		}
-		case ET_CAPSULE:
-		{
-			box = caps[tId - elementOffset.capsuleIndex()].aabb();
-			break;
-		}
-		case ET_TRI:
-		{
-			boundary_expand = 0.01;
-			box = tris[tId - elementOffset.triangleIndex()].aabb();
-			break;
-		}
-		default:
-			break;
-		}
-
-		box.v0 -= boundary_expand;
-		box.v1 += boundary_expand;
-
-		boundingBox[tId] = box;
 	}
 
 	template<typename Box3D>
@@ -1106,52 +727,6 @@ namespace dyno
 			groupedSources[out] = source;
 	}
 
-	template<typename AABB>
-	__global__ void NLQ_CountPatchPairs(
-		DArray<int> counts,
-		DArray<Pair<uint, uint>> shapePairs,
-		DArray<int> shape2PatchOffsets,
-		DArray<AABB> patchAabbs,
-		int patchCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= shapePairs.size()) return;
-
-		Pair<uint, uint> lp = shapePairs[tId];
-		int shape0 = (int)lp.first;
-		int shape1 = (int)lp.second;
-
-		if (shape0 + 1 >= shape2PatchOffsets.size() || shape1 + 1 >= shape2PatchOffsets.size())
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		int start0 = NLQ_ClampInt(shape2PatchOffsets[shape0], 0, patchCount);
-		int end0 = NLQ_ClampInt(shape2PatchOffsets[shape0 + 1], 0, patchCount);
-		int start1 = NLQ_ClampInt(shape2PatchOffsets[shape1], 0, patchCount);
-		int end1 = NLQ_ClampInt(shape2PatchOffsets[shape1 + 1], 0, patchCount);
-
-		if (end0 <= start0 || end1 <= start1)
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		int cnt = 0;
-		for (int p0 = start0; p0 < end0; ++p0)
-		{
-			AABB aabb0 = patchAabbs[p0];
-			for (int p1 = start1; p1 < end1; ++p1)
-			{
-				if (aabb0.checkOverlap(patchAabbs[p1]))
-					cnt++;
-			}
-		}
-
-		counts[tId] = cnt;
-	}
-
 	__global__ void NLQ_CountContactList(
 		DArray<int> counts,
 		DArrayList<int> contactList)
@@ -1201,97 +776,6 @@ namespace dyno
 			{
 				patchPairs[offset + write] = Pair<uint, uint>(srcId, (uint)(tBegin + targetIdx));
 				write++;
-			}
-		}
-	}
-
-	template<typename AABB>
-	__global__ void NLQ_CountPatchPairsSingleTarget(
-		DArray<int> counts,
-		DArray<AABB> sourceAabbs,
-		DArray<AABB> targetAabbs,
-		int targetIndex)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= sourceAabbs.size())
-			return;
-		if (targetIndex < 0 || targetIndex >= targetAabbs.size())
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		counts[tId] = sourceAabbs[tId].checkOverlap(targetAabbs[targetIndex]) ? 1 : 0;
-	}
-
-	template<typename AABB>
-	__global__ void NLQ_SetPatchPairsSingleTarget(
-		DArray<Pair<uint, uint>> patchPairs,
-		DArray<AABB> sourceAabbs,
-		DArray<AABB> targetAabbs,
-		DArray<uint> source2PatchIds,
-		int targetIndex,
-		int targetPatchId,
-		DArray<int> prefix,
-		DArray<int> counts)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= sourceAabbs.size() || tId >= source2PatchIds.size())
-			return;
-		if (targetIndex < 0 || targetIndex >= targetAabbs.size())
-			return;
-		if (!sourceAabbs[tId].checkOverlap(targetAabbs[targetIndex]))
-			return;
-
-		int offset = prefix[tId];
-		if (offset >= 0 && offset < patchPairs.size() && counts[tId] > 0)
-		{
-			patchPairs[offset] = Pair<uint, uint>(source2PatchIds[tId], (uint)targetPatchId);
-		}
-	}
-
-	template<typename AABB>
-	__global__ void NLQ_SetPatchPairs(
-		DArray<Pair<uint, uint>> patchPairs,
-		DArray<Pair<uint, uint>> shapePairs,
-		DArray<int> shape2PatchOffsets,
-		DArray<AABB> patchAabbs,
-		DArray<int> prefix,
-		DArray<int> counts,
-		int patchCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= shapePairs.size()) return;
-
-		Pair<uint, uint> lp = shapePairs[tId];
-		int shape0 = (int)lp.first;
-		int shape1 = (int)lp.second;
-
-		if (shape0 + 1 >= shape2PatchOffsets.size() || shape1 + 1 >= shape2PatchOffsets.size())
-			return;
-
-		int start0 = NLQ_ClampInt(shape2PatchOffsets[shape0], 0, patchCount);
-		int end0 = NLQ_ClampInt(shape2PatchOffsets[shape0 + 1], 0, patchCount);
-		int start1 = NLQ_ClampInt(shape2PatchOffsets[shape1], 0, patchCount);
-		int end1 = NLQ_ClampInt(shape2PatchOffsets[shape1 + 1], 0, patchCount);
-
-		int offset = prefix[tId];
-		int size = counts[tId];
-		int write = 0;
-
-		for (int p0 = start0; p0 < end0; ++p0)
-		{
-			AABB aabb0 = patchAabbs[p0];
-			for (int p1 = start1; p1 < end1; ++p1)
-			{
-				if (!aabb0.checkOverlap(patchAabbs[p1]))
-					continue;
-
-				if (write < size && (offset + write) < patchPairs.size())
-				{
-					patchPairs[offset + write] = Pair<uint, uint>((uint)p0, (uint)p1);
-					write++;
-				}
 			}
 		}
 	}
@@ -1708,478 +1192,6 @@ namespace dyno
 		}
 	}
 
-	// Count the sizes of each triangle contact list
-	__global__ void NLQ_Narrow_CountTriContactSizes(
-		DArray<int> listSizes,
-		DArrayList<int> triContactList)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= triContactList.size()) return;
-
-		listSizes[tId] = (int)triContactList[tId].size();
-	}
-
-	__global__ void NLQ_Narrow_FlattenTriContactList(
-		DArray<int> pairListIds,
-		DArray<int> pairCandidateOffsets,
-		DArrayList<int> triContactList,
-		DArray<int> listOffsets,
-		DArray<int> listSizes)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= triContactList.size()) return;
-
-		int base = listOffsets[tId];
-		int count = listSizes[tId];
-		if (count <= 0) return;
-
-		List<int>& list = triContactList[tId];
-		int listSize = (int)list.size();
-		if (listSize < count)
-			count = listSize;
-
-		for (int i = 0; i < count; ++i)
-		{
-			int out = base + i;
-			if (out >= pairListIds.size() || out >= pairCandidateOffsets.size())
-				break;
-			pairListIds[out] = tId;
-			pairCandidateOffsets[out] = i;
-		}
-	}
-
-	template<typename Real, typename Coord, typename Triangle>
-	__global__ void NLQ_Narrow_ThreadCount(
-		DArray<int> counts,
-		DArrayList<int> triContactList,
-		DArray<int> triListTriIds,
-		DArray<int> triListSide,
-		DArray<int> pairListIds,
-		DArray<int> pairCandidateOffsets,
-		DArray<Coord> vertices,
-		DArray<Triangle> triangles,
-		Real dHat,
-		int triCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= counts.size()) return;
-
-		int listId = pairListIds[tId];
-		int candOffset = pairCandidateOffsets[tId];
-		if (listId < 0 || listId >= triContactList.size())
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		int triIdCurrent = triListTriIds[listId];
-		int side = triListSide[listId];
-		if (triIdCurrent < 0 || triIdCurrent >= triCount)
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		List<int>& list = triContactList[listId];
-		if (candOffset < 0 || candOffset >= list.size())
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		int triIdCandidate = list[candOffset];
-		if (triIdCandidate < 0 || triIdCandidate >= triCount)
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		int triId0 = side == 0 ? triIdCurrent : triIdCandidate;
-		int triId1 = side == 0 ? triIdCandidate : triIdCurrent;
-
-		Triangle tri0 = triangles[triId0];
-		Coord p00 = vertices[tri0[0]];
-		Coord p01 = vertices[tri0[1]];
-		Coord p02 = vertices[tri0[2]];
-		TTriangle3D<Real> t0(p00, p01, p02);
-
-		Triangle tri1 = triangles[triId1];
-		Coord p10 = vertices[tri1[0]];
-		Coord p11 = vertices[tri1[1]];
-		Coord p12 = vertices[tri1[2]];
-		TTriangle3D<Real> t1(p10, p11, p12);
-
-		TManifold<Real> manifold;
-		CollisionDetection<Real>::request(manifold, t0, t1, dHat, dHat);
-		counts[tId] = manifold.contactCount;
-	}
-
-	template<typename Real, typename Coord, typename Triangle, typename ContactPair>
-	__global__ void NLQ_Narrow_ThreadSet(
-		DArray<ContactPair> contacts,
-		DArrayList<int> triContactList,
-		DArray<int> triListTriIds,
-		DArray<int> triListPairIds,
-		DArray<int> triListSide,
-		DArray<int> pairListIds,
-		DArray<int> pairCandidateOffsets,
-		DArray<Pair<uint, uint>> patchPairs,
-		DArray<uint> patch2Shape,
-		DArray<Coord> vertices,
-		DArray<Triangle> triangles,
-		DArray<int> prefix,
-		DArray<int> counts,
-		Real dHat,
-		int triCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= counts.size()) return;
-
-		int count = counts[tId];
-		if (count <= 0) return;
-
-		int listId = pairListIds[tId];
-		int candOffset = pairCandidateOffsets[tId];
-		if (listId < 0 || listId >= triContactList.size())
-			return;
-
-		int triIdCurrent = triListTriIds[listId];
-		int side = triListSide[listId];
-		int pairId = triListPairIds[listId];
-		if (triIdCurrent < 0 || triIdCurrent >= triCount)
-			return;
-		if (pairId < 0 || pairId >= patchPairs.size())
-			return;
-
-		List<int>& list = triContactList[listId];
-		if (candOffset < 0 || candOffset >= list.size())
-			return;
-
-		int triIdCandidate = list[candOffset];
-		if (triIdCandidate < 0 || triIdCandidate >= triCount)
-			return;
-
-		Pair<uint, uint> pp = patchPairs[pairId];
-		int patch0 = (int)pp.first;
-		int patch1 = (int)pp.second;
-
-		int shape0 = patch0 < patch2Shape.size() ? (int)patch2Shape[patch0] : -1;
-		int shape1 = patch1 < patch2Shape.size() ? (int)patch2Shape[patch1] : -1;
-
-		int bodyId0 = shape0;
-		int bodyId1 = shape1;
-
-		int triId0 = side == 0 ? triIdCurrent : triIdCandidate;
-		int triId1 = side == 0 ? triIdCandidate : triIdCurrent;
-
-		Triangle tri0 = triangles[triId0];
-		Coord p00 = vertices[tri0[0]];
-		Coord p01 = vertices[tri0[1]];
-		Coord p02 = vertices[tri0[2]];
-		TTriangle3D<Real> t0(p00, p01, p02);
-
-		Triangle tri1 = triangles[triId1];
-		Coord p10 = vertices[tri1[0]];
-		Coord p11 = vertices[tri1[1]];
-		Coord p12 = vertices[tri1[2]];
-		TTriangle3D<Real> t1(p10, p11, p12);
-
-		TManifold<Real> manifold;
-		CollisionDetection<Real>::request(manifold, t0, t1, dHat, dHat);
-
-		int writeBase = prefix[tId];
-		int writeLimit = writeBase + count;
-
-		for (int n = 0; n < manifold.contactCount; ++n)
-		{
-			int outIdx = writeBase + n;
-			if (outIdx >= writeLimit || outIdx >= contacts.size())
-				break;
-
-			ContactPair cp;
-			cp.bodyId1 = bodyId0;
-			cp.bodyId2 = bodyId1;
-			cp.localId1 = triId0;
-			cp.localId2 = triId1;
-			cp.pos1 = manifold.contacts[n].position;
-			cp.pos2 = manifold.contacts[n].position;
-			cp.normal1 = -manifold.normal;
-			cp.normal2 = manifold.normal;
-			cp.contactType = ContactType::CT_NONPENETRATION;
-			cp.interpenetration = -manifold.contacts[n].penetration;
-
-			contacts[outIdx] = cp;
-		}
-	}
-
-	template<typename Real, typename Coord, typename Matrix, typename Triangle>
-	__global__ void NLQ_Narrow_Count(
-		DArray<int> counts,
-		DArray<Pair<uint, uint>> patchPairs,
-		DArray<int> patch2TriOffsets,
-		DArray<int> patch2TriIndices,
-		DArray<Coord> vertices,
-		DArray<Triangle> triangles,
-		DArray<uint> patch2Shape,
-		DArray<Coord> centers,
-		DArray<Matrix> rotations,
-		DArray<Coord> restShapeCenters,
-		DArray<Matrix> restShapeRotations,
-		DArray<int> shape2RigidBodyIds,
-		Real dHat,
-		int patchCount,
-		int triCount,
-		int patchTriCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= patchPairs.size()) return;
-
-		Pair<uint, uint> pp = patchPairs[tId];
-		int patch0 = (int)pp.first; // source patch global id
-		int patch1 = (int)pp.second; // target patch global id
-
-		// if patch index out of range, then return
-		if (patch0 < 0 || patch0 >= patchCount || patch1 < 0 || patch1 >= patchCount)
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		if (patch0 + 1 >= patch2TriOffsets.size() || patch1 + 1 >= patch2TriOffsets.size())
-		{
-			counts[tId] = 0;
-			return;
-		}
-
-		int start0 = NLQ_ClampInt(patch2TriOffsets[patch0], 0, patchTriCount);
-		int end0 = NLQ_ClampInt(patch2TriOffsets[patch0 + 1], 0, patchTriCount);
-		int start1 = NLQ_ClampInt(patch2TriOffsets[patch1], 0, patchTriCount);
-		int end1 = NLQ_ClampInt(patch2TriOffsets[patch1 + 1], 0, patchTriCount);
-
-		// int shape0 = patch0 < patch2Shape.size() ? (int)patch2Shape[patch0] : -1;
-		// int shape1 = patch1 < patch2Shape.size() ? (int)patch2Shape[patch1] : -1;
-
-		// Matrix RRel0 = Matrix::identityMatrix();
-		// Matrix RRel1 = Matrix::identityMatrix();
-		// Coord tRel0 = Coord(Real(0));
-		// Coord tRel1 = Coord(Real(0));
-		// int bodyId0 = shape0;
-		// int bodyId1 = shape1;
-
-		// if (shape0 >= 0)
-		// {	
-		// 	// Get relative transform of shape0
-		// 	NLQ_GetRelativeTransform(
-		// 		shape0,
-		// 		shape2RigidBodyIds,
-		// 		centers,
-		// 		rotations,
-		// 		restShapeCenters,
-		// 		restShapeRotations,
-		// 		RRel0,
-		// 		tRel0,
-		// 		bodyId0);
-		// }
-
-		// if (shape1 >= 0)
-		// {
-		// 	// Get relative transform of shape1
-		// 	NLQ_GetRelativeTransform(
-		// 		shape1,
-		// 		shape2RigidBodyIds,
-		// 		centers,
-		// 		rotations,
-		// 		restShapeCenters,
-		// 		restShapeRotations,
-		// 		RRel1,
-		// 		tRel1,
-		// 		bodyId1);
-		// }
-
-		int cnt = 0;
-		for (int i = start0; i < end0; ++i)
-		{
-			int triId0 = patch2TriIndices[i];
-			if (triId0 < 0 || triId0 >= triCount)
-				continue;
-			// compute triangle 0 in world space
-			Triangle tri0 = triangles[triId0];
-			// Coord p00 = RRel0 * vertices[tri0[0]] + tRel0;
-			// Coord p01 = RRel0 * vertices[tri0[1]] + tRel0;
-			// Coord p02 = RRel0 * vertices[tri0[2]] + tRel0;
-			Coord p00 = vertices[tri0[0]];
-			Coord p01 = vertices[tri0[1]];
-			Coord p02 = vertices[tri0[2]];
-			TTriangle3D<Real> t0(p00, p01, p02);
-
-			for (int j = start1; j < end1; ++j)
-			{
-				int triId1 = patch2TriIndices[j];
-				if (triId1 < 0 || triId1 >= triCount)
-					continue;
-
-				// compute triangle 1 in world space
-				Triangle tri1 = triangles[triId1];
-				// Coord p10 = RRel1 * vertices[tri1[0]] + tRel1;
-				// Coord p11 = RRel1 * vertices[tri1[1]] + tRel1;
-				// Coord p12 = RRel1 * vertices[tri1[2]] + tRel1;
-				Coord p10 = vertices[tri1[0]];
-				Coord p11 = vertices[tri1[1]];
-				Coord p12 = vertices[tri1[2]];
-				TTriangle3D<Real> t1(p10, p11, p12);
-
-				// perform narrow-phase collision detection
-				TManifold<Real> manifold;
-				CollisionDetection<Real>::request(manifold, t0, t1, dHat, dHat);
-
-				cnt += manifold.contactCount;
-			}
-		}
-
-		counts[tId] = cnt;
-	}
-
-	template<typename Real, typename Coord, typename Matrix, typename Triangle, typename ContactPair>
-	__global__ void NLQ_Narrow_Set(
-		DArray<ContactPair> contacts,
-		DArray<Pair<uint, uint>> patchPairs,
-		DArray<int> patch2TriOffsets,
-		DArray<int> patch2TriIndices,
-		DArray<Coord> vertices,
-		DArray<Triangle> triangles,
-		DArray<uint> patch2Shape,
-		DArray<Coord> centers,
-		DArray<Matrix> rotations,
-		DArray<Coord> restShapeCenters,
-		DArray<Matrix> restShapeRotations,
-		DArray<int> shape2RigidBodyIds,
-		DArray<int> prefix,
-		DArray<int> counts,
-		Real dHat,
-		int patchCount,
-		int triCount,
-		int patchTriCount)
-	{
-		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= patchPairs.size()) return;
-
-		Pair<uint, uint> pp = patchPairs[tId];
-		int patch0 = (int)pp.first;
-		int patch1 = (int)pp.second;
-
-		if (patch0 < 0 || patch0 >= patchCount || patch1 < 0 || patch1 >= patchCount)
-			return;
-
-		if (patch0 + 1 >= patch2TriOffsets.size() || patch1 + 1 >= patch2TriOffsets.size())
-			return;
-
-		int start0 = NLQ_ClampInt(patch2TriOffsets[patch0], 0, patchTriCount);
-		int end0 = NLQ_ClampInt(patch2TriOffsets[patch0 + 1], 0, patchTriCount);
-		int start1 = NLQ_ClampInt(patch2TriOffsets[patch1], 0, patchTriCount);
-		int end1 = NLQ_ClampInt(patch2TriOffsets[patch1 + 1], 0, patchTriCount);
-
-		int offset = prefix[tId];
-		int size = counts[tId];
-		int write = 0;
-
-		int shape0 = patch0 < patch2Shape.size() ? (int)patch2Shape[patch0] : -1;
-		int shape1 = patch1 < patch2Shape.size() ? (int)patch2Shape[patch1] : -1;
-
-		// Matrix RRel0 = Matrix::identityMatrix();
-		// Matrix RRel1 = Matrix::identityMatrix();
-		// Coord tRel0 = Coord(Real(0));
-		// Coord tRel1 = Coord(Real(0));
-		int bodyId0 = shape0;
-		int bodyId1 = shape1;
-
-		// if (shape0 >= 0)
-		// {
-		// 	NLQ_GetRelativeTransform(
-		// 		shape0,
-		// 		shape2RigidBodyIds,
-		// 		centers,
-		// 		rotations,
-		// 		restShapeCenters,
-		// 		restShapeRotations,
-		// 		RRel0,
-		// 		tRel0,
-		// 		bodyId0);
-		// }
-
-		// if (shape1 >= 0)
-		// {
-		// 	NLQ_GetRelativeTransform(
-		// 		shape1,
-		// 		shape2RigidBodyIds,
-		// 		centers,
-		// 		rotations,
-		// 		restShapeCenters,
-		// 		restShapeRotations,
-		// 		RRel1,
-		// 		tRel1,
-		// 		bodyId1);
-		// }
-
-		for (int i = start0; i < end0; ++i)
-		{
-			int triId0 = patch2TriIndices[i];
-			if (triId0 < 0 || triId0 >= triCount)
-				continue;
-
-			Triangle tri0 = triangles[triId0];
-			// Coord p00 = RRel0 * vertices[tri0[0]] + tRel0;
-			// Coord p01 = RRel0 * vertices[tri0[1]] + tRel0;
-			// Coord p02 = RRel0 * vertices[tri0[2]] + tRel0;
-			Coord p00 = vertices[tri0[0]];
-			Coord p01 = vertices[tri0[1]];
-			Coord p02 = vertices[tri0[2]];
-			TTriangle3D<Real> t0(p00, p01, p02);
-
-			for (int j = start1; j < end1; ++j)
-			{
-				int triId1 = patch2TriIndices[j];
-				if (triId1 < 0 || triId1 >= triCount)
-					continue;
-
-				Triangle tri1 = triangles[triId1];
-				// Coord p10 = RRel1 * vertices[tri1[0]] + tRel1;
-				// Coord p11 = RRel1 * vertices[tri1[1]] + tRel1;
-				// Coord p12 = RRel1 * vertices[tri1[2]] + tRel1;
-				Coord p10 = vertices[tri1[0]];
-				Coord p11 = vertices[tri1[1]];
-				Coord p12 = vertices[tri1[2]];
-				TTriangle3D<Real> t1(p10, p11, p12);
-
-				TManifold<Real> manifold;
-				CollisionDetection<Real>::request(manifold, t0, t1, dHat, dHat);
-
-				// Process contacts information
-				for (int n = 0; n < manifold.contactCount; ++n)
-				{
-					if (write >= size || (offset + write) >= contacts.size())
-						break;
-
-					ContactPair cp;
-					cp.bodyId1 = bodyId0;
-					cp.bodyId2 = bodyId1;
-					cp.localId1 = triId0;
-					cp.localId2 = triId1;
-					cp.pos1 = manifold.contacts[n].position;
-					cp.pos2 = manifold.contacts[n].position;
-					cp.normal1 = -manifold.normal;
-					cp.normal2 = manifold.normal;
-					cp.contactType = ContactType::CT_NONPENETRATION;
-					cp.interpenetration = -manifold.contacts[n].penetration;
-					printf("[NeighborTriMeshQuery] Contact found between shape %d (tri %d) and shape %d (tri %d), penetration=%f\n",
-                            shape0, triId0, shape1, triId1, cp.interpenetration);
-
-					contacts[offset + write] = cp;
-					write++;
-				}
-			}
-		}
-	}
-
 	template<typename TDataType>
 	NeighborTriMeshQuery<TDataType>::NeighborTriMeshQuery()
 		: NeighborElementQuery<TDataType>()
@@ -2554,6 +1566,14 @@ namespace dyno
 	template<typename TDataType>
 	void NeighborTriMeshQuery<TDataType>::compute()
 	{
+		CTimer timer;
+		timer.start();
+
+		auto finishTiming = [&]() {
+			timer.stop();
+			std::cout << "[NeighborTriMeshQuery] compute time: " << timer.getElapsedTime() << " ms" << std::endl;
+		};
+
 		mUseBroadPhasePatchPairs = false;
 		if (this->outPotentialShapePairs()->isEmpty())
 			this->outPotentialShapePairs()->allocate();
@@ -2565,8 +1585,7 @@ namespace dyno
 			this->outPotentialTriSet()->allocate();
 
 		// examine inputs
-		if (this->inShapeAABBs()->isEmpty()
-			|| this->inPatchAABBs()->isEmpty()
+		if (this->inPatchAABBs()->isEmpty()
 			|| this->inShape2PatchOffsets()->isEmpty()
 			|| this->inPatch2TriOffsets()->isEmpty()
 			|| this->inPatch2TriIndices()->isEmpty()
@@ -2582,11 +1601,10 @@ namespace dyno
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] Missing input data.\n");
+			finishTiming();
 			return;
 		}
 
-		// auto& shapeAabbs = this->inShapeAABBs()->getData();
-		// int shapeCount = (int)shapeAabbs.size();
 		int shapeCount = this->inShape2ElementIds()->size();
 		if (shapeCount <= 0)
 		{
@@ -2595,7 +1613,8 @@ namespace dyno
 			this->outContacts()->resize(0);
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			printf("[NeighborTriMeshQuery] shapeAABBs is empty.\n");
+			printf("[NeighborTriMeshQuery] Shape2ElementIds is empty.\n");
+			finishTiming();
 			return;
 		}
 
@@ -2608,6 +1627,7 @@ namespace dyno
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] RestShapeCenter missing.\n");
+			finishTiming();
 			return;
 		}
 
@@ -2619,6 +1639,7 @@ namespace dyno
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] RestShapeRotation missing.\n");
+			finishTiming();
 			return;
 		}
 
@@ -2629,6 +1650,7 @@ namespace dyno
 			this->outContacts()->resize(0);
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
+			finishTiming();
 			return;
 		}
 
@@ -2643,6 +1665,7 @@ namespace dyno
 				this->triSet->clear();
 				this->outPotentialTriSet()->setDataPtr(this->triSet);
 				printf("[NeighborTriMeshQuery] Shape2PatchOffsets size mismatch.\n");
+				finishTiming();
 				return;
 			}
 		}
@@ -2655,6 +1678,7 @@ namespace dyno
 			this->outContacts()->resize(0);
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
+			finishTiming();
 			return;
 		}
 
@@ -2677,6 +1701,7 @@ namespace dyno
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] Patch2Shape size mismatch.\n");
+			finishTiming();
 			return;
 		}
 
@@ -2688,6 +1713,7 @@ namespace dyno
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			// printf("[NeighborTriMeshQuery] BroadPhase failed.\n");
+			finishTiming();
 			return;
 		}
 
@@ -2698,17 +1724,22 @@ namespace dyno
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			// printf("[NeighborTriMeshQuery] MiddlePhase failed.\n");
+			finishTiming();
 			return;
 		}
 
 		// NarrowPhase: patch pairs + triangle CSR -> contacts
 		narrowPhase();
+		finishTiming();
 	}
 
 	template<typename TDataType>
 	bool NeighborTriMeshQuery<TDataType>::broadPhase()
 	{
 		// printf("[NeighborTriMeshQuery] BroadPhase started.\n");
+		CTimer broadTimer;
+		broadTimer.start();
+
 		auto inTopo = this->inDiscreteElements()->getDataPtr();
 		if (inTopo == nullptr)
 		{
@@ -2850,15 +1881,18 @@ namespace dyno
 		pairCountCpy.clear();
 		pairCount.clear();
 
-		std::cout << "[NeighborTriMeshQuery] broadPhase found " << total << " shape pairs." << std::endl;
-
+		// std::cout << "[NeighborTriMeshQuery] broadPhase found " << total << " shape pairs." << std::endl;
+		broadTimer.stop();
+		std::cout << "[NeighborTriMeshQuery] compute broad phase time: " << broadTimer.getElapsedTime() << " ms" << std::endl;
 		return true;
 	}
 
 	template<typename TDataType>
 	bool NeighborTriMeshQuery<TDataType>::middlePhase()
 	{
-		printf("[NeighborTriMeshQuery] MiddlePhase started.\n");
+		// printf("[NeighborTriMeshQuery] MiddlePhase started.\n");
+		CTimer middleTimer;
+		middleTimer.start();
 
 		// Get potential shape pairs from broad phase
 		auto& shapePairs = this->outPotentialShapePairs()->getData();
@@ -3212,9 +2246,9 @@ namespace dyno
 			mShape2PatchOffsets,
 			patchAabbs);
 
-		printf("[NeighborTriMeshQuery] middle phase contacts=%u (lists=%u)\n",
-			(unsigned int)contactList.elementSize(),
-			(unsigned int)contactList.size());
+		// printf("[NeighborTriMeshQuery] middle phase contacts=%u (lists=%u)\n",
+			// (unsigned int)contactList.elementSize(),
+			// (unsigned int)contactList.size());
 		if (contactList.elementSize() == 0)
 		{
 			this->outPotentialPatchPairs()->resize(0);
@@ -3258,15 +2292,20 @@ namespace dyno
 		contactCountCpy.clear();
 		contactCount.clear();
 
-		std::cout << "[NeighborTriMeshQuery] middlePhase found " << totalPairs << " patch pairs." << std::endl;
-		printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
+		// std::cout << "[NeighborTriMeshQuery] middlePhase found " << totalPairs << " patch pairs." << std::endl;
+		// printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
+		middleTimer.stop();
+		std::cout << "[NeighborTriMeshQuery] compute middle phase time: " << middleTimer.getElapsedTime() << " ms" << std::endl;
+		
 		return true;
 	}
 
 	template<typename TDataType>
 	void NeighborTriMeshQuery<TDataType>::narrowPhase()
 	{
-		printf("[NeighborTriMeshQuery] NarrowPhase started.\n");
+		CTimer narrowTimer;
+		narrowTimer.start();
+		// printf("[NeighborTriMeshQuery] NarrowPhase started.\n");
 		auto& patchPairs = this->outPotentialPatchPairs()->getData();
 		if (patchPairs.size() == 0)
 		{
@@ -3378,7 +2417,7 @@ namespace dyno
 			dHat,
 			triCount);
 		cuSynchronize();
-		printf("[NeighborTriMeshQuery] NarrowPhase contact count computed.\n");
+		// printf("[NeighborTriMeshQuery] NarrowPhase contact count computed.\n");
 
 		int total = mReduce.accumulate(triContactCounts.begin(), triContactCounts.size());
 		if (total <= 0)
@@ -3418,7 +2457,7 @@ namespace dyno
 			dHat,
 			triCount);
 		cuSynchronize();
-		printf("[NeighborTriMeshQuery] NarrowPhase contacts generated: %d contacts found.\n", total);
+		// printf("[NeighborTriMeshQuery] NarrowPhase contacts generated: %d contacts found.\n", total);
 		
 		/* thread-level narrow phase version
 		DArray<int> triPairSizes;
@@ -3534,159 +2573,132 @@ namespace dyno
 		*/
 		
 		// Build a TriangleSet for collided triangles in world space
-		CArray<ContactPair> hContacts;
-		hContacts.assign(this->outContacts()->getData());
-
-		CArray<Coord> hVertices;
-		hVertices.assign(vertices);
-		CArray<Triangle> hTriangles;
-		hTriangles.assign(triIndices);
-
-		CArray<int> hPatch2TriOffsets;
-		hPatch2TriOffsets.assign(patch2TriOffsets);
-		CArray<int> hPatch2TriIndices;
-		hPatch2TriIndices.assign(patch2TriIndices);
-		CArray<uint> hPatch2Shape;
-		hPatch2Shape.assign(mPatch2Shape);
-
-		CArray<Coord> hCenters;
-		hCenters.assign(this->inCenter()->getData());
-		CArray<Matrix> hRotations;
-		hRotations.assign(this->inRotationMatrix()->getData());
-		CArray<Coord> hRestCenters;
-		hRestCenters.assign(this->inRestShapeCenter()->getData());
-		CArray<Matrix> hRestRotations;
-		hRestRotations.assign(this->inRestShapeRotation()->getData());
-		CArray<int> hShape2Rigid;
-		hShape2Rigid.assign(mShape2RigidBodyIds);
-
-		std::vector<int> triIdToShape(triCount, -1);
-		for (int patchId = 0; patchId < patchCount; ++patchId)
+		if (this->inEnableVisualizeCollisionTriSet()->getValue())
 		{
-			int shapeId = patchId < (int)hPatch2Shape.size() ? (int)hPatch2Shape[patchId] : -1;
-			if (shapeId < 0)
-				continue;
+			CArray<ContactPair> hContacts;
+			hContacts.assign(this->outContacts()->getData());
 
-			if (patchId + 1 >= (int)hPatch2TriOffsets.size())
-				continue;
-			int tStart = hPatch2TriOffsets[patchId];
-			int tEnd = hPatch2TriOffsets[patchId + 1];
-			if (tStart < 0) tStart = 0;
-			if (tEnd > patchTriCount) tEnd = patchTriCount;
-			if (tEnd <= tStart)
-				continue;
-			for (int t = tStart; t < tEnd; ++t)
+			CArray<Coord> hVertices;
+			hVertices.assign(vertices);
+			CArray<Triangle> hTriangles;
+			hTriangles.assign(triIndices);
+
+			CArray<int> hPatch2TriOffsets;
+			hPatch2TriOffsets.assign(patch2TriOffsets);
+			CArray<int> hPatch2TriIndices;
+			hPatch2TriIndices.assign(patch2TriIndices);
+			CArray<uint> hPatch2Shape;
+			hPatch2Shape.assign(mPatch2Shape);
+
+			CArray<Coord> hCenters;
+			hCenters.assign(this->inCenter()->getData());
+			CArray<Matrix> hRotations;
+			hRotations.assign(this->inRotationMatrix()->getData());
+			CArray<Coord> hRestCenters;
+			hRestCenters.assign(this->inRestShapeCenter()->getData());
+			CArray<Matrix> hRestRotations;
+			hRestRotations.assign(this->inRestShapeRotation()->getData());
+			CArray<int> hShape2Rigid;
+			hShape2Rigid.assign(mShape2RigidBodyIds);
+
+			std::vector<int> triIdToShape(triCount, -1);
+			for (int patchId = 0; patchId < patchCount; ++patchId)
 			{
-				int triId = hPatch2TriIndices[t];
-				if (triId < 0 || triId >= triCount)
+				int shapeId = patchId < (int)hPatch2Shape.size() ? (int)hPatch2Shape[patchId] : -1;
+				if (shapeId < 0)
 					continue;
-				if (triIdToShape[triId] < 0)
-					triIdToShape[triId] = shapeId;
+
+				if (patchId + 1 >= (int)hPatch2TriOffsets.size())
+					continue;
+				int tStart = hPatch2TriOffsets[patchId];
+				int tEnd = hPatch2TriOffsets[patchId + 1];
+				if (tStart < 0) tStart = 0;
+				if (tEnd > patchTriCount) tEnd = patchTriCount;
+				if (tEnd <= tStart)
+					continue;
+				for (int t = tStart; t < tEnd; ++t)
+				{
+					int triId = hPatch2TriIndices[t];
+					if (triId < 0 || triId >= triCount)
+						continue;
+					if (triIdToShape[triId] < 0)
+						triIdToShape[triId] = shapeId;
+				}
 			}
+
+			std::vector<Coord> contactVertices;
+			std::vector<Triangle> contactTriangles;
+			contactVertices.reserve(hContacts.size() * 6);
+			contactTriangles.reserve(hContacts.size() * 2);
+
+			for (uint i = 0; i < hContacts.size(); ++i)
+			{
+				int triId0 = hContacts[i].localId1;
+				int triId1 = hContacts[i].localId2;
+				if (triId0 < 0 || triId0 >= triCount || triId1 < 0 || triId1 >= triCount)
+					continue;
+
+				int shape0 = triIdToShape[triId0];
+				int shape1 = triIdToShape[triId1];
+				if (shape0 < 0 || shape1 < 0)
+					continue;
+
+				int bodyId0 = shape0;
+				int bodyId1 = shape1;
+
+				Triangle tri0 = hTriangles[triId0];
+				Coord p00 = hVertices[tri0[0]];
+				Coord p01 = hVertices[tri0[1]];
+				Coord p02 = hVertices[tri0[2]];
+				int base = (int)contactVertices.size();
+				contactVertices.push_back(p00);
+				contactVertices.push_back(p01);
+				contactVertices.push_back(p02);
+				contactTriangles.push_back(Triangle(base, base + 1, base + 2));
+
+				Triangle tri1 = hTriangles[triId1];
+				Coord p10 = hVertices[tri1[0]];
+				Coord p11 = hVertices[tri1[1]];
+				Coord p12 = hVertices[tri1[2]];
+				base = (int)contactVertices.size();
+				contactVertices.push_back(p10);
+				contactVertices.push_back(p11);
+				contactVertices.push_back(p12);
+				contactTriangles.push_back(Triangle(base, base + 1, base + 2));
+			}
+
+			if (contactTriangles.empty())
+			{
+				this->triSet->clear();
+				this->outPotentialTriSet()->setDataPtr(this->triSet);
+			}
+			else
+			{
+				this->triSet->setPoints(contactVertices);
+				this->triSet->setTriangles(contactTriangles);
+				this->triSet->update();
+				this->outPotentialTriSet()->setDataPtr(this->triSet);
+			}
+
+			/* thread-level narrow phase version
+			pairOffsets.clear();
+			pairCounts.clear();
+			pairCandidateOffsets.clear();
+			pairListIds.clear();
+			triPairOffsets.clear();
+			triPairSizes.clear();
+			triListSide.clear();
+			triListPairIds.clear();
+			triListTriIds.clear();
+			*/
+			/* warp-level narrow phase version */
+			triContactList.clear();
+			triListOffsets.clear();
+			triListSizes.clear();
 		}
-
-		std::vector<Coord> contactVertices;
-		std::vector<Triangle> contactTriangles;
-		contactVertices.reserve(hContacts.size() * 6);
-		contactTriangles.reserve(hContacts.size() * 2);
-
-		for (uint i = 0; i < hContacts.size(); ++i)
-		{
-			int triId0 = hContacts[i].localId1;
-			int triId1 = hContacts[i].localId2;
-			if (triId0 < 0 || triId0 >= triCount || triId1 < 0 || triId1 >= triCount)
-				continue;
-
-			int shape0 = triIdToShape[triId0];
-			int shape1 = triIdToShape[triId1];
-			if (shape0 < 0 || shape1 < 0)
-				continue;
-
-			// Matrix RRel0 = Matrix::identityMatrix();
-			// Matrix RRel1 = Matrix::identityMatrix();
-			// Coord tRel0 = Coord(Real(0));
-			// Coord tRel1 = Coord(Real(0));
-			int bodyId0 = shape0;
-			int bodyId1 = shape1;
-
-			// NLQ_GetRelativeTransformHost(
-			// 	shape0,
-			// 	hShape2Rigid,
-			// 	hCenters,
-			// 	hRotations,
-			// 	hRestCenters,
-			// 	hRestRotations,
-			// 	RRel0,
-			// 	tRel0,
-			// 	bodyId0);
-
-			// NLQ_GetRelativeTransformHost(
-			// 	shape1,
-			// 	hShape2Rigid,
-			// 	hCenters,
-			// 	hRotations,
-			// 	hRestCenters,
-			// 	hRestRotations,
-			// 	RRel1,
-			// 	tRel1,
-			// 	bodyId1);
-
-			Triangle tri0 = hTriangles[triId0];
-			// Coord p00 = RRel0 * hVertices[tri0[0]] + tRel0;
-			// Coord p01 = RRel0 * hVertices[tri0[1]] + tRel0;
-			// Coord p02 = RRel0 * hVertices[tri0[2]] + tRel0;
-			Coord p00 = hVertices[tri0[0]];
-			Coord p01 = hVertices[tri0[1]];
-			Coord p02 = hVertices[tri0[2]];
-			int base = (int)contactVertices.size();
-			contactVertices.push_back(p00);
-			contactVertices.push_back(p01);
-			contactVertices.push_back(p02);
-			contactTriangles.push_back(Triangle(base, base + 1, base + 2));
-
-			Triangle tri1 = hTriangles[triId1];
-			// Coord p10 = RRel1 * hVertices[tri1[0]] + tRel1;
-			// Coord p11 = RRel1 * hVertices[tri1[1]] + tRel1;
-			// Coord p12 = RRel1 * hVertices[tri1[2]] + tRel1;
-			Coord p10 = hVertices[tri1[0]];
-			Coord p11 = hVertices[tri1[1]];
-			Coord p12 = hVertices[tri1[2]];
-			base = (int)contactVertices.size();
-			contactVertices.push_back(p10);
-			contactVertices.push_back(p11);
-			contactVertices.push_back(p12);
-			contactTriangles.push_back(Triangle(base, base + 1, base + 2));
-		}
-
-		if (contactTriangles.empty())
-		{
-			this->triSet->clear();
-			this->outPotentialTriSet()->setDataPtr(this->triSet);
-		}
-		else
-		{
-			this->triSet->setPoints(contactVertices);
-			this->triSet->setTriangles(contactTriangles);
-			this->triSet->update();
-			this->outPotentialTriSet()->setDataPtr(this->triSet);
-		}
-
-		/* thread-level narrow phase version
-		pairOffsets.clear();
-		pairCounts.clear();
-		pairCandidateOffsets.clear();
-		pairListIds.clear();
-		triPairOffsets.clear();
-		triPairSizes.clear();
-		triListSide.clear();
-		triListPairIds.clear();
-		triListTriIds.clear();
-		*/
-		/* warp-level narrow phase version */
-		triContactList.clear();
-		triListOffsets.clear();
-		triListSizes.clear();
-		printf("[NeighborTriMeshQuery] NarrowPhase completed.\n");
+		narrowTimer.stop();
+		std::cout << "[NeighborTriMeshQuery] compute narrow phase time: " << narrowTimer.getElapsedTime() << " ms" << std::endl;
+		// printf("[NeighborTriMeshQuery] NarrowPhase completed.\n");
 	}
 
 	DEFINE_CLASS(NeighborTriMeshQuery);

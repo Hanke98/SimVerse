@@ -624,7 +624,17 @@ namespace dyno
 		Vec3f N = dirA.cross(dirB);
         Real D = 0;
         Real bA, bB;
-        if (N.norm() > EPSILON) N /= N.norm(); else return;
+        if (N.norm() > EPSILON)
+        {
+            N /= N.norm();
+        }
+        else
+        {
+            // Parallel edges: use closest-points direction as fallback axis.
+            Vec3f N2 = proj.v1 - proj.v0;
+            if (N2.norm() <= EPSILON) return;
+            N = N2 / N2.norm();
+        }
         checkSignedDistanceAxis(D, bA, bB, N, shapeA, shapeB, radiusA, radiusB);
 
         if (REAL_GREAT(D, 0))
@@ -2166,22 +2176,26 @@ namespace dyno
 
         auto handleCoplanarOverlap = [&]() -> bool
         {
+            // Check if triangle is degenerate
             Vec3f nA = triA.normal();
             Vec3f nB = triB.normal();
             Real nALen = nA.norm();
             Real nBLen = nB.norm();
             if (nALen <= EPSILON || nBLen <= EPSILON) return false;
 
+            // Check if normals are parallel
             Vec3f nAUnit = nA / nALen;
             Vec3f nBUnit = nB / nBLen;
             Real ndot = abs(nAUnit.dot(nBUnit));
             if (REAL_LESS(ndot, Real(1) - Real(1e-4))) return false;
 
+            // Check if triangles distance along normal is small enough
             Real maxL = triA.maximumEdgeLength() + triB.maximumEdgeLength();
             Real planeEps = EPSILON * (maxL + Real(1));
             Real planeDist = abs((triB.v[0] - triA.v[0]).dot(nAUnit));
             if (REAL_GREAT(planeDist, planeEps)) return false;
 
+            // Choose the maximum component of normal as the dropped axis
             using Coord2D = Vector<Real, 2>;
             int dropAxis = 2;
             Real ax = abs(nAUnit.x);
@@ -2190,6 +2204,7 @@ namespace dyno
             if (ax >= ay && ax >= az) dropAxis = 0;
             else if (ay >= az) dropAxis = 1;
 
+            // Project triangles onto 2D plane by dropping the selected axis
             auto to2D = [&](const Vec3f& v) -> Coord2D
             {
                 return (dropAxis == 0) ? Coord2D(v.y, v.z)
@@ -2200,21 +2215,38 @@ namespace dyno
             Coord2D a2[3] = { to2D(triA.v[0]), to2D(triA.v[1]), to2D(triA.v[2]) };
             Coord2D b2[3] = { to2D(triB.v[0]), to2D(triB.v[1]), to2D(triB.v[2]) };
 
+            Coord2D bestAxis(0);
+            Real bestOverlap = REAL_infinity;
+            bool hasBestAxis = false;
+
+            // Check overlap on all triangle edges' perpendicular axes
             auto overlapOnAxis = [&](const Coord2D& axis) -> bool
             {
-                if (axis.normSquared() <= EPSILON * EPSILON) return true;
-                Real minA = a2[0].dot(axis), maxA = minA;
-                Real minB = b2[0].dot(axis), maxB = minB;
+                Real axisLen = axis.norm();
+                if (axisLen <= EPSILON) return true;
+                Coord2D nAxis = axis / axisLen;
+                Real minA = a2[0].dot(nAxis), maxA = minA;
+                Real minB = b2[0].dot(nAxis), maxB = minB;
                 for (int i = 1; i < 3; ++i)
                 {
-                    Real pa = a2[i].dot(axis);
-                    Real pb = b2[i].dot(axis);
+                    Real pa = a2[i].dot(nAxis);
+                    Real pb = b2[i].dot(nAxis);
                     if (pa < minA) minA = pa;
                     if (pa > maxA) maxA = pa;
                     if (pb < minB) minB = pb;
                     if (pb > maxB) maxB = pb;
                 }
-                return !(REAL_GREAT(minA, maxB) || REAL_GREAT(minB, maxA));
+                if (REAL_GREAT(minA, maxB) || REAL_GREAT(minB, maxA)) return false;
+
+                // Minimal translation distance to separate along this axis.
+                Real overlap = glm::min(maxA - minB, maxB - minA);
+                if (REAL_LESS(overlap, bestOverlap))
+                {
+                    bestOverlap = overlap;
+                    bestAxis = nAxis;
+                    hasBestAxis = true;
+                }
+                return true;
             };
 
             for (int i = 0; i < 3; ++i)
@@ -2230,10 +2262,45 @@ namespace dyno
                 if (!overlapOnAxis(axis)) return false;
             }
 
-            Real depth = -(radiusA + radiusB);
-            if (!REAL_LESS(depth, 0)) depth = -planeEps;
-            Real boundary = triA.v[0].dot(nAUnit);
-            sat.update(SeparationType::CT_TRIA, boundary, boundary, depth, nAUnit, triA.v[0], triA.v[1], triA.v[2]);
+            // Coplanar branch only validates 2D overlap; use 1D projection for true signed distance.
+            Real D = 0;
+            Real bA = 0;
+            Real bB = 0;
+            Vec3f axis3Candidate;
+            if (hasBestAxis)
+            {
+                axis3Candidate = (dropAxis == 0) ? Vec3f(0, bestAxis.x, bestAxis.y)
+                    : (dropAxis == 1) ? Vec3f(bestAxis.x, 0, bestAxis.y)
+                    : Vec3f(bestAxis.x, bestAxis.y, 0);
+            }
+            else
+            {
+                axis3Candidate = triA.v[1] - triA.v[0];
+                if (axis3Candidate.norm() <= EPSILON) axis3Candidate = triA.v[2] - triA.v[1];
+                if (axis3Candidate.norm() <= EPSILON) axis3Candidate = triA.v[0] - triA.v[2];
+            }
+
+            // MTD axis must lie in the coplanar plane to avoid normal leakage in depth/方向.
+            Vec3f axis3 = axis3Candidate - nAUnit * axis3Candidate.dot(nAUnit);
+            Real axis3Len = axis3.norm();
+            if (axis3Len > EPSILON)
+            {
+                axis3 /= axis3Len;
+            }
+            else
+            {
+                // Fallback: construct a stable in-plane axis from a triangle edge.
+                Vec3f e = triA.v[1] - triA.v[0];
+                if (e.norm() <= EPSILON) e = triA.v[2] - triA.v[1];
+                if (e.norm() <= EPSILON) e = triA.v[0] - triA.v[2];
+                axis3 = nAUnit.cross(e);
+                Real axis3Len2 = axis3.norm();
+                if (axis3Len2 > EPSILON) axis3 /= axis3Len2;
+                else axis3 = nAUnit;
+            }
+            if (axis3Candidate.norm() > EPSILON && axis3.dot(axis3Candidate) < 0) axis3 = -axis3;
+            checkSignedDistanceAxis(D, bA, bB, axis3, triA, triB, radiusA, radiusB);
+            sat.update(SeparationType::CT_TRIA, bA, bB, D, axis3, triA.v[0], triA.v[1], triA.v[2]);
             return true;
         };
 

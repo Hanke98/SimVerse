@@ -57,8 +57,6 @@ namespace dyno
 		DEF_VAR(bool, EnableAdjacentFilter, false, "");
 		DEF_VAR(bool, EnableBroadPhasePatchPairs, false, "");
 
-		DEF_ARRAY_IN(AABB, ShapeAABBs, DeviceType::GPU, "");
-
 		// Patch AABBs in world-space rest pose coordinates.
 		DEF_ARRAY_IN(AABB, PatchAABBs, DeviceType::GPU, "");
 
@@ -89,7 +87,7 @@ namespace dyno
 		// Optional: mapping from texture mesh shapeId to discrete elementId
 		DEF_ARRAY_IN(PairUU, Shape2ElementIds, DeviceType::GPU, "");
 
-		// Rest pose for each shape (same order as shapeAABBs / patch offsets)
+		// Rest pose for each shape (same order as patch offsets)
 		DEF_ARRAY_IN(Coord, RestShapeCenter, DeviceType::GPU, "");
 		DEF_ARRAY_IN(Matrix, RestShapeRotation, DeviceType::GPU, "");
 
@@ -99,6 +97,8 @@ namespace dyno
 		DEF_ARRAY_IN(int, Shape2TriOffsets, DeviceType::GPU, "");
 
 		DEF_VAR_IN(ShapeBVHList, ShapeBVHs, "");
+
+		DEF_VAR_IN(Bool, EnableVisualizeCollisionTriSet, "Enable visualize collision triSet mesh");
 
 		DEF_ARRAY_OUT(PairUU, PotentialShapePairs, DeviceType::GPU, "");
 

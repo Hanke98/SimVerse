@@ -165,18 +165,25 @@ namespace dyno
         }
 
         const auto& meshShapes = mesh->shapes(); // one obj one shape, including collision and visual
-        const size_t meshShapeCount = meshShapes.size(); // so meshShapes.size() >= urdfShapes.size()
+        // const size_t baseShapeCount = meshShapes.size(); // so meshShapes.size() >= urdfShapes.size()
+        const size_t baseShapeCount = urdfShapes.size();
+        const size_t instanceCount = this->ctrl_mb_chains.size();
+        const size_t totalShapeCount = baseShapeCount * instanceCount;
 
         using Real = typename TDataType::Real;
         using Coord = typename TDataType::Coord;
         using Matrix = typename TDataType::Matrix;
         using AABB = TAlignedBox3D<Real>;
 
-        std::vector<Coord> restShapeCenters(meshShapeCount, Coord(Real(0)));
-        std::vector<Matrix> restShapeRotations(meshShapeCount, Matrix::identityMatrix());
+        std::vector<Coord> baseRestShapeCenters(baseShapeCount, Coord(Real(0)));
+        std::vector<Matrix> baseRestShapeRotations(baseShapeCount, Matrix::identityMatrix());
+        std::vector<Coord> restShapeCenters(totalShapeCount, Coord(Real(0)));
+        std::vector<Matrix> restShapeRotations(totalShapeCount, Matrix::identityMatrix());
+
+        auto instances = this->varVehiclesTransform()->getValue();
 
         // Calculate Local AABBs, rest centers and rest rotations for each mesh shape
-        for (size_t l = 0; l < urdfShapes.size(); ++l)
+        for (size_t l = 0; l < baseShapeCount; ++l)
         {
             const auto& shape = urdfShapes[l];
 
@@ -187,57 +194,72 @@ namespace dyno
                 shapeId = static_cast<int>(shape.visualShapeId);
             }
 
-            if (shapeId < 0 || static_cast<size_t>(shapeId) >= meshShapeCount)
+            if (shapeId < 0 || static_cast<size_t>(shapeId) >= baseShapeCount)
                 continue;
 
             // Get rest center and rotation
             const auto& bbWorld = meshShapes[shapeId]->boundingTransform;
-            restShapeCenters[shapeId] = bbWorld.translation();
-            restShapeRotations[shapeId] = bbWorld.rotation();
-
+            baseRestShapeCenters[shapeId] = bbWorld.translation();
+            baseRestShapeRotations[shapeId] = bbWorld.rotation();
         }
 
         // Populate texture mesh shape to rigid body id mapping
         // TODO: The multi environment version
-        // for (size_t chainIndex = 0; chainIndex < this->ctrl_mb_chains.size(); ++chainIndex)
-        // {
-        //     const auto& mb = this->ctrl_mb_chains[chainIndex];
-        //     for (size_t bodyIndexIdx = 0; bodyIndexIdx < mb.body_indices.size(); ++bodyIndexIdx)
-        //     {
-        //         int bodyId = mb.body_indices[bodyIndexIdx];
-        //         this->mTextureMeshShape2RigidBodyIds.push_back(bodyId);
-        //     }
-        // }
-        const auto& mb = this->ctrl_mb_chains[0];
-        for (size_t bodyIndexIdx = 0; bodyIndexIdx < mb.body_indices.size(); ++bodyIndexIdx)
+        for (size_t chainIndex = 0; chainIndex < this->ctrl_mb_chains.size(); ++chainIndex)
         {
-            int bodyId = mb.body_indices[bodyIndexIdx];
-            this->mTextureMeshShape2RigidBodyIds.push_back(bodyId);
+            const auto& mb = this->ctrl_mb_chains[chainIndex];
+            for (size_t bodyIndexIdx = 0; bodyIndexIdx < mb.body_indices.size(); ++bodyIndexIdx)
+            {
+                int bodyId = mb.body_indices[bodyIndexIdx];
+                this->mTextureMeshShape2RigidBodyIds.push_back(bodyId);
+            }
         }
+        // const auto& mb = this->ctrl_mb_chains[0];
+        // for (size_t bodyIndexIdx = 0; bodyIndexIdx < mb.body_indices.size(); ++bodyIndexIdx)
+        // {
+        //     int bodyId = mb.body_indices[bodyIndexIdx];
+        //     this->mTextureMeshShape2RigidBodyIds.push_back(bodyId);
+        // }
 
         // Compute triangle index offsets for each mesh shape
-        std::vector<int> shape2TriOffsets(meshShapeCount + 1, 0);
-        for (size_t i = 0; i < meshShapeCount; ++i)
+        size_t baseTriCount = 0;
+        std::vector<int> baseShape2TriOffsets(baseShapeCount + 1, 0);
+        for (size_t i = 0; i < baseShapeCount; ++i)
         {
-            shape2TriOffsets[i + 1] = shape2TriOffsets[i] + static_cast<int>(meshShapes[i]->vertexIndex.size());
+            baseShape2TriOffsets[i + 1] = baseShape2TriOffsets[i] + static_cast<int>(meshShapes[i]->vertexIndex.size());
+            baseTriCount += meshShapes[i]->vertexIndex.size();
         }
 
-        std::vector<int> shape2PatchOffsets(urdfShapes.size() + 1, 0);
-        std::vector<AABB> patchAabbsRestWorld;
-        std::vector<int> patch2TriOffsets;
-        std::vector<int> patch2TriIndices;
-        patch2TriOffsets.push_back(0);
+        std::vector<std::vector<int>> baseAdjacentShapes(baseShapeCount);
+        for (const auto& joint : this->urdfInfo.joints)
+        {
+            int parent = joint.parentLinkId;
+            int child = joint.childLinkId;
+            if (parent >= 0 && child >= 0
+                && parent < static_cast<int>(baseShapeCount)
+                && child < static_cast<int>(baseShapeCount))
+            {
+                baseAdjacentShapes[parent].push_back(child);
+                baseAdjacentShapes[child].push_back(parent);
+            }
+        }
+        
+        std::vector<int> baseShape2PatchOffsets(baseShapeCount + 1, 0);
+        std::vector<AABB> basePatchAabbsRestWorld;
+        std::vector<int> basePatch2TriOffsets;
+        std::vector<int> basePatch2TriIndices;
+        basePatch2TriOffsets.push_back(0);
 
         // Populate patch AABBs and triangle indices
         int patchTotal = 0;
-        for (size_t l = 0; l < urdfShapes.size(); ++l)
+        for (size_t l = 0; l < baseShapeCount; ++l)
         {
             const auto& shape = urdfShapes[l];
             int shapeId = static_cast<int>(shape.visualShapeId);
             size_t patchCount = 0;
 
             // Check if the shape has patches
-            if (shapeId >= 0 && static_cast<size_t>(shapeId + 1) < shape2TriOffsets.size()
+            if (shapeId >= 0 && static_cast<size_t>(shapeId + 1) < baseShape2TriOffsets.size()
                 && shape.patchOffsets.size() >= 2 && !shape.patchFaces.empty())
             {
                 size_t offsetCount = shape.patchOffsets.size() - 1;
@@ -247,16 +269,8 @@ namespace dyno
             // Loop through patches
             for (size_t p = 0; p < patchCount; ++p)
             {
-                const bool useRestWorldPatchAabbs = true;
-                if (useRestWorldPatchAabbs)
-                {
-                    patchAabbsRestWorld.push_back(shape.patchAABBs[p]);
-                }
-                // else
-                // {
-                //     // Legacy local-pose path (kept for comparison / fallback).
-                //     patchAabbsRestWorld.push_back(toLocalAabb(shape.patchAABBs[p], restShapeRotations[shapeId], restShapeCenters[shapeId]));
-                // }
+
+                basePatchAabbsRestWorld.push_back(shape.patchAABBs[p]);
 
                 int begin = shape.patchOffsets[p];
                 int end = shape.patchOffsets[p + 1];
@@ -271,96 +285,141 @@ namespace dyno
                 }
 
                 // Compute triangle indices for the patch
-                int triBase = shape2TriOffsets[shapeId];
+                int triBase = baseShape2TriOffsets[shapeId];
                 for (int t = begin; t < end; ++t)
                 {
                     int faceID = shape.patchFaces[t];
-                    patch2TriIndices.push_back(triBase + faceID);
+                    basePatch2TriIndices.push_back(triBase + faceID);
                 }
 
-                patch2TriOffsets.push_back(static_cast<int>(patch2TriIndices.size()));
+                basePatch2TriOffsets.push_back(static_cast<int>(basePatch2TriIndices.size()));
                 ++patchTotal;
             }
 
-            shape2PatchOffsets[l + 1] = patchTotal;
+            baseShape2PatchOffsets[l + 1] = patchTotal;
         }
 
+        size_t basePatchCount = basePatchAabbsRestWorld.size();
+        size_t totalPatchCount = basePatchCount * instanceCount;
+
+        
+
         std::vector<std::shared_ptr<LinearBVH<TDataType>>> shapeBVHs;
-        shapeBVHs.resize(urdfShapes.size());
+        shapeBVHs.resize(baseShapeCount);
 
         size_t builtShapeBvhCount = 0;
-        for (size_t shapeId = 0; shapeId < urdfShapes.size(); ++shapeId)
+        for (size_t shapeId = 0; shapeId < baseShapeCount; ++shapeId)
         {
-            int begin = shape2PatchOffsets[shapeId];
-            int end = shape2PatchOffsets[shapeId + 1];
+            int begin = baseShape2PatchOffsets[shapeId];
+            int end = baseShape2PatchOffsets[shapeId + 1];
             int count = end - begin;
             if (count <= 0)
                 continue;
 
-			if (begin < 0 || end > static_cast<int>(patchAabbsRestWorld.size()))
+			if (begin < 0 || end > static_cast<int>(basePatchAabbsRestWorld.size()))
 				continue;
 
-			DArray<AABB> patchAabbsDevice;
-			patchAabbsDevice.resize(static_cast<uint>(count));
-			patchAabbsDevice.assign(patchAabbsRestWorld, static_cast<uint>(count), 0, static_cast<uint>(begin));
+			DArray<AABB> basePatchAabbsDevice;
+			basePatchAabbsDevice.resize(static_cast<uint>(count));
+			basePatchAabbsDevice.assign(basePatchAabbsRestWorld, static_cast<uint>(count), 0, static_cast<uint>(begin));
 
             auto bvh = std::make_shared<LinearBVH<TDataType>>();
-            bvh->construct(patchAabbsDevice);
-            patchAabbsDevice.clear();
+            bvh->construct(basePatchAabbsDevice);
+            basePatchAabbsDevice.clear();
 
             shapeBVHs[shapeId] = bvh;
             ++builtShapeBvhCount;
         }
 
+        auto TransformAABB = [&](const AABB& aabb, const Transform3f& T) -> AABB
+        {
+            AABB out;
+            out.v0 = aabb.v0 + T.translation();
+            out.v1 = aabb.v1 + T.translation();
+
+            return out;
+        };
+        
+        std::vector<std::vector<int>> adjacentShapes(totalShapeCount);
+        std::vector<int> shape2TriOffsets(totalShapeCount + 1, 0);
+        std::vector<int> shape2PatchOffsets(totalShapeCount + 1, 0);
+        std::vector<AABB> patchAabbsRestWorld(totalPatchCount);
+        std::vector<int> patch2TriOffsets(totalPatchCount + 1, 0);
+        for (size_t instId = 0; instId < instanceCount; ++instId){
+            auto Tinst = instances[instId];
+
+            size_t shapeBase = instId * baseShapeCount;
+            size_t patchBase = instId * basePatchCount;
+            size_t triBase = instId * baseTriCount;
+
+            for (size_t localShapeId = 0; localShapeId < baseShapeCount; ++localShapeId)
+            {
+                size_t globalShapeId = shapeBase + localShapeId;
+                restShapeCenters[globalShapeId] = Tinst.rotation() * baseRestShapeCenters[localShapeId] + Tinst.translation();
+                restShapeRotations[globalShapeId] = Tinst.rotation() * baseRestShapeRotations[localShapeId];
+                
+                shape2PatchOffsets[globalShapeId] = baseShape2PatchOffsets[localShapeId] + (int)patchBase;
+                shape2TriOffsets[globalShapeId] = baseShape2TriOffsets[localShapeId] + (int)triBase;
+                
+                for (size_t adjShapeIdx = 0; adjShapeIdx < baseAdjacentShapes[localShapeId].size(); ++adjShapeIdx)
+                {
+                    adjacentShapes[globalShapeId].push_back(baseAdjacentShapes[localShapeId][adjShapeIdx] + shapeBase);
+                }
+            }   
+
+            for (size_t localPatchId = 0; localPatchId < basePatchCount; ++localPatchId) 
+            {
+                size_t globalPatchId = patchBase + localPatchId;
+                // TODO: recalculate patchs' aabbs
+                patchAabbsRestWorld[globalPatchId] = TransformAABB(basePatchAabbsRestWorld[localPatchId], Tinst);
+                patch2TriOffsets[globalPatchId] = basePatch2TriOffsets[localPatchId] + (int)triBase;
+                for (int k = 0; k < baseTriCount; ++k) {
+                    
+                }
+            }
+        }
+        // The last element stores the total number of triangles, check here !!!
+        shape2TriOffsets[totalShapeCount] = (int)baseTriCount * (int)instanceCount; 
+        shape2PatchOffsets[totalShapeCount] = (int)basePatchCount * (int)instanceCount;
+        patch2TriOffsets[totalPatchCount] = (int)baseTriCount * (int)instanceCount;
+
         mNeighborTriMeshQuery->inShapeBVHs()->setValue(shapeBVHs);
         printf("[NeighborTriMeshQuery] Built %zu shape BVHs (shapeCount=%zu)\n",
                builtShapeBvhCount,
-               urdfShapes.size());
+               baseShapeCount);
 
-        mNeighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsRestWorld);
-        mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);
-        mNeighborTriMeshQuery->inPatch2TriOffsets()->assign(patch2TriOffsets);
-        mNeighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
-        mNeighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
-        mNeighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
+        mNeighborTriMeshQuery->inPatchAABBs()->assign(basePatchAabbsRestWorld);
+        mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(baseShape2PatchOffsets);
+        mNeighborTriMeshQuery->inPatch2TriOffsets()->assign(basePatch2TriOffsets);
+        mNeighborTriMeshQuery->inPatch2TriIndices()->assign(basePatch2TriIndices);
+        mNeighborTriMeshQuery->inRestShapeCenter()->assign(baseRestShapeCenters);
+        mNeighborTriMeshQuery->inRestShapeRotation()->assign(baseRestShapeRotations);
         mNeighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
         mNeighborTriMeshQuery->inShape2ElementIdsDense()->assign(mTextureMeshShape2ElementIdsDense);
         mNeighborTriMeshQuery->inShape2RigidBodyIds()->assign(mTextureMeshShape2RigidBodyIds);
-        mNeighborTriMeshQuery->inShape2TriOffsets()->assign(shape2TriOffsets);
+        mNeighborTriMeshQuery->inShape2TriOffsets()->assign(baseShape2TriOffsets);
         
         // if (!mUrdfShapeRigidBodyIds.empty() && mUrdfShapeRigidBodyIds.size() == urdfShapes.size())
         // {
         //     mNeighborTriMeshQuery->inShape2RigidBodyIds()->assign(mUrdfShapeRigidBodyIds);
         // }
         
-        std::vector<std::vector<int>> adjacentShapes(urdfShapes.size());
-        for (const auto& joint : this->urdfInfo.joints)
-        {
-            int parent = joint.parentLinkId;
-            int child = joint.childLinkId;
-            if (parent >= 0 && child >= 0
-                && parent < static_cast<int>(urdfShapes.size())
-                && child < static_cast<int>(urdfShapes.size()))
-            {
-                adjacentShapes[parent].push_back(child);
-                adjacentShapes[child].push_back(parent);
-            }
-        }
-        if (!adjacentShapes.empty())
+        
+        if (!baseAdjacentShapes.empty())
         {
             // Convert std::vector<std::vector<int>> to DArrayList<int>
             CArrayList<int> convertedArray;
             std::vector<uint> counts;
-            for (const auto& vec : adjacentShapes) {
+            for (const auto& vec : baseAdjacentShapes) {
                 counts.push_back(static_cast<uint>(vec.size()));
             }
 
             CArray<uint> countArray;
             countArray.assign(counts);
             convertedArray.resize(countArray);
-            for (size_t i = 0; i < adjacentShapes.size(); ++i) {
+            for (size_t i = 0; i < baseAdjacentShapes.size(); ++i) {
                 auto& list = convertedArray[i];
-                for (int val : adjacentShapes[i]) {
+                for (int val : baseAdjacentShapes[i]) {
                     list.insert(val);
                 }
             }

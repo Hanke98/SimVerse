@@ -33,9 +33,9 @@ int main() {
     simulator.createScene();
     std::cout << "场景创建完成" << std::endl;
 
-    float dt = 0.002;
+    float dt = 0.01;
     float density = 2000.0f;
-    float damping = 250.0f;
+    float damping = 50.0f;
     bool enableGravity = false;
     bool enableFriction = false;
     bool enableRendering = true;
@@ -57,7 +57,7 @@ int main() {
     hinge_param.num_bodies = 1;
     hinge_param.ids.push_back(0);
     // hinge_param.ids.push_back(1);
-    std::vector<float> theta{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    std::vector<float> theta{0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
     hinge_param.theta.push_back(theta);
     // hinge_param.theta.push_back(theta);
 
@@ -115,13 +115,13 @@ int main() {
     };
 
     Real targetAngle[7] = {
-        Real(0.3),    // joint 0 0.3
-        Real(1.0),    // joint 1 1.0
-        Real(0),      // joint 2 0
-        Real(-0.6),   // joint 3 -0.6
-        Real(0.3),    // joint 4 0.3
-        Real(1.8),    // joint 5 1.8
-        Real(0.3)     // joint 6 0.3
+        Real(0.3),    // joint 0
+        Real(1.0),    // joint 1
+        Real(0),    // joint 2
+        Real(-0.6),    // joint 3
+        Real(0.3),    // joint 4
+        Real(1.8),    // joint 5
+        Real(0.3)     // joint 6
     };
 
     int checkFrequancy = 100;
@@ -218,7 +218,7 @@ int main() {
             Real e  = targetAngle[j] - hingeAngle;
             torque[j] = kp[j] * e - kd[j] * hingeVelocity ;
             torque[j] = std::max(-effortLimit[j]/1, std::min(effortLimit[j]/1, torque[j]));
-            torque[j] -= dampings[j] * hingeVelocity * (1 - damping * dt);
+            // torque[j] -= dampings[j] * hingeVelocity * (1 - damping * dt);
             // torque[j] -= dampings[j] * hingeVelocity;
 
             // 更新上一帧角度
@@ -276,9 +276,11 @@ int main() {
         // param.torques.push_back(moterVelocities1);
         simulator.setHingeTorques(param);
         simulator.stepSimulation(enableRendering, enableSaveScreen, savePath);
-        if (i == 0) {
-            simulator.setInitGesture(hinge_param);
-        }
+
+        // if you want to turn on the initial gesture, open here
+        // if (i == 0) {
+        //     simulator.setInitGesture(hinge_param);
+        // }
 
         i++;
     }

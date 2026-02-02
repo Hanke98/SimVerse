@@ -56,5 +56,7 @@ tmp
 *.so
 
 /examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/*.bmp
+/examples/Cuda/RigidBody/NMQ_test/screenSave/*.bmp
 
 /.github/*
+

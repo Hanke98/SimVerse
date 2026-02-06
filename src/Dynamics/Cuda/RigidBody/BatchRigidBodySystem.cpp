@@ -869,10 +869,10 @@ namespace dyno
             mTextureMeshShape2ElementIds.clear();
             if (textureShapeCount > 0)
             {
-                // mTextureMeshShape2ElementIds.resize(textureShapeCount);
+                mTextureMeshShape2ElementIds.reserve(textureShapeCount);
                 for (uint i = 0; i < textureShapeCount; ++i)
                 {
-                    mTextureMeshShape2ElementIds[i] = Pair<uint, uint>(i, invalidElementId);
+                    mTextureMeshShape2ElementIds.push_back(Pair<uint, uint>(i, invalidElementId));
                 }
             }
 
@@ -896,6 +896,35 @@ namespace dyno
 
                 for (int l = 0; l < this->urdfInfo.links.size(); ++l) {
 
+                    auto updateBbTransform = [&](uint shapeId, bool isVisual) {
+                        if (texMesh == nullptr || shapeId >= textureShapeCount)
+                            return;
+
+                        const auto& bbWorld = texMesh->shapes()[shapeId]->boundingTransform;
+                        auto& link = this->urdfInfo.links[l];
+
+                        const Mat3f& R_link = link.T_world.rotation();
+                        const Vec3f& t_link = link.T_world.translation();
+                        const Mat3f& R_bb = bbWorld.rotation();
+                        const Vec3f& t_bb = bbWorld.translation();
+
+                        Mat3f R_local = R_link.transpose() * R_bb;
+                        Vec3f t_local = R_link.transpose() * (t_bb - t_link);
+
+                        if (isVisual)
+                        {
+                            link.T_visual_bb_world = bbWorld;
+                            link.T_visual_bb_local.rotation() = R_local;
+                            link.T_visual_bb_local.translation() = t_local;
+                        }
+                        else
+                        {
+                            link.T_collision_bb_world = bbWorld;
+                            link.T_collision_bb_local.rotation() = R_local;
+                            link.T_collision_bb_local.translation() = t_local;
+                        }
+                    };
+
                     uint it;
 
                     if (!this->varVisualOrCollision()->getValue()) {
@@ -903,6 +932,9 @@ namespace dyno
                     } else {
                         it = this->urdfInfo.links[l].collisionShapeId;
                     }
+
+                    updateBbTransform(this->urdfInfo.links[l].visualShapeId, true);
+                    updateBbTransform(this->urdfInfo.links[l].collisionShapeId, false);
 
                     auto up = texMesh->shapes()[it]->boundingBox.v1;
                     auto down = texMesh->shapes()[it]->boundingBox.v0;
@@ -961,15 +993,14 @@ namespace dyno
                     Pair<uint, uint> entry;
                     entry.first = it;
                     entry.second = boxLocalId;
-                    mTextureMeshShape2ElementIds.push_back(entry);
-                    // if (it < mTextureMeshShape2ElementIds.size())
-                    // {
-                    //     mTextureMeshShape2ElementIds[it] = entry;
-                    // }
-                    // else
-                    // {
-                    //     mTextureMeshShape2ElementIds.push_back(entry);
-                    // }
+                    if (it < mTextureMeshShape2ElementIds.size())
+                    {
+                        mTextureMeshShape2ElementIds[it] = entry;
+                    }
+                    else
+                    {
+                        mTextureMeshShape2ElementIds.push_back(entry);
+                    }
                     
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
                     mb.body_indices.push_back(actor->idx);
@@ -995,14 +1026,24 @@ namespace dyno
                     auto parentId = this->urdfInfo.joints[j].parentLinkId;
                     auto childId = this->urdfInfo.joints[j].childLinkId;
 
+                    const uint parentShapeId = this->varVisualOrCollision()->getValue()
+                        ? this->urdfInfo.links[parentId].collisionShapeId
+                        : this->urdfInfo.links[parentId].visualShapeId;
+                    const uint childShapeId = this->varVisualOrCollision()->getValue()
+                        ? this->urdfInfo.links[childId].collisionShapeId
+                        : this->urdfInfo.links[childId].visualShapeId;
+
+                    auto parentIt = actors.find(parentShapeId);
+                    auto childIt = actors.find(childShapeId);
+
                     if (this->urdfInfo.joints[j].type == REVOLUTE) {
                         HingeJoint<Real>* joint;
                         if (!this->varVisualOrCollision()->getValue()) {
-                            joint = &this->createHingeJoint(actors[this->urdfInfo.links[parentId].visualShapeId],
-                                                            actors[this->urdfInfo.links[childId].visualShapeId]);
+                            joint = &this->createHingeJoint(parentIt->second,
+                                                            childIt->second);
                         } else {
-                            joint = &this->createHingeJoint(actors[this->urdfInfo.links[parentId].collisionShapeId],
-                                                            actors[this->urdfInfo.links[childId].collisionShapeId]);
+                            joint = &this->createHingeJoint(parentIt->second,
+                                                            childIt->second);
                         }
                         joint->setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation()
                                               + instances[robotarmIndex].translation());
@@ -1014,11 +1055,11 @@ namespace dyno
                     if (this->urdfInfo.joints[j].type == PRISMATIC) {
                         SliderJoint<Real>* joint;
                         if (!this->varVisualOrCollision()->getValue()) {
-                            joint = &this->createSliderJoint(actors[this->urdfInfo.links[parentId].visualShapeId],
-                                                             actors[this->urdfInfo.links[childId].visualShapeId]);
+                            joint = &this->createSliderJoint(parentIt->second,
+                                                             childIt->second);
                         } else {
-                            joint = &this->createSliderJoint(actors[this->urdfInfo.links[parentId].collisionShapeId],
-                                                             actors[this->urdfInfo.links[childId].collisionShapeId]);
+                            joint = &this->createSliderJoint(parentIt->second,
+                                                             childIt->second);
                         }
                         joint->setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation()
                                               + instances[robotarmIndex].translation());
@@ -1030,11 +1071,11 @@ namespace dyno
                     if (this->urdfInfo.joints[j].type == FIXED) {
                         FixedJoint<Real>* joint;
                         if (!this->varVisualOrCollision()->getValue()) {
-                            joint = &this->createFixedJoint(actors[this->urdfInfo.links[parentId].visualShapeId],
-                                                            actors[this->urdfInfo.links[childId].visualShapeId]);
+                            joint = &this->createFixedJoint(parentIt->second,
+                                                            childIt->second);
                         } else {
-                            joint = &this->createFixedJoint(actors[this->urdfInfo.links[parentId].collisionShapeId],
-                                                            actors[this->urdfInfo.links[childId].collisionShapeId]);
+                            joint = &this->createFixedJoint(parentIt->second,
+                                                            childIt->second);
                         }
                         joint->setAnchorPoint(this->urdfInfo.joints[j].originWorld.translation()
                                               + instances[robotarmIndex].translation());
@@ -1088,7 +1129,11 @@ namespace dyno
             };
 
             for (size_t i = 0; i < robotarmSize; i++) {
-                const Vec3f& _targetPosition = targetPosition[robotarmIndex];
+                Vec3f _targetPosition = Vec3f(0.0f, 0.0f, 0.0f);
+                if (robotarmIndex < targetPosition.size())
+                {
+                    _targetPosition = targetPosition[robotarmIndex];
+                }
                 auto [mb, non_ctrl_mb]
                     = addRigidArmExample(_targetPosition);
                 ctrl_mb_chains.push_back(mb);

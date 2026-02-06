@@ -258,15 +258,15 @@ int main() {
             }
         }
 
-        moterVelocities1 = {
-            (float)torque[0],
-            (float)torque[1],
-            (float)torque[2],
-            (float)torque[3],
-            (float)torque[4],
-            (float)torque[5],
-            (float)torque[6]
-        };
+        // moterVelocities1 = {
+        //     (float)torque[0],
+        //     (float)torque[1],
+        //     (float)torque[2],
+        //     (float)torque[3],
+        //     (float)torque[4],
+        //     (float)torque[5],
+        //     (float)torque[6]
+        // };
 
         RobotArmSimulator<DataType3f>::HingeTorqueParam param;
         param.num_bodies = 1;
@@ -278,9 +278,9 @@ int main() {
         simulator.stepSimulation(enableRendering, enableSaveScreen, savePath);
 
         // if you want to turn on the initial gesture, open here
-        // if (i == 0) {
-        //     simulator.setInitGesture(hinge_param);
-        // }
+        if (i == 0) {
+            simulator.setInitGesture(hinge_param);
+        }
 
         i++;
     }

@@ -241,7 +241,8 @@ namespace dyno
 		QPen LinePen = QPen(QPen(QBrush(QColor(200,200,200)), 2, Qt::SolidLine, Qt::SquareCap, Qt::BevelJoin));
 		painter.setPen(LinePen);
 
-		mPath.clear();
+		// mPath.clear();
+		mPath = QPainterPath();
 		if (useBezier)		//Draw Bezier or Line
 		{
 			//draw Bezier

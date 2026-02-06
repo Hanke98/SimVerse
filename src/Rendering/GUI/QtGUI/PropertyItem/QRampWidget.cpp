@@ -165,21 +165,21 @@ namespace dyno
 	void QDrawLabel::paintEvent(QPaintEvent* event)
 	{
 
-		//ÉèÖÃ°ë¾¶
+		//ï¿½ï¿½ï¿½Ã°ë¾¶
 		radius = 4;
 		int w = this->width();
 		int h = this->height();
 		
-		//ÉèÖÃ×î´ó×îÐ¡×ø±ê
+		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡ï¿½ï¿½ï¿½ï¿½
 		minX = 0 + 1.5 * radius;
 		maxX = w - 2 * radius;
 		minY = 0 + 2 * radius;
 		maxY = h - 1.5 * radius;
 
-		//Èç¹ûCoordArrayÎª¿Õ£¬Ôò´ÓfieldÖÐÈ¡Êý¾Ý
+		//ï¿½ï¿½ï¿½CoordArrayÎªï¿½Õ£ï¿½ï¿½ï¿½ï¿½fieldï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½
 		if (mCoordArray.empty())
 		{
-			if (mField->getValue().getUserPoints().empty())		//Èç¹ûfieldÖÐÃ»ÓÐWidget´«»ØµÄÊý¾Ý£¬Ôò´Ófield±¾ÉíµÄCoord½øÐÐ³õÊ¼»¯
+			if (mField->getValue().getUserPoints().empty())		//ï¿½ï¿½ï¿½fieldï¿½ï¿½Ã»ï¿½ï¿½Widgetï¿½ï¿½ï¿½Øµï¿½ï¿½ï¿½ï¿½Ý£ï¿½ï¿½ï¿½ï¿½fieldï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Coordï¿½ï¿½ï¿½Ð³ï¿½Ê¼ï¿½ï¿½
 			{
 				this->copyFromField(mField->getValue().FE_MyCoord, mCoordArray);
 				mReSortCoordArray.assign(mCoordArray.begin(), mCoordArray.end());
@@ -187,7 +187,7 @@ namespace dyno
 				buildCoordToResortMap();
 				this->copyFromField(mField->getValue().FE_HandleCoord, mHandlePoints);
 			}
-			else		//·ñÔòÖ±½ÓÈ¡field´æµÄqt×ø±ê
+			else		//ï¿½ï¿½ï¿½ï¿½Ö±ï¿½ï¿½È¡fieldï¿½ï¿½ï¿½qtï¿½ï¿½ï¿½ï¿½
 			{
 				this->copyFromField(mField->getValue().getUserPoints(), mCoordArray);
 				//this->copyFromField(field->getDataPtr()->OriginalHandlePoint, HandlePoints);
@@ -197,9 +197,9 @@ namespace dyno
 		}
 
 
-		if (mCoordArray.empty())			//Èç¹ûÊÇcloseÄ£Ê½£¬ÇÒÃ»ÓÐ³õÊ¼»¯Êý¾Ý£¬ÔòÔÚ¿Õ»­²¼´´½¨Á½¸öµã£¬×÷Îª±ß½çµã
+		if (mCoordArray.empty())			//ï¿½ï¿½ï¿½ï¿½ï¿½closeÄ£Ê½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½Ð³ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½Ý£ï¿½ï¿½ï¿½ï¿½Ú¿Õ»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ã£¬ï¿½ï¿½Îªï¿½ß½ï¿½ï¿½
 		{
-			if (mMode == x)		//directionÎªx´´½¨µãµÄÂß¼­
+			if (mMode == x)		//directionÎªxï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ß¼ï¿½
 			{
 				if (mGeneratorXmin)
 				{
@@ -224,8 +224,8 @@ namespace dyno
 			}
 		}
 
-		mReSortCoordArray.assign(mCoordArray.begin(), mCoordArray.end());		//ÓÃCoordArrayÎªreSortCoordArray¸³Öµ
-		reSort(mReSortCoordArray);		//¶ÔreSortCoordArrayÖØÅÅÐò
+		mReSortCoordArray.assign(mCoordArray.begin(), mCoordArray.end());		//ï¿½ï¿½CoordArrayÎªreSortCoordArrayï¿½ï¿½Öµ
+		reSort(mReSortCoordArray);		//ï¿½ï¿½reSortCoordArrayï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 
 		QPainter painter(this);
@@ -245,28 +245,29 @@ namespace dyno
 		//Draw Ellipse
 		size_t ptNum = mCoordArray.size();
 
-		QVector<QPointF> QCoordArray;//´´½¨QPointFÒÔ»æÖÆµã
+		QVector<QPointF> QCoordArray;//ï¿½ï¿½ï¿½ï¿½QPointFï¿½Ô»ï¿½ï¿½Æµï¿½
 		for (size_t i = 0; i < mReSortCoordArray.size(); i++)
 		{
 			QCoordArray.push_back(QPointF(mReSortCoordArray[i].x, mReSortCoordArray[i].y));
 		}
 
 
-		buildCoordToResortMap();	//¹¹½¨mapÓÃÒÔÍ¨¹ýCoordArray²éÕÒÅÅÐòºóreSortCoordArrayµÄÔªËØid
+		buildCoordToResortMap();	//ï¿½ï¿½ï¿½ï¿½mapï¿½ï¿½ï¿½ï¿½Í¨ï¿½ï¿½CoordArrayï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½reSortCoordArrayï¿½ï¿½Ôªï¿½ï¿½id
 
-		if (mHandlePoints.empty())	//Í¨¹ýCoordArray¹¹½¨±´Èû¶û¿ØÖÆ±úµÄµãHandlePoints
+		if (mHandlePoints.empty())	//Í¨ï¿½ï¿½CoordArrayï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ±ï¿½ï¿½Äµï¿½HandlePoints
 		{
 			buildHandlePointSet();
 		}
 
-		//»æÖÆÇúÏß
+		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 		QPen LinePen = QPen(QPen(QBrush(QColor(200,200,200)), 2, Qt::SolidLine, Qt::SquareCap, Qt::BevelJoin));
 		painter.setPen(LinePen);
 
-		mPath.clear();
-		if (useBezier)		//»­±´Èû¶ûÇúÏß»òÕÛÏß
+		// mPath.clear();
+		mPath = QPainterPath();
+		if (useBezier)		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ß»ï¿½ï¿½ï¿½ï¿½ï¿½
 		{
-			//»æÖÆ±´Èû¶ûÇúÏß
+			//ï¿½ï¿½ï¿½Æ±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 			for (size_t i = 1; i < mReSortCoordArray.size(); i++)
 			{
 				int ptnum = i - 1;
@@ -305,7 +306,7 @@ namespace dyno
 		QPen LinePenWhite = QPen(QPen(QBrush(Qt::white), 2, Qt::SolidLine, Qt::SquareCap, Qt::BevelJoin));
 		painter.setPen(LinePenWhite);
 
-		//»æÖÆµã
+		//ï¿½ï¿½ï¿½Æµï¿½
 		for (size_t i = 0; i < ptNum; i++)
 		{
 			painter.setBrush(QBrush(Qt::gray, Qt::SolidPattern));
@@ -331,10 +332,10 @@ namespace dyno
 			painter.drawEllipse(mCoordArray[mHoverPoint].x - radius, mCoordArray[mHoverPoint].y - radius, 2 * radius, 2 * radius);
 		}
 
-		//»æÖÆ¿ØÖÆ±ú
+		//ï¿½ï¿½ï¿½Æ¿ï¿½ï¿½Æ±ï¿½
 		if (useBezier) 
 		{
-			////»æÖÆÈ«²¿¿ØÖÆ±ú
+			////ï¿½ï¿½ï¿½ï¿½È«ï¿½ï¿½ï¿½ï¿½ï¿½Æ±ï¿½
 			//{
 			//	for (size_t i = 0; i < CoordArray.size(); i++)
 			//	{
@@ -353,13 +354,13 @@ namespace dyno
 			{
 				int f = mHandleParent * 2;
 				int s = mHandleParent * 2 + 1;
-				//»æÖÆ¿ØÖÆ±ú
+				//ï¿½ï¿½ï¿½Æ¿ï¿½ï¿½Æ±ï¿½
 				painter.drawLine(QPointF(mCoordArray[mHandleParent].x, mCoordArray[mHandleParent].y), QPointF(mHandlePoints[f].x, mHandlePoints[f].y));
 				painter.drawLine(QPointF(mCoordArray[mHandleParent].x, mCoordArray[mHandleParent].y), QPointF(mHandlePoints[s].x, mHandlePoints[s].y));
-				//»æÖÆ¿ØÖÆµã
+				//ï¿½ï¿½ï¿½Æ¿ï¿½ï¿½Æµï¿½
 				painter.drawEllipse(mHandlePoints[f].x - radius, mHandlePoints[f].y - radius, 2 * radius, 2 * radius);
 				painter.drawEllipse(mHandlePoints[s].x - radius, mHandlePoints[s].y - radius, 2 * radius, 2 * radius);
-				// »æÖÆ¸¸µã
+				// ï¿½ï¿½ï¿½Æ¸ï¿½ï¿½ï¿½
 				painter.setBrush(QBrush(QColor(80, 179, 255), Qt::SolidPattern));
 				painter.drawEllipse(mCoordArray[mHandleParent].x - radius, mCoordArray[mHandleParent].y - radius, 2 * radius, 2 * radius);
 
@@ -389,7 +390,7 @@ namespace dyno
 		painter.setBrush(QBrush(QColor(80, 179, 255), Qt::SolidPattern));
 		painter.setPen(QPen(QPen(QBrush(QColor(255, 255, 255)), 2, Qt::SolidLine, Qt::SquareCap, Qt::BevelJoin)));
 
-		//»æÖÆÑ¡ÖÐµã
+		//ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½Ðµï¿½
 		if (mMultiSelectID.size())
 		{
 			for (auto it : mMultiSelectID)
@@ -474,12 +475,12 @@ namespace dyno
 	void QDrawLabel::mousePressEvent(QMouseEvent* event) 
 	{
 
-		//Êó±ê×ó¼ü
+		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 		mPressCoord.x = event->pos().x();
 		mPressCoord.y = event->pos().y();
 
-		if (mShiftKey)	//¶àÑ¡
+		if (mShiftKey)	//ï¿½ï¿½Ñ¡
 		{
 			for (size_t i = 0; i < mCoordArray.size(); i++)
 			{
@@ -518,7 +519,7 @@ namespace dyno
 				}
 			}
 		}
-		else if (!mShiftKey && !mAltKey)		//µ¥Ñ¡
+		else if (!mShiftKey && !mAltKey)		//ï¿½ï¿½Ñ¡
 		{
 			for (size_t i = 0; i < mCoordArray.size(); i++)
 			{
@@ -555,7 +556,7 @@ namespace dyno
 			}
 		}
 		
-		//ÅÐ¶ÏÊÇ·ñµã»÷±´Èû¶û¿ØÖÆ±ú
+		//ï¿½Ð¶ï¿½ï¿½Ç·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ±ï¿½
 		if (useBezier)
 		{
 			int displayHandle[2] = { mHandleParent * 2 ,mHandleParent * 2 + 1};
@@ -590,7 +591,7 @@ namespace dyno
 
 					mConnectLength = V2.norm();
 				
-					{//ÅÐ¶ÏHandleÊÇ·ñÁª¶¯
+					{//ï¿½Ð¶ï¿½Handleï¿½Ç·ï¿½ï¿½ï¿½ï¿½ï¿½
 						Vec2f V3 = Vec2f(mHandlePoints[mSelectHandlePoint].x - mCoordArray[mHandleParent].x, mHandlePoints[mSelectHandlePoint].y - mCoordArray[mHandleParent].y);
 						Vec2f V4 = Vec2f(mHandlePoints[mConnectHandlePoint].x - mCoordArray[mHandleParent].x, mHandlePoints[mConnectHandlePoint].y - mCoordArray[mHandleParent].y);
 						V4.normalize();
@@ -604,13 +605,13 @@ namespace dyno
 				}
 			}
 		}
-		//Î´µã»÷ÈÎºÎµãÔò²åÈëµã
+		//Î´ï¿½ï¿½ï¿½ï¿½ÎºÎµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 		if (!mIsSelect && !mIsHandleSelect)
 		{
-			//closeÄ£Ê½ÏÂ²åÈëµã²¢×Ô¶¯ÅÅÐò
+			//closeÄ£Ê½ï¿½Â²ï¿½ï¿½ï¿½ã²¢ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½
 			addPointtoEnd();
 		}
-		//Êó±êÓÒ¼ü
+		//ï¿½ï¿½ï¿½ï¿½Ò¼ï¿½
 		else if(event->button() == Qt::RightButton)
 		{
 			if (mSelectPointID > 1) 
@@ -622,7 +623,7 @@ namespace dyno
 		this->update();
 	}
 
-	//Î²²å
+	//Î²ï¿½ï¿½
 	int QDrawLabel::addPointtoEnd() 
 	{
 
@@ -666,10 +667,10 @@ namespace dyno
 	void QDrawLabel::mouseMoveEvent(QMouseEvent* event)
 	{
 		this->grabKeyboard();
-		//ÒÆ¶¯Ô¼Êø 
+		//ï¿½Æ¶ï¿½Ô¼ï¿½ï¿½ 
 		if (mIsSelect) 
 		{
-			//Ê×Î»ÒÆ¶¯Ô¼Êø ¡ª¡ªµ¥Ñ¡
+			//ï¿½ï¿½Î»ï¿½Æ¶ï¿½Ô¼ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡
 
 			if (mSelectPointID <= 1)
 			{
@@ -698,7 +699,7 @@ namespace dyno
 
 			mInitPosition = mCoordArray[mSelectPointID];
 
-			//¶àÑ¡
+			//ï¿½ï¿½Ñ¡
 			if (mMultiSelectID.size() > 1)
 			{
 				for (size_t i = 0; i < mMultiSelectID.size(); i++)
@@ -739,10 +740,10 @@ namespace dyno
 
 			update();
 		}
-		//¿ØÖÆ±úÒÆ¶¯
+		//ï¿½ï¿½ï¿½Æ±ï¿½ï¿½Æ¶ï¿½
 		if (mIsHandleSelect)
 		{
-			//Ê×Î»ÒÆ¶¯Ô¼Êø 
+			//ï¿½ï¿½Î»ï¿½Æ¶ï¿½Ô¼ï¿½ï¿½ 
 			mHandlePoints[mSelectHandlePoint].x = dyno::clamp(event->pos().x(), minX, maxX);
 			mHandlePoints[mSelectHandlePoint].y = dyno::clamp(event->pos().y(), minY, maxY);
 			
@@ -804,7 +805,7 @@ namespace dyno
 	{
 		Ramp s;
 
-		//¸üÐÂÊý¾Ýµ½field 
+		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ýµï¿½field 
 		if (mField == nullptr) { return; }
 		else
 		{

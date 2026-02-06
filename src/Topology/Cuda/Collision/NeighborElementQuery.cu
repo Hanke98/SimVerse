@@ -3,6 +3,7 @@
 
 #include "Collision/CollisionDetectionBroadPhase.h"
 
+#include "Platform.h"
 #include "Primitive/Primitive3D.h"
 
 #include "Timer.h"
@@ -498,7 +499,9 @@ namespace dyno
 	void NeighborElementQuery<TDataType>::compute()
 	{
 		CTimer broadTimer;
-		broadTimer.start();
+		CTimer totalTimer;
+		// totalTimer.start();
+		// broadTimer.start();
 
 		// auto finishTiming = [&]() {
 		// 	timer.stop();
@@ -530,6 +533,8 @@ namespace dyno
 			mQueryAABB.resize(t_num);
 		}
 		//printf("=========== ============= INSIDE SELF COLLISION %d\n", t_num);
+		CTimer broadTimer1;
+
 		ElementOffset elementOffset = inTopo->calculateElementOffset();
 
 		Real dHat = this->varDHead()->getValue();
@@ -553,6 +558,12 @@ namespace dyno
 			triangleInGlobal,
 			elementOffset,
 			dHat);
+		cuSynchronize();
+
+		broadTimer1.stop();
+		std::cout << "[NeighborElementQuery] compute broad phase time 1: " << broadTimer1.getElapsedTime() << " ms" << std::endl;
+
+		CTimer broadTimer2;
 
 		mQueryAABB.assign(mQueriedAABB);
 
@@ -566,6 +577,11 @@ namespace dyno
 			// finishTiming();
 			return;
 		}
+
+		broadTimer2.stop();
+		std::cout << "[NeighborElementQuery] compute broad phase time 2: " << broadTimer2.getElapsedTime() << " ms" << std::endl;
+
+		CTimer broadTimer3;
 
 		DArray<int> count(contactList.size());
 		cuExecute(contactList.size(),
@@ -585,17 +601,28 @@ namespace dyno
 
 		DArray<ContactId> deviceIds(totalSize);
 
+		broadTimer3.stop();
+		std::cout << "[NeighborElementQuery] compute broad phase time 3: " << broadTimer3.getElapsedTime() << " ms" << std::endl;
+
+		CTimer broadTimer4;
+
 		cuExecute(contactList.size(),
 			CCL_SetupContactIds,
 			deviceIds,
 			count,
 			contactList);
+		cuSynchronize();
+
+		broadTimer4.stop();
+		std::cout << "[NeighborElementQuery] compute broad phase time 4: " << broadTimer4.getElapsedTime() << " ms" << std::endl;
 
 		broadTimer.stop();
 		std::cout << "[NeighborElementQuery] compute broad phase time: " << broadTimer.getElapsedTime() << " ms" << std::endl;
 
 		CTimer narrowTimer;
-		narrowTimer.start();
+		CTimer narrowTimer1;
+		
+		// narrowTimer.start();
 
 		count.clear();
 
@@ -715,7 +742,11 @@ namespace dyno
 					true);
 			}
 		}
-
+		cuSynchronize();
+		narrowTimer1.stop();
+		std::cout << "[NeighborElementQuery] compute narrow phase time 1: " << narrowTimer1.getElapsedTime() << " ms" << std::endl;
+		
+		CTimer narrowTimer2;
 		contactNumCpy.assign(contactNum);
 		
 		int sum = mReduce.accumulate(contactNum.begin(), contactNum.size());
@@ -734,6 +765,9 @@ namespace dyno
 				contactNum,
 				contactNumCpy);
 		}
+		cuSynchronize();
+		narrowTimer2.stop();
+		std::cout << "[NeighborElementQuery] compute narrow phase time 2: " << narrowTimer2.getElapsedTime() << " ms" << std::endl;
 
 		contactNumCpy.clear();
 		contactNum.clear();
@@ -743,6 +777,9 @@ namespace dyno
 		// finishTiming();
 		narrowTimer.stop();
 		std::cout << "[NeighborElementQuery] compute narrow phase time: " << narrowTimer.getElapsedTime() << " ms" << std::endl;
+
+		totalTimer.stop();
+		std::cout << "[NeighborElementQuery] compute time: " << totalTimer.getElapsedTime() << " ms" << std::endl;
 
 	}
 

@@ -174,7 +174,7 @@ public:
 
     DEF_VAR(Bool, VisualOrCollision, false, "False stands for Visual while ture standing for collision");
     
-    DEF_VAR(CollisionDetectionType, CollisionDetectionType, TriMesh, "CollisionDetectionType");
+    DEF_VAR(CollisionDetectionType, CollisionDetectionType, Element, "CollisionDetectionType");
 
     DEF_VAR(Bool, EnableVisualizeCollisionTriSet, false, "Enable visualize collision triSet mesh");
     

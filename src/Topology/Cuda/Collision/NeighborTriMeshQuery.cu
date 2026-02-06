@@ -2626,6 +2626,103 @@ namespace dyno
 				this->varInputVerticesInRestWorld()->getValue());
 			cuSynchronize();
 		// printf("[NeighborTriMeshQuery] NarrowPhase contacts generated: %d contacts found.\n", total);
+
+		// Debug: dump a few manifold normals/penetrations once
+		{
+			static bool sPrinted = false;
+			if (!sPrinted)
+			{
+				sPrinted = true;
+				CArray<ContactPair> hContacts;
+				hContacts.assign(this->outContacts()->getData());
+				CArray<Coord> hVertices;
+				hVertices.assign(vertices);
+				CArray<Triangle> hTriangles;
+				hTriangles.assign(triIndices);
+				CArray<Coord> hCenters;
+				hCenters.assign(this->inCenter()->getData());
+				CArray<Coord> hRestCenters;
+				hRestCenters.assign(this->inRestShapeCenter()->getData());
+				CArray<int> hShape2TriOffsets;
+				hShape2TriOffsets.assign(this->inShape2TriOffsets()->getData());
+
+				auto findShapeId = [&](int triId) -> int {
+					if (triId < 0 || hShape2TriOffsets.size() < 2) return -1;
+					int shapeCount = (int)hShape2TriOffsets.size() - 1;
+					for (int s = 0; s < shapeCount; ++s)
+					{
+						int a = hShape2TriOffsets[s];
+						int b = hShape2TriOffsets[s + 1];
+						if (triId >= a && triId < b)
+							return s;
+					}
+					return -1;
+				};
+
+				// const size_t sampleCount = std::min<size_t>(5, hContacts.size());
+				// printf("[NMQ DEBUG] contacts=%zu (sample=%zu)\n", (size_t)hContacts.size(), sampleCount);
+				// for (size_t i = 0; i < sampleCount; ++i)
+				// {
+				// 	const auto& cp = hContacts[(uint)i];
+				// 	printf("[NMQ DEBUG] c[%zu] body=(%d,%d) tri=(%d,%d) pen=%.6f\n",
+				// 		i, (int)cp.bodyId1, (int)cp.bodyId2, (int)cp.localId1, (int)cp.localId2,
+				// 		(double)cp.interpenetration);
+				// 	printf("  n1=(%.6f %.6f %.6f) n2=(%.6f %.6f %.6f)\n",
+				// 		(double)cp.normal1[0], (double)cp.normal1[1], (double)cp.normal1[2],
+				// 		(double)cp.normal2[0], (double)cp.normal2[1], (double)cp.normal2[2]);
+				// 	printf("  p1=(%.6f %.6f %.6f) p2=(%.6f %.6f %.6f)\n",
+				// 		(double)cp.pos1[0], (double)cp.pos1[1], (double)cp.pos1[2],
+				// 		(double)cp.pos2[0], (double)cp.pos2[1], (double)cp.pos2[2]);
+				// 	if (cp.bodyId1 >= 0 && cp.bodyId1 < (int)hCenters.size())
+				// 	{
+				// 		Coord d1 = cp.pos1 - hCenters[(uint)cp.bodyId1];
+				// 		printf("  d1=(%.6f %.6f %.6f)\n", (double)d1[0], (double)d1[1], (double)d1[2]);
+				// 	}
+				// 	if (cp.bodyId2 >= 0 && cp.bodyId2 < (int)hCenters.size())
+				// 	{
+				// 		Coord d2 = cp.pos2 - hCenters[(uint)cp.bodyId2];
+				// 		printf("  d2=(%.6f %.6f %.6f)\n", (double)d2[0], (double)d2[1], (double)d2[2]);
+				// 	}
+
+				// 	int triId0 = cp.localId1;
+				// 	int triId1 = cp.localId2;
+				// 	int shape0 = findShapeId(triId0);
+				// 	int shape1 = findShapeId(triId1);
+				// 	if (shape0 >= 0 && shape0 < (int)hRestCenters.size())
+				// 	{
+				// 		auto rc0 = hRestCenters[(uint)shape0];
+				// 		printf("  shape0=%d rest0=(%.6f %.6f %.6f)\n",
+				// 			shape0, (double)rc0[0], (double)rc0[1], (double)rc0[2]);
+				// 	}
+				// 	if (shape1 >= 0 && shape1 < (int)hRestCenters.size())
+				// 	{
+				// 		auto rc1 = hRestCenters[(uint)shape1];
+				// 		printf("  shape1=%d rest1=(%.6f %.6f %.6f)\n",
+				// 			shape1, (double)rc1[0], (double)rc1[1], (double)rc1[2]);
+				// 	}
+				// 	if (triId0 >= 0 && triId0 < (int)hTriangles.size() &&
+				// 		triId1 >= 0 && triId1 < (int)hTriangles.size())
+				// 	{
+				// 		Triangle t0 = hTriangles[(uint)triId0];
+				// 		Triangle t1 = hTriangles[(uint)triId1];
+				// 		Coord a0 = hVertices[(uint)t0[0]];
+				// 		Coord b0 = hVertices[(uint)t0[1]];
+				// 		Coord c0 = hVertices[(uint)t0[2]];
+				// 		Coord a1 = hVertices[(uint)t1[0]];
+				// 		Coord b1 = hVertices[(uint)t1[1]];
+				// 		Coord c1 = hVertices[(uint)t1[2]];
+				// 		Coord n0 = (b0 - a0).cross(c0 - a0);
+				// 		Coord n1 = (b1 - a1).cross(c1 - a1);
+				// 		if (n0.norm() > Real(0)) n0.normalize();
+				// 		if (n1.norm() > Real(0)) n1.normalize();
+				// 		printf("  triN0=(%.6f %.6f %.6f) triN1=(%.6f %.6f %.6f) dot=(%.3f %.3f)\n",
+				// 			(double)n0[0], (double)n0[1], (double)n0[2],
+				// 			(double)n1[0], (double)n1[1], (double)n1[2],
+				// 			(double)cp.normal1.dot(n0), (double)cp.normal2.dot(n1));
+				// 	}
+				// }
+			}
+		}
 		
 		/* thread-level narrow phase version
 		DArray<int> triPairSizes;

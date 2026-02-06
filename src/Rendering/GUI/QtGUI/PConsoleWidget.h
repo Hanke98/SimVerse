@@ -1,14 +1,15 @@
 #ifndef QCONSOLEWIDGET_H
 #define QCONSOLEWIDGET_H
 
+#include <memory>
 #include <QWidget>
 #include <QFileSystemModel>
 #include <QTreeView>
 #include <QListView>
 
-#include <QTextEdit.h>
-#include <QPushButton.h>
-#include <QMessageBox.h>
+#include <QTextEdit>
+#include <QPushButton>
+#include <QMessageBox>
 
 // Slots macro definition conflicts with Python
 #ifdef slots

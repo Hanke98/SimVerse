@@ -45,7 +45,10 @@ std::shared_ptr<SceneGraph> creatScene()
 
 	std::vector<Transform3f> vehiclesTransform;
 	Transform3f Transform0(Vec3f(0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+	Transform3f Transform1(Vec3f(0.0f, 0.0f, 3.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+
 	vehiclesTransform.push_back(Transform0);
+	vehiclesTransform.push_back(Transform1);
 
 	multiRobotArm->varVehiclesTransform()->setValue(vehiclesTransform);
 	auto instances = multiRobotArm->varVehiclesTransform()->getValue();
@@ -104,7 +107,6 @@ std::shared_ptr<SceneGraph> creatScene()
             Pair<uint, uint> entry;
             entry.first = it;
             entry.second = boxLocalId;
-            // multiRobotArm->mTextureMeshShape2ElementIds.push_back(entry);
 			multiRobotArm->pushBackShape2ElementIds(entry);
 		}
 		multiRobotArm->pushBackCtrlMBChain(mb);
@@ -128,7 +130,6 @@ std::shared_ptr<SceneGraph> creatScene()
             printf("[BatchRigidBodySystem] TextureMesh shape to element mapping ready.\n");
         }
     }
-    multiRobotArm->setupNeighborTriMeshQueryFromUrdf();
 
 
 
@@ -163,7 +164,7 @@ int main()
 	app.initialize(1280, 768);
 
 	//Set the distance unit for the camera, the fault unit is meter
-	app.renderWindow()->getCamera()->setUnitScale(3.0f);
+	app.renderWindow()->getCamera()->setUnitScale(10.0f);
 
 	app.mainLoop();
 

@@ -2,6 +2,8 @@
 #include "BasicShapes/PlaneModel.h"
 #include "GLPointVisualModule.h"
 #include "GLSurfaceVisualModule.h"
+#include "GLWireframeVisualModule.h"
+#include "Mapping/ContactsToEdgeSet.h"
 #include "Mapping/ContactsToPointSet.h"
 #include "Mapping/DiscreteElementsToTriangleSet.h"
 #include "Mapping/DiscreteSpheresToTriangleSet.h"
@@ -19,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 
@@ -49,28 +52,30 @@ namespace dyno
         this->stateTopology()->connect(cdBV->inDiscreteElements());
         this->animationPipeline()->pushModule(cdBV);
 
-        if (this->varCollisionDetectionType()->getValue() == TriMesh)
-        {
-            auto transformer = std::make_shared<InstanceTransform<DataType3f>>();
-            this->stateCenter()->connect(transformer->inCenter());
-            this->stateRotationMatrix()->connect(transformer->inRotationMatrix());
-            this->stateBindingPair()->connect(transformer->inBindingPair());
-            this->stateBindingTag()->connect(transformer->inBindingTag());
-            this->stateInstanceTransform()->connect(transformer->inInstanceTransform());
-            this->animationPipeline()->pushModule(transformer);
+		if (this->varCollisionDetectionType()->getValue() == TriMesh)
+		{
+			mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
+			mNeighborTriMeshQuery->varInputVerticesInRestWorld()->setValue(false);
 
-            auto tm2ts = std::make_shared<TextureMeshToTriangleSet<TDataType>>();
-            this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
-            transformer->outInstanceTransform()->connect(tm2ts->inTransform());
-            this->animationPipeline()->pushModule(tm2ts);
+			// Use TM2TS to generate per-frame world-space TriangleSet (multi-instance aware).
+			auto transformer = std::make_shared<InstanceTransform<DataType3f>>();
+			this->stateCenter()->connect(transformer->inCenter());
+			this->stateRotationMatrix()->connect(transformer->inRotationMatrix());
+			this->stateBindingPair()->connect(transformer->inBindingPair());
+			this->stateBindingTag()->connect(transformer->inBindingTag());
+			this->stateInstanceTransform()->connect(transformer->inInstanceTransform());
+			this->animationPipeline()->pushModule(transformer);
 
-            // mNeighborTriMeshQuery = std::make_shared<NeighborMeshQuery<TDataType>>();
-            mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
-            
-            tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
-            this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
-            this->stateRotationMatrix()->connect(mNeighborTriMeshQuery->inRotationMatrix());
-            this->stateTopology()->connect(mNeighborTriMeshQuery->inDiscreteElements());
+			auto tm2ts = std::make_shared<TextureMeshToTriangleSet<DataType3f>>();
+			this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
+			transformer->outInstanceTransform()->connect(tm2ts->inTransform());
+			this->animationPipeline()->pushModule(tm2ts);
+
+			tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
+
+			this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
+			this->stateRotationMatrix()->connect(mNeighborTriMeshQuery->inRotationMatrix());
+			this->stateTopology()->connect(mNeighborTriMeshQuery->inDiscreteElements());
             this->animationPipeline()->pushModule(mNeighborTriMeshQuery);
 
             // Bridge module output to a Node field so GraphicsPipeline can discover render modules.
@@ -82,6 +87,17 @@ namespace dyno
 
             if (this->varEnableVisualizeCollisionTriSet()->getValue()) {
                 mNeighborTriMeshQuery->inEnableVisualizeCollisionTriSet()->setValue(true);
+
+                auto contactMapper = std::make_shared<ContactsToEdgeSet<DataType3f>>();
+                mNeighborTriMeshQuery->outContacts()->connect(contactMapper->inContacts());
+                contactMapper->varScale()->setValue(2.0);
+                this->graphicsPipeline()->pushModule(contactMapper);
+
+                auto wireRender = std::make_shared<GLWireframeVisualModule>();
+                wireRender->setColor(Color(0, 0, 1));
+                wireRender->varLineWidth()->setValue(5.0f);
+                contactMapper->outEdgeSet()->connect(wireRender->inEdgeSet());
+                this->graphicsPipeline()->pushModule(wireRender);
 
                 auto contactTriSet = std::make_shared<GLSurfaceVisualModule>();
                 contactTriSet->setColor(Color(1.0f, 0.0f, 1.0f));
@@ -145,6 +161,16 @@ namespace dyno
     }
 
     template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::resetStates()
+    {
+        ArticulatedBody<TDataType>::resetStates();
+        if (this->varCollisionDetectionType()->getValue() == TriMesh)
+        {
+            setupNeighborTriMeshQueryFromUrdf();
+        }
+    }
+
+    template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::setupNeighborTriMeshQueryFromUrdf()
     {
         if (!mNeighborTriMeshQuery)
@@ -205,6 +231,8 @@ namespace dyno
 
         // Populate texture mesh shape to rigid body id mapping
         // TODO: The multi environment version
+        this->mTextureMeshShape2RigidBodyIds.clear();
+        this->mTextureMeshShape2RigidBodyIds.reserve(totalShapeCount);
         for (size_t chainIndex = 0; chainIndex < this->ctrl_mb_chains.size(); ++chainIndex)
         {
             const auto& mb = this->ctrl_mb_chains[chainIndex];
@@ -229,6 +257,9 @@ namespace dyno
             baseShape2TriOffsets[i + 1] = baseShape2TriOffsets[i] + static_cast<int>(meshShapes[i]->vertexIndex.size());
             baseTriCount += meshShapes[i]->vertexIndex.size();
         }
+        size_t totalTriCount = baseTriCount * instanceCount;
+
+		// TriangleSet is generated per-frame by TextureMeshToTriangleSet (world-space).
 
         std::vector<std::vector<int>> baseAdjacentShapes(baseShapeCount);
         for (const auto& joint : this->urdfInfo.joints)
@@ -255,7 +286,12 @@ namespace dyno
         for (size_t l = 0; l < baseShapeCount; ++l)
         {
             const auto& shape = urdfShapes[l];
-            int shapeId = static_cast<int>(shape.visualShapeId);
+            int shapeId = -1;
+            if (this->varVisualOrCollision()->getValue()) {
+                shapeId = static_cast<int>(shape.collisionShapeId);
+            } else {
+                shapeId = static_cast<int>(shape.visualShapeId);
+            }
             size_t patchCount = 0;
 
             // Check if the shape has patches
@@ -300,36 +336,8 @@ namespace dyno
         }
 
         size_t basePatchCount = basePatchAabbsRestWorld.size();
+        size_t basePatchTriCount = basePatch2TriIndices.size();
         size_t totalPatchCount = basePatchCount * instanceCount;
-
-        
-
-        std::vector<std::shared_ptr<LinearBVH<TDataType>>> shapeBVHs;
-        shapeBVHs.resize(baseShapeCount);
-
-        size_t builtShapeBvhCount = 0;
-        for (size_t shapeId = 0; shapeId < baseShapeCount; ++shapeId)
-        {
-            int begin = baseShape2PatchOffsets[shapeId];
-            int end = baseShape2PatchOffsets[shapeId + 1];
-            int count = end - begin;
-            if (count <= 0)
-                continue;
-
-			if (begin < 0 || end > static_cast<int>(basePatchAabbsRestWorld.size()))
-				continue;
-
-			DArray<AABB> basePatchAabbsDevice;
-			basePatchAabbsDevice.resize(static_cast<uint>(count));
-			basePatchAabbsDevice.assign(basePatchAabbsRestWorld, static_cast<uint>(count), 0, static_cast<uint>(begin));
-
-            auto bvh = std::make_shared<LinearBVH<TDataType>>();
-            bvh->construct(basePatchAabbsDevice);
-            basePatchAabbsDevice.clear();
-
-            shapeBVHs[shapeId] = bvh;
-            ++builtShapeBvhCount;
-        }
 
         auto TransformAABB = [&](const AABB& aabb, const Transform3f& T) -> AABB
         {
@@ -345,12 +353,14 @@ namespace dyno
         std::vector<int> shape2PatchOffsets(totalShapeCount + 1, 0);
         std::vector<AABB> patchAabbsRestWorld(totalPatchCount);
         std::vector<int> patch2TriOffsets(totalPatchCount + 1, 0);
+        std::vector<int> patch2TriIndices(basePatchTriCount * instanceCount, 0);
         for (size_t instId = 0; instId < instanceCount; ++instId){
             auto Tinst = instances[instId];
 
             size_t shapeBase = instId * baseShapeCount;
             size_t patchBase = instId * basePatchCount;
             size_t triBase = instId * baseTriCount;
+            size_t patchIndexBase = instId * basePatchTriCount;
 
             for (size_t localShapeId = 0; localShapeId < baseShapeCount; ++localShapeId)
             {
@@ -372,32 +382,226 @@ namespace dyno
                 size_t globalPatchId = patchBase + localPatchId;
                 // TODO: recalculate patchs' aabbs
                 patchAabbsRestWorld[globalPatchId] = TransformAABB(basePatchAabbsRestWorld[localPatchId], Tinst);
-                patch2TriOffsets[globalPatchId] = basePatch2TriOffsets[localPatchId] + (int)triBase;
-                for (int k = 0; k < baseTriCount; ++k) {
-                    
-                }
+                patch2TriOffsets[globalPatchId] = basePatch2TriOffsets[localPatchId] + (int)patchIndexBase;
+            }
+
+            // Copy patch triangle indices for this instance once.
+            for (size_t k = 0; k < basePatchTriCount; ++k) {
+                patch2TriIndices[patchIndexBase + k] = basePatch2TriIndices[k] + (int)triBase;
             }
         }
         // The last element stores the total number of triangles, check here !!!
         shape2TriOffsets[totalShapeCount] = (int)baseTriCount * (int)instanceCount; 
         shape2PatchOffsets[totalShapeCount] = (int)basePatchCount * (int)instanceCount;
-        patch2TriOffsets[totalPatchCount] = (int)baseTriCount * (int)instanceCount;
+        patch2TriOffsets[totalPatchCount] = (int)basePatchTriCount * (int)instanceCount;
+
+        // Validate patch2TriIndices to avoid invalid triangle access.
+        if (totalTriCount > 0 && !patch2TriIndices.empty())
+        {
+            size_t badTriCount = 0;
+            for (auto& idx : patch2TriIndices)
+            {
+                if (idx < 0 || idx >= (int)totalTriCount)
+                {
+                    idx = -1;
+                    ++badTriCount;
+                }
+            }
+            if (badTriCount > 0)
+            {
+                printf("[NMQ DEBUG] patch2TriIndices out-of-range: %zu corrected (totalTriCount=%zu)\n",
+                    badTriCount,
+                    totalTriCount);
+            }
+        }
+
+        // Validate element ids if topology is available.
+        {
+            auto topo = this->stateTopology()->getDataPtr();
+            if (topo != nullptr && !mTextureMeshShape2ElementIdsDense.empty())
+            {
+                auto elementOffset = topo->calculateElementOffset();
+                uint boxStart = (uint)elementOffset.boxIndex();
+                uint boxCount = (uint)topo->boxesInGlobal().size();
+                uint boxEnd = boxStart + boxCount;
+
+                size_t corrected = 0;
+                size_t invalid = 0;
+                for (auto& id : mTextureMeshShape2ElementIdsDense)
+                {
+                    if (id < 0) continue;
+                    uint uid = (uint)id;
+                    if (boxCount > 0 && uid < boxStart && uid < boxCount)
+                    {
+                        id = (int)(uid + boxStart);
+                        ++corrected;
+                        continue;
+                    }
+                    if (boxCount > 0 && uid >= boxEnd)
+                    {
+                        id = -1;
+                        ++invalid;
+                    }
+                }
+                if (corrected > 0 || invalid > 0)
+                {
+                    printf("[NMQ DEBUG] elementId fixup: corrected=%zu invalid=%zu boxStart=%u boxEnd=%u\n",
+                        corrected,
+                        invalid,
+                        boxStart,
+                        boxEnd);
+                }
+            }
+        }
+
+        std::vector<std::shared_ptr<LinearBVH<TDataType>>> shapeBVHs;
+        // shapeBVHs.resize(baseShapeCount);
+
+        // size_t builtShapeBvhCount = 0;
+        // for (size_t shapeId = 0; shapeId < baseShapeCount; ++shapeId)
+        // {
+        //     int begin = baseShape2PatchOffsets[shapeId];
+        //     int end = baseShape2PatchOffsets[shapeId + 1];
+        //     int count = end - begin;
+        //     if (count <= 0)
+        //         continue;
+
+		// 	if (begin < 0 || end > static_cast<int>(basePatchAabbsRestWorld.size()))
+		// 		continue;
+
+		// 	DArray<AABB> basePatchAabbsDevice;
+		// 	basePatchAabbsDevice.resize(static_cast<uint>(count));
+		// 	basePatchAabbsDevice.assign(basePatchAabbsRestWorld, static_cast<uint>(count), 0, static_cast<uint>(begin));
+
+        //     auto bvh = std::make_shared<LinearBVH<TDataType>>();
+        //     bvh->construct(basePatchAabbsDevice);
+        //     basePatchAabbsDevice.clear();
+
+        //     shapeBVHs[shapeId] = bvh;
+        //     ++builtShapeBvhCount;
+        // }
+
+        shapeBVHs.resize(totalShapeCount);
+
+        size_t builtShapeBvhCount = 0;
+        for (size_t gloabalShapeId = 0; gloabalShapeId < totalShapeCount; ++gloabalShapeId)
+        {
+            int begin = shape2PatchOffsets[gloabalShapeId];
+            int end = shape2PatchOffsets[gloabalShapeId + 1];
+            int count = end - begin;
+            if (count <= 0)
+                continue;
+
+			if (begin < 0 || end > static_cast<int>(patchAabbsRestWorld.size()))
+				continue;
+
+			DArray<AABB> basePatchAabbsDevice;
+			basePatchAabbsDevice.resize(static_cast<uint>(count));
+			basePatchAabbsDevice.assign(patchAabbsRestWorld, static_cast<uint>(count), 0, static_cast<uint>(begin));
+
+            auto bvh = std::make_shared<LinearBVH<TDataType>>();
+            bvh->construct(basePatchAabbsDevice);
+            basePatchAabbsDevice.clear();
+
+            shapeBVHs[gloabalShapeId] = bvh;
+            ++builtShapeBvhCount;
+        }
+
+        // ===== Debug: mapping/size sanity =====
+        printf("[NMQ DEBUG] baseShape=%zu baseTri=%zu basePatch=%zu basePatchTri=%zu totalTri=%zu totalPatch=%zu\n",
+               baseShapeCount,
+               baseTriCount,
+               basePatchCount,
+               basePatchTriCount,
+               totalTriCount,
+               totalPatchCount);
+        printf("[NMQ DEBUG] patch2TriOffsets.back=%d patch2TriIndices.size=%zu shape2TriOffsets.back=%d\n",
+               patch2TriOffsets.empty() ? -1 : patch2TriOffsets.back(),
+               patch2TriIndices.size(),
+               shape2TriOffsets.empty() ? -1 : shape2TriOffsets.back());
+        printf("[NMQ DEBUG] shapeCount(rest)=%zu,  urdfShapes=%zu, elemPairs=%zu, elemDense=%zu, rigidIds=%zu\n",
+               restShapeCenters.size(),
+               urdfShapes.size(),
+               mTextureMeshShape2ElementIds.size(),
+               mTextureMeshShape2ElementIdsDense.size(),
+               mTextureMeshShape2RigidBodyIds.size());
+        printf("[NMQ DEBUG] stateInstanceTransform empty=%d size=%u\n",
+               this->stateInstanceTransform()->isEmpty() ? 1 : 0,
+               (unsigned)this->stateInstanceTransform()->size());
+
+        // ===== Debug: sample shapeId->bodyId mapping and rest/current translation =====
+        {
+            using Coord = typename TDataType::Coord;
+            using Real = typename TDataType::Real;
+
+            const size_t sampleCount = std::min<size_t>(3, restShapeCenters.size());
+            auto centersPtr = this->stateCenter()->getDataPtr();
+            if (centersPtr == nullptr || centersPtr->size() == 0)
+            {
+                printf("[NMQ DEBUG] stateCenter empty, skip tCurr (only tRest)\n");
+                for (size_t s = 0; s < sampleCount; ++s)
+                {
+                    int bodyId = (s < mTextureMeshShape2RigidBodyIds.size())
+                               ? mTextureMeshShape2RigidBodyIds[s]
+                               : -1;
+                    Coord tRest = restShapeCenters[s];
+                    printf("[NMQ DEBUG] shape=%zu body=%d tRest=(%.3f %.3f %.3f)\n",
+                           s,
+                           bodyId,
+                           (double)tRest[0], (double)tRest[1], (double)tRest[2]);
+                }
+            }
+            else
+            {
+                Array<Coord, DeviceType::CPU> hCenters;
+                hCenters.assign(*centersPtr);
+                for (size_t s = 0; s < sampleCount; ++s)
+                {
+                    int bodyId = (s < mTextureMeshShape2RigidBodyIds.size())
+                               ? mTextureMeshShape2RigidBodyIds[s]
+                               : -1;
+                    bool bodyOk = (bodyId >= 0 && bodyId < (int)hCenters.size());
+                    Coord tRest = restShapeCenters[s];
+                    Coord tCurr = bodyOk ? hCenters[bodyId] : Coord(Real(0));
+                    Coord diff = tCurr - tRest;
+
+                    printf("[NMQ DEBUG] shape=%zu body=%d bodyOk=%d tRest=(%.3f %.3f %.3f) tCurr=(%.3f %.3f %.3f) diff=(%.3f %.3f %.3f)\n",
+                           s,
+                           bodyId,
+                           bodyOk ? 1 : 0,
+                           (double)tRest[0], (double)tRest[1], (double)tRest[2],
+                           (double)tCurr[0], (double)tCurr[1], (double)tCurr[2],
+                           (double)diff[0], (double)diff[1], (double)diff[2]);
+                }
+            }
+        }
 
         mNeighborTriMeshQuery->inShapeBVHs()->setValue(shapeBVHs);
         printf("[NeighborTriMeshQuery] Built %zu shape BVHs (shapeCount=%zu)\n",
                builtShapeBvhCount,
-               baseShapeCount);
+               totalShapeCount);
 
-        mNeighborTriMeshQuery->inPatchAABBs()->assign(basePatchAabbsRestWorld);
-        mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(baseShape2PatchOffsets);
-        mNeighborTriMeshQuery->inPatch2TriOffsets()->assign(basePatch2TriOffsets);
-        mNeighborTriMeshQuery->inPatch2TriIndices()->assign(basePatch2TriIndices);
-        mNeighborTriMeshQuery->inRestShapeCenter()->assign(baseRestShapeCenters);
-        mNeighborTriMeshQuery->inRestShapeRotation()->assign(baseRestShapeRotations);
+        // mNeighborTriMeshQuery->inPatchAABBs()->assign(basePatchAabbsRestWorld);
+        // mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(baseShape2PatchOffsets);
+        // mNeighborTriMeshQuery->inPatch2TriOffsets()->assign(basePatch2TriOffsets);
+        // mNeighborTriMeshQuery->inPatch2TriIndices()->assign(basePatch2TriIndices);
+        // mNeighborTriMeshQuery->inRestShapeCenter()->assign(baseRestShapeCenters);
+        // mNeighborTriMeshQuery->inRestShapeRotation()->assign(baseRestShapeRotations);
+        // mNeighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
+        // mNeighborTriMeshQuery->inShape2ElementIdsDense()->assign(mTextureMeshShape2ElementIdsDense);
+        // mNeighborTriMeshQuery->inShape2RigidBodyIds()->assign(mTextureMeshShape2RigidBodyIds);
+        // mNeighborTriMeshQuery->inShape2TriOffsets()->assign(baseShape2TriOffsets);
+
+        mNeighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsRestWorld);
+        mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);
+        mNeighborTriMeshQuery->inPatch2TriOffsets()->assign(patch2TriOffsets);
+        mNeighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
+        mNeighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
+        mNeighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
         mNeighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
         mNeighborTriMeshQuery->inShape2ElementIdsDense()->assign(mTextureMeshShape2ElementIdsDense);
         mNeighborTriMeshQuery->inShape2RigidBodyIds()->assign(mTextureMeshShape2RigidBodyIds);
-        mNeighborTriMeshQuery->inShape2TriOffsets()->assign(baseShape2TriOffsets);
+        mNeighborTriMeshQuery->inShape2TriOffsets()->assign(shape2TriOffsets);
         
         // if (!mUrdfShapeRigidBodyIds.empty() && mUrdfShapeRigidBodyIds.size() == urdfShapes.size())
         // {
@@ -665,7 +869,7 @@ namespace dyno
             mTextureMeshShape2ElementIds.clear();
             if (textureShapeCount > 0)
             {
-                mTextureMeshShape2ElementIds.resize(textureShapeCount);
+                // mTextureMeshShape2ElementIds.resize(textureShapeCount);
                 for (uint i = 0; i < textureShapeCount; ++i)
                 {
                     mTextureMeshShape2ElementIds[i] = Pair<uint, uint>(i, invalidElementId);
@@ -914,6 +1118,7 @@ namespace dyno
                         }
 
                         entry.second = boxStart + entry.second;
+                        pushBackShape2ElementIdsDense(entry.second);
                         validCount++;
                         if (entry.second < minId) minId = entry.second;
                         if (entry.second > maxId) maxId = entry.second;
@@ -928,7 +1133,6 @@ namespace dyno
                 }
             }
             attachRender();
-            setupNeighborTriMeshQueryFromUrdf();
     }
 
     template<typename TDataType>

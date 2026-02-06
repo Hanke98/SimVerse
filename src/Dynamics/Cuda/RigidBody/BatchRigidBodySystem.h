@@ -176,9 +176,10 @@ public:
     
     DEF_VAR(CollisionDetectionType, CollisionDetectionType, TriMesh, "CollisionDetectionType");
 
-    DEF_VAR(Bool, EnableVisualizeCollisionTriSet, true, "Enable visualize collision triSet mesh");
+    DEF_VAR(Bool, EnableVisualizeCollisionTriSet, false, "Enable visualize collision triSet mesh");
     
 protected:
+    void resetStates() override;
 
     void resetOneMultiBodies(int mb_id);
 
@@ -206,6 +207,8 @@ protected:
     
 
     std::shared_ptr<NeighborTriMeshQuery<TDataType>> mNeighborTriMeshQuery;
+    // Collision TriangleSet used by NeighborTriMeshQuery (kept in rest-world space; do NOT call update()).
+    std::shared_ptr<TriangleSet<TDataType>> mCollisionTriangleSet;
   };
 
 } // namespace dyno

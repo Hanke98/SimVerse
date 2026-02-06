@@ -56,6 +56,9 @@ namespace dyno
 
 		DEF_VAR(bool, EnableAdjacentFilter, false, "");
 		DEF_VAR(bool, EnableBroadPhasePatchPairs, false, "");
+		// If true, TriangleSet::points are provided in rest-world space (static), and the query will transform
+		// them to current world space using per-shape relative transforms.
+		DEF_VAR(bool, InputVerticesInRestWorld, false, "");
 
 		// Patch AABBs in world-space rest pose coordinates.
 		DEF_ARRAY_IN(AABB, PatchAABBs, DeviceType::GPU, "");

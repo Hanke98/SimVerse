@@ -88,16 +88,16 @@ namespace dyno
             if (this->varEnableVisualizeCollisionTriSet()->getValue()) {
                 mNeighborTriMeshQuery->inEnableVisualizeCollisionTriSet()->setValue(true);
 
-                auto contactMapper = std::make_shared<ContactsToEdgeSet<DataType3f>>();
-                mNeighborTriMeshQuery->outContacts()->connect(contactMapper->inContacts());
-                contactMapper->varScale()->setValue(2.0);
-                this->graphicsPipeline()->pushModule(contactMapper);
+                // auto contactMapper = std::make_shared<ContactsToEdgeSet<DataType3f>>();
+                // mNeighborTriMeshQuery->outContacts()->connect(contactMapper->inContacts());
+                // contactMapper->varScale()->setValue(2.0);
+                // this->graphicsPipeline()->pushModule(contactMapper);
 
-                auto wireRender = std::make_shared<GLWireframeVisualModule>();
-                wireRender->setColor(Color(0, 0, 1));
-                wireRender->varLineWidth()->setValue(5.0f);
-                contactMapper->outEdgeSet()->connect(wireRender->inEdgeSet());
-                this->graphicsPipeline()->pushModule(wireRender);
+                // auto wireRender = std::make_shared<GLWireframeVisualModule>();
+                // wireRender->setColor(Color(0, 0, 1));
+                // wireRender->varLineWidth()->setValue(5.0f);
+                // contactMapper->outEdgeSet()->connect(wireRender->inEdgeSet());
+                // this->graphicsPipeline()->pushModule(wireRender);
 
                 auto contactTriSet = std::make_shared<GLSurfaceVisualModule>();
                 contactTriSet->setColor(Color(1.0f, 0.0f, 1.0f));
@@ -111,7 +111,7 @@ namespace dyno
 
                 auto pointRender = std::make_shared<GLPointVisualModule>();
                 pointRender->setColor(Color(1, 0, 0));
-                pointRender->varPointSize()->setValue(0.03f);
+                pointRender->varPointSize()->setValue(0.003f);
                 contactPointMapper->outPointSet()->connect(pointRender->inPointSet());
                 this->graphicsPipeline()->pushModule(pointRender);
             } else {
@@ -207,6 +207,15 @@ namespace dyno
         std::vector<Matrix> restShapeRotations(totalShapeCount, Matrix::identityMatrix());
 
         auto instances = this->varVehiclesTransform()->getValue();
+        if (instanceCount == 0 || instances.size() < instanceCount)
+        {
+            printf("[BatchRigidBodySystem] Invalid instance transforms (instanceCount=%zu, transformCount=%zu).\n",
+                instanceCount,
+                instances.size());
+            return;
+        }
+
+        std::vector<int> urdfShapeToMeshShape(baseShapeCount, -1);
 
         // Calculate Local AABBs, rest centers and rest rotations for each mesh shape
         for (size_t l = 0; l < baseShapeCount; ++l)
@@ -220,13 +229,14 @@ namespace dyno
                 shapeId = static_cast<int>(shape.visualShapeId);
             }
 
-            if (shapeId < 0 || static_cast<size_t>(shapeId) >= baseShapeCount)
+            if (shapeId < 0 || static_cast<size_t>(shapeId) >= meshShapes.size())
                 continue;
 
             // Get rest center and rotation
             const auto& bbWorld = meshShapes[shapeId]->boundingTransform;
-            baseRestShapeCenters[shapeId] = bbWorld.translation();
-            baseRestShapeRotations[shapeId] = bbWorld.rotation();
+            urdfShapeToMeshShape[l] = shapeId;
+            baseRestShapeCenters[l] = bbWorld.translation();
+            baseRestShapeRotations[l] = bbWorld.rotation();
         }
 
         // Populate texture mesh shape to rigid body id mapping
@@ -254,8 +264,14 @@ namespace dyno
         std::vector<int> baseShape2TriOffsets(baseShapeCount + 1, 0);
         for (size_t i = 0; i < baseShapeCount; ++i)
         {
-            baseShape2TriOffsets[i + 1] = baseShape2TriOffsets[i] + static_cast<int>(meshShapes[i]->vertexIndex.size());
-            baseTriCount += meshShapes[i]->vertexIndex.size();
+            int meshShapeId = urdfShapeToMeshShape[i];
+            int triNum = 0;
+            if (meshShapeId >= 0 && static_cast<size_t>(meshShapeId) < meshShapes.size())
+            {
+                triNum = static_cast<int>(meshShapes[meshShapeId]->vertexIndex.size());
+            }
+            baseShape2TriOffsets[i + 1] = baseShape2TriOffsets[i] + triNum;
+            baseTriCount += static_cast<size_t>(triNum);
         }
         size_t totalTriCount = baseTriCount * instanceCount;
 
@@ -286,16 +302,11 @@ namespace dyno
         for (size_t l = 0; l < baseShapeCount; ++l)
         {
             const auto& shape = urdfShapes[l];
-            int shapeId = -1;
-            if (this->varVisualOrCollision()->getValue()) {
-                shapeId = static_cast<int>(shape.collisionShapeId);
-            } else {
-                shapeId = static_cast<int>(shape.visualShapeId);
-            }
+            int shapeId = urdfShapeToMeshShape[l];
             size_t patchCount = 0;
 
             // Check if the shape has patches
-            if (shapeId >= 0 && static_cast<size_t>(shapeId + 1) < baseShape2TriOffsets.size()
+            if (shapeId >= 0
                 && shape.patchOffsets.size() >= 2 && !shape.patchFaces.empty())
             {
                 size_t offsetCount = shape.patchOffsets.size() - 1;
@@ -321,7 +332,7 @@ namespace dyno
                 }
 
                 // Compute triangle indices for the patch
-                int triBase = baseShape2TriOffsets[shapeId];
+                int triBase = baseShape2TriOffsets[l];
                 for (int t = begin; t < end; ++t)
                 {
                     int faceID = shape.patchFaces[t];
@@ -484,6 +495,7 @@ namespace dyno
         shapeBVHs.resize(totalShapeCount);
 
         size_t builtShapeBvhCount = 0;
+        size_t singlePatchShapeCount = 0;
         for (size_t gloabalShapeId = 0; gloabalShapeId < totalShapeCount; ++gloabalShapeId)
         {
             int begin = shape2PatchOffsets[gloabalShapeId];
@@ -491,6 +503,12 @@ namespace dyno
             int count = end - begin;
             if (count <= 0)
                 continue;
+            // A single patch does not need a BVH; middle phase handles this path directly.
+            if (count == 1)
+            {
+                ++singlePatchShapeCount;
+                continue;
+            }
 
 			if (begin < 0 || end > static_cast<int>(patchAabbsRestWorld.size()))
 				continue;
@@ -505,6 +523,12 @@ namespace dyno
 
             shapeBVHs[gloabalShapeId] = bvh;
             ++builtShapeBvhCount;
+        }
+
+        if (singlePatchShapeCount > 0)
+        {
+            printf("[NMQ DEBUG] skipped BVH build for %zu single-patch shapes\n",
+                singlePatchShapeCount);
         }
 
         // ===== Debug: mapping/size sanity =====
@@ -609,21 +633,21 @@ namespace dyno
         // }
         
         
-        if (!baseAdjacentShapes.empty())
+        if (!adjacentShapes.empty())
         {
             // Convert std::vector<std::vector<int>> to DArrayList<int>
             CArrayList<int> convertedArray;
             std::vector<uint> counts;
-            for (const auto& vec : baseAdjacentShapes) {
+            for (const auto& vec : adjacentShapes) {
                 counts.push_back(static_cast<uint>(vec.size()));
             }
 
             CArray<uint> countArray;
             countArray.assign(counts);
             convertedArray.resize(countArray);
-            for (size_t i = 0; i < baseAdjacentShapes.size(); ++i) {
+            for (size_t i = 0; i < adjacentShapes.size(); ++i) {
                 auto& list = convertedArray[i];
-                for (int val : baseAdjacentShapes[i]) {
+                for (int val : adjacentShapes[i]) {
                     list.insert(val);
                 }
             }
@@ -896,35 +920,6 @@ namespace dyno
 
                 for (int l = 0; l < this->urdfInfo.links.size(); ++l) {
 
-                    auto updateBbTransform = [&](uint shapeId, bool isVisual) {
-                        if (texMesh == nullptr || shapeId >= textureShapeCount)
-                            return;
-
-                        const auto& bbWorld = texMesh->shapes()[shapeId]->boundingTransform;
-                        auto& link = this->urdfInfo.links[l];
-
-                        const Mat3f& R_link = link.T_world.rotation();
-                        const Vec3f& t_link = link.T_world.translation();
-                        const Mat3f& R_bb = bbWorld.rotation();
-                        const Vec3f& t_bb = bbWorld.translation();
-
-                        Mat3f R_local = R_link.transpose() * R_bb;
-                        Vec3f t_local = R_link.transpose() * (t_bb - t_link);
-
-                        if (isVisual)
-                        {
-                            link.T_visual_bb_world = bbWorld;
-                            link.T_visual_bb_local.rotation() = R_local;
-                            link.T_visual_bb_local.translation() = t_local;
-                        }
-                        else
-                        {
-                            link.T_collision_bb_world = bbWorld;
-                            link.T_collision_bb_local.rotation() = R_local;
-                            link.T_collision_bb_local.translation() = t_local;
-                        }
-                    };
-
                     uint it;
 
                     if (!this->varVisualOrCollision()->getValue()) {
@@ -932,9 +927,6 @@ namespace dyno
                     } else {
                         it = this->urdfInfo.links[l].collisionShapeId;
                     }
-
-                    updateBbTransform(this->urdfInfo.links[l].visualShapeId, true);
-                    updateBbTransform(this->urdfInfo.links[l].collisionShapeId, false);
 
                     auto up = texMesh->shapes()[it]->boundingBox.v1;
                     auto down = texMesh->shapes()[it]->boundingBox.v0;
@@ -1037,7 +1029,7 @@ namespace dyno
                     auto childIt = actors.find(childShapeId);
 
                     if (this->urdfInfo.joints[j].type == REVOLUTE) {
-                        HingeJoint<Real>* joint;
+                        HingeJoint* joint;
                         if (!this->varVisualOrCollision()->getValue()) {
                             joint = &this->createHingeJoint(parentIt->second,
                                                             childIt->second);
@@ -1235,102 +1227,112 @@ namespace dyno
             }
         }
 
+        const size_t bodyCount = std::min<size_t>(hinge_param.num_bodies, hinge_param.ids.size());
+
         // 对每个铰链关节进行处理
-        for (size_t i = 0; i < hinge_param.num_bodies; i++) {
-            for (auto it : hinge_param.ids) {
-                if(it >= ctrl_mb_chains.size()) continue;
-                auto& initialGesture = this->initialGesture[it];
+        for (size_t bi = 0; bi < bodyCount; ++bi) {
+            if (bi >= hinge_param.theta.size()) {
+                break;
+            }
+            int it = hinge_param.ids[bi];
+            if (it < 0 || it >= (int)ctrl_mb_chains.size()) {
+                continue;
+            }
+            auto& initialGesture = this->initialGesture[it];
+            const auto& thetaVec = hinge_param.theta[bi];
 
-                for (int j = 0; j < ctrl_mb_chains[it].hinge_joint_indices.size(); j++) {
-                    auto jointIndex = ctrl_mb_chains[it].hinge_joint_indices[j];
-
-                    // 引用原始数据 (R_original)
-                    auto& originalJoint = this->urdfInfo.joints[jointIndex];
-                    auto& originalLink = this->urdfInfo.links[originalJoint.childLinkId];
-                    auto& originalParentLink = this->urdfInfo.links[originalJoint.parentLinkId];
-
-                    // 引用正在修改的姿态数据 (R_current)
-                    auto& currentJointGesture = initialGesture.joints[jointIndex];
-                    auto& currentLinkGesture = initialGesture.links[originalJoint.childLinkId];
-
-                    if (originalJoint.type == REVOLUTE) {
-                        const auto& theta = hinge_param.theta[i][j];
-
-                        // 轴在 Parent Link Frame 下的表示（来自原始零位姿态）
-                        Vec3f axisParent = originalParentLink.T_world.rotation().inverse() * originalJoint.axisWorld;
-
-                        axisParent.normalize();
-                        TQuat thetaQuat(theta, axisParent);
-                        Mat3f rotationMatrix = thetaQuat.toMatrix3x3();
-
-                        currentJointGesture.originLocal.rotation() = rotationMatrix * originalJoint.originLocal.rotation();
-
-                        currentLinkGesture.T_visual_bb_local.rotation() = originalLink.T_visual_bb_local.rotation();
-                        currentLinkGesture.T_collision_bb_local.rotation() = originalLink.T_collision_bb_local.rotation();
-
-                        currentLinkGesture.T_local.rotation() = rotationMatrix * originalLink.T_local.rotation();
-                    }
+            for (size_t j = 0; j < ctrl_mb_chains[it].hinge_joint_indices.size(); ++j) {
+                if (j >= thetaVec.size()) {
+                    break;
                 }
-                // 定义递归 Lambda 函数
-                std::function<void(int, const Transform3f&)> updateWorldRecursive =
-                [&](int currentLinkIdx, const Transform3f& parentTWorld)
-                {
-                    UrdfLink& currentLink = initialGesture.links[currentLinkIdx];
+                auto jointIndex = ctrl_mb_chains[it].hinge_joint_indices[j];
 
-                    currentLink.T_world = parentTWorld;
-                    currentLink.T_visual_bb_world = composeTransform(currentLink.T_world, currentLink.T_visual_bb_local);
-                    currentLink.T_collision_bb_world = composeTransform(currentLink.T_world, currentLink.T_collision_bb_local);
+                // 引用原始数据 (R_original)
+                auto& originalJoint = this->urdfInfo.joints[jointIndex];
+                auto& originalLink = this->urdfInfo.links[originalJoint.childLinkId];
 
-                    for (int jointIdx : linkChildJoints[currentLinkIdx]) {
-                        UrdfJoint& childJoint = initialGesture.joints[jointIdx];
+                // 引用正在修改的姿态数据 (R_current)
+                auto& currentJointGesture = initialGesture.joints[jointIndex];
+                auto& currentLinkGesture = initialGesture.links[originalJoint.childLinkId];
 
-                        // JointWorld = ParentLinkWorld * JointLocal
-                        childJoint.originWorld = composeTransform(currentLink.T_world, childJoint.originLocal);
+                if (originalJoint.type == REVOLUTE) {
+                    const auto& theta = thetaVec[j];
 
-                        // 计算关节轴的世界方向 (轴由 Joint 的世界旋转旋转)
-                        childJoint.axisWorld = childJoint.originWorld.rotation() * this->urdfInfo.joints[jointIdx].axis; // 轴本身不变，但世界方向会变
+                    // 轴在 Parent Link Frame 下的表示（来自原始零位姿态）
+                    Vec3f axisParent = originalJoint.originLocal.rotation() * originalJoint.axis;
 
-                        updateWorldRecursive(childJoint.childLinkId, childJoint.originWorld);
-                    }
-                };
+                    axisParent.normalize();
+                    TQuat thetaQuat(theta, axisParent);
+                    Mat3f rotationMatrix = thetaQuat.toMatrix3x3();
 
-                if (rootLinkIndex != -1) {
-                    auto& initialRootGesture = initialGesture.links[rootLinkIndex];
-                    Transform3f* initialRootBBGestureWorld = nullptr;
-                    Transform3f* initialRootBBGestureLocal = nullptr;
-                    if (!varVisualOrCollision()->getValue()) {
-                        initialRootBBGestureWorld = &initialRootGesture.T_visual_bb_world;
-                        initialRootBBGestureLocal = &initialRootGesture.T_visual_bb_local;
-                    } else {
-                        initialRootBBGestureWorld = &initialRootGesture.T_collision_bb_world;
-                        initialRootBBGestureLocal = &initialRootGesture.T_collision_bb_local;
-                    }
+                    currentJointGesture.originLocal.rotation() = rotationMatrix * originalJoint.originLocal.rotation();
 
-                    Transform3f rootWorldTransform = initialRootGesture.T_world;
-                    Transform3f rootLocalTransform;
-                    // Root Link 的 T_bounding_box_local 平移计算
-                    Vec3f worldDeltaTranslation;
+                    currentLinkGesture.T_visual_bb_local.rotation() = originalLink.T_visual_bb_local.rotation();
+                    currentLinkGesture.T_collision_bb_local.rotation() = originalLink.T_collision_bb_local.rotation();
 
-                    worldDeltaTranslation = initialRootBBGestureWorld->translation()
-                                            - initialRootGesture.T_world.translation();
-
-                    Mat3f R_PJ_transpose = initialRootGesture.T_world.rotation().transpose();
-                    Vec3f relativeTranslation = R_PJ_transpose * worldDeltaTranslation;
-                    rootLocalTransform.translation() = relativeTranslation;
-                    initialRootBBGestureLocal->translation() = rootLocalTransform.translation();
-
-                    Mat3f R_PJ = this->urdfInfo.links[rootLinkIndex].T_world.rotation();
-                    Mat3f R_BB;
-                    if (!varVisualOrCollision()->getValue()) {
-                        R_BB = this->urdfInfo.links[rootLinkIndex].T_visual_bb_world.rotation();
-                    } else {
-                        R_BB = this->urdfInfo.links[rootLinkIndex].T_collision_bb_world.rotation();
-                    }
-                    Mat3f relativeRotation = R_PJ.transpose() * R_BB;
-                    initialRootBBGestureLocal->rotation() = relativeRotation;
-
-                    updateWorldRecursive(rootLinkIndex, rootWorldTransform);
+                    currentLinkGesture.T_local.rotation() = rotationMatrix * originalLink.T_local.rotation();
                 }
+            }
+
+            // 定义递归 Lambda 函数
+            std::function<void(int, const Transform3f&)> updateWorldRecursive =
+            [&](int currentLinkIdx, const Transform3f& parentTWorld)
+            {
+                UrdfLink& currentLink = initialGesture.links[currentLinkIdx];
+
+                currentLink.T_world = parentTWorld;
+                currentLink.T_visual_bb_world = composeTransform(currentLink.T_world, currentLink.T_visual_bb_local);
+                currentLink.T_collision_bb_world = composeTransform(currentLink.T_world, currentLink.T_collision_bb_local);
+
+                for (int jointIdx : linkChildJoints[currentLinkIdx]) {
+                    UrdfJoint& childJoint = initialGesture.joints[jointIdx];
+
+                    // JointWorld = ParentLinkWorld * JointLocal
+                    childJoint.originWorld = composeTransform(currentLink.T_world, childJoint.originLocal);
+
+                    // 计算关节轴的世界方向 (轴由 Joint 的世界旋转旋转)
+                    childJoint.axisWorld = childJoint.originWorld.rotation() * this->urdfInfo.joints[jointIdx].axis; // 轴本身不变，但世界方向会变
+
+                    updateWorldRecursive(childJoint.childLinkId, childJoint.originWorld);
+                }
+            };
+
+            if (rootLinkIndex != -1) {
+                auto& initialRootGesture = initialGesture.links[rootLinkIndex];
+                Transform3f* initialRootBBGestureWorld = nullptr;
+                Transform3f* initialRootBBGestureLocal = nullptr;
+                if (!varVisualOrCollision()->getValue()) {
+                    initialRootBBGestureWorld = &initialRootGesture.T_visual_bb_world;
+                    initialRootBBGestureLocal = &initialRootGesture.T_visual_bb_local;
+                } else {
+                    initialRootBBGestureWorld = &initialRootGesture.T_collision_bb_world;
+                    initialRootBBGestureLocal = &initialRootGesture.T_collision_bb_local;
+                }
+
+                Transform3f rootWorldTransform = initialRootGesture.T_world;
+                Transform3f rootLocalTransform;
+                // Root Link 的 T_bounding_box_local 平移计算
+                Vec3f worldDeltaTranslation;
+
+                worldDeltaTranslation = initialRootBBGestureWorld->translation()
+                                        - initialRootGesture.T_world.translation();
+
+                Mat3f R_PJ_transpose = initialRootGesture.T_world.rotation().transpose();
+                Vec3f relativeTranslation = R_PJ_transpose * worldDeltaTranslation;
+                rootLocalTransform.translation() = relativeTranslation;
+                initialRootBBGestureLocal->translation() = rootLocalTransform.translation();
+
+                Mat3f R_PJ = this->urdfInfo.links[rootLinkIndex].T_world.rotation();
+                Mat3f R_BB;
+                if (!varVisualOrCollision()->getValue()) {
+                    R_BB = this->urdfInfo.links[rootLinkIndex].T_visual_bb_world.rotation();
+                } else {
+                    R_BB = this->urdfInfo.links[rootLinkIndex].T_collision_bb_world.rotation();
+                }
+                Mat3f relativeRotation = R_PJ.transpose() * R_BB;
+                initialRootBBGestureLocal->rotation() = relativeRotation;
+
+                updateWorldRecursive(rootLinkIndex, rootWorldTransform);
             }
         }
 
@@ -1342,8 +1344,11 @@ namespace dyno
 
         auto instances = this->varVehiclesTransform()->getValue();
 
-        for (int i = 0; i < hinge_param.num_bodies; i++) {
-            auto it = hinge_param.ids[i];
+        for (size_t bi = 0; bi < bodyCount; ++bi) {
+            int it = hinge_param.ids[bi];
+            if (it < 0 || it >= (int)ctrl_mb_chains.size()) {
+                continue;
+            }
             for (int j = 0; j < ctrl_mb_chains[it].body_indices.size(); j++) {
                 auto index = ctrl_mb_chains[it].body_indices[j];
                 if (!varVisualOrCollision()->getValue()) {
@@ -1424,6 +1429,57 @@ namespace dyno
             }
         }
         this->stateExternalTorque()->assign(systemTorque);
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::applyHingeVelocityControl(BatchRigidBodySystemHingeVelocityControlParam& motor_param) {
+
+        auto topo = this->stateTopology()->getDataPtr();
+        if (topo == nullptr) {
+            printf("[BatchRigidBodySystem] applyHingeVelocityControl skipped: topology is null.\n");
+            return;
+        }
+
+		auto& d_hinge = topo->hingeJoints();
+
+        CArray<HingeJoint> c_hinge;
+        c_hinge.assign(d_hinge);
+
+        const size_t chainCount = ctrl_mb_chains.size();
+        std::vector<int> hingePrefixCount(chainCount + 1, 0);
+        for (size_t ci = 0; ci < chainCount; ++ci) {
+            hingePrefixCount[ci + 1] = hingePrefixCount[ci]
+                + static_cast<int>(ctrl_mb_chains[ci].hinge_joint_indices.size());
+        }
+
+        size_t bodyCount = std::min(motor_param.ids.size(), motor_param.motorVel.size());
+        if (motor_param.num_bodies <= 0) {
+            bodyCount = 0;
+        } else {
+            bodyCount = std::min(bodyCount, static_cast<size_t>(motor_param.num_bodies));
+        }
+
+        for (size_t i = 0; i < bodyCount; ++i) {
+            const int chainId = motor_param.ids[i];
+            if (chainId < 0 || chainId >= static_cast<int>(chainCount)) {
+                continue;
+            }
+
+            const auto& mb_chain = ctrl_mb_chains[chainId];
+            const auto& vel = motor_param.motorVel[i];
+            const size_t hingeCount = mb_chain.hinge_joint_indices.size();
+            const size_t setCount = std::min(hingeCount, vel.size());
+            const int baseHingeJointIndex = hingePrefixCount[chainId];
+
+            for (size_t j = 0; j < setCount; ++j) {
+                const int hingeIndex = baseHingeJointIndex + static_cast<int>(j);
+                if (hingeIndex < 0 || hingeIndex >= static_cast<int>(c_hinge.size())) {
+                    continue;
+                }
+                c_hinge[hingeIndex].setMoter(vel[j]);
+            }
+        }
+        d_hinge.assign(c_hinge);
     }
 
     template<typename TDataType>

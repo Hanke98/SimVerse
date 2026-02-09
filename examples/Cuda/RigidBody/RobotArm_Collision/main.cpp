@@ -36,13 +36,13 @@ int main() {
     float dt = 0.02;
     float density = 2000.0f;
     float damping = 10.0f; //250.0f;
-    bool enableGravity = true;
+    bool enableGravity = false;
     bool enableFriction = false;
     bool enableRendering = true;
     bool enableSaveScreen = false;
     bool render_collision = false;
     std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Collision/screenSave/";
-    Vec3f base{ -0.0f, -0.0f, -0.0f };
+    Vec3f base{ -0.0f, 0.5f, -0.0f };
     Vec3f offset{ 1.5f, 0.0f, 1.5f };
     std::vector<Vec3f> target_position;
     Vec3f target1{0.5f, 0.5f, 0.5f};
@@ -51,13 +51,13 @@ int main() {
     int num_copies_x = 1;
     int num_copies_y = 1;
     int num_copies_z = 1;
-    std::string urdf_fn = "../asset/franka_description/robots/franka_panda_custom.urdf";
+    std::string urdf_fn = "../asset/franka_description/robots/scene_panda_custom.urdf";
     bool render_boundingbox = false;
     RobotArmSimulator<DataType3f>::InitHingeParam hinge_param;
     hinge_param.num_bodies = 1;
     hinge_param.ids.push_back(0);
     // hinge_param.ids.push_back(1);
-    std::vector<float> theta{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    std::vector<float> theta{-1.0, 0.5863, 0, -2.3180, 0, 2.9416, 0.7854, 0.035, 0.035};
     hinge_param.theta.push_back(theta);
     // hinge_param.theta.push_back(theta);
 
@@ -126,6 +126,22 @@ int main() {
 
     int checkFrequancy = 100;
     int best_idx = 0;
+
+    RobotArmSimulator<DataType3f>::HingeVelocityParam param;
+    moterVelocities1 = {
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    };
+    param.num_bodies = 1;
+    param.ids.push_back(0);
+    param.motorVel.push_back(moterVelocities1);
+    simulator.setHingeVelocities(param);
+
 
     while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
 
@@ -276,9 +292,9 @@ int main() {
         // // param.torques.push_back(moterVelocities1);
         // simulator.setHingeTorques(param);
         simulator.stepSimulation(enableRendering, enableSaveScreen, savePath);
-        // if (i == 0) {
-        //     simulator.setInitGesture(hinge_param);
-        // }
+        if (i == 0) {
+            simulator.setInitGesture(hinge_param);
+        }
 
         i++;
     }

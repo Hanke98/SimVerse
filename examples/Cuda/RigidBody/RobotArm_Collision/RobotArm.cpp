@@ -81,6 +81,11 @@ namespace dyno
     void RobotArmSimulator<TDataType>::setHingeTorques(HingeTorqueParam& hingetorque_param) {
         batchSolver->applyHingeTorqueControl(hingetorque_param);
     }
+    
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setHingeVelocities(HingeVelocityParam& hingevelocity_param) {
+        batchSolver->applyHingeVelocityControl(hingevelocity_param);
+    }
 
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::setMass(MassParam& mass_param) {

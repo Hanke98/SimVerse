@@ -22,6 +22,7 @@ namespace dyno
     public:
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemControlParamBase CtrlParam;
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemHingeTorqueControlParam HingeTorqueParam;
+        typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemHingeVelocityControlParam HingeVelocityParam;
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemLocalIndexParam LocalIndexParam;
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemMassParam MassParam;
         typedef typename BatchRigidBodySystem<TDataType>::BatchRigidBodySystemInertiaParam InertiaParam;
@@ -75,6 +76,7 @@ namespace dyno
         void enableGravity(bool flag);
         void enableFriction(bool flag);
         void setHingeTorques(HingeTorqueParam& hingetorque_param);
+        void setHingeVelocities(HingeVelocityParam& hingevelocity_param);
         void setMass(MassParam& mass_param);
         void setInertia(InertiaParam& inertia_param);
         void setTransform(Vec3f base, Vec3f offset, int num_copies_x, int num_copies_y, int num_copies_z);

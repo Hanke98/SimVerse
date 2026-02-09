@@ -41,14 +41,18 @@ std::shared_ptr<SceneGraph> creatScene()
 	std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
 
 	auto multiRobotArm = scn->addNode(std::make_shared<BatchRigidBodySystem<DataType3f>>());
-	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_cube_sphere_cube.urdf");
+	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_three_bunnies.urdf");
 
 	std::vector<Transform3f> vehiclesTransform;
 	Transform3f Transform0(Vec3f(0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
-	Transform3f Transform1(Vec3f(0.0f, 0.0f, 3.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+	Transform3f Transform1(Vec3f(0.0f, 0.0f, 1.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+	// Transform3f Transform2(Vec3f(6.0f, 0.0f, 0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+	// Transform3f Transform3(Vec3f(6.0f, 0.0f, 6.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
 
-	vehiclesTransform.push_back(Transform0);
 	vehiclesTransform.push_back(Transform1);
+	// vehiclesTransform.push_back(Transform1);
+	// vehiclesTransform.push_back(Transform2);
+	// vehiclesTransform.push_back(Transform3);
 
 	multiRobotArm->varVehiclesTransform()->setValue(vehiclesTransform);
 	auto instances = multiRobotArm->varVehiclesTransform()->getValue();
@@ -84,7 +88,7 @@ std::shared_ptr<SceneGraph> creatScene()
 
             int oldBoxCount = multiRobotArm->getHostBoxesSize();
 
-			multiRobotArm->bindBox(actor, box, 1000);
+			multiRobotArm->bindBox(actor, box, 1000000);
 			multiRobotArm->bindShape(actor, Pair<uint, uint>(it, i));
 			mb.body_indices.push_back(actor->idx);
 
@@ -164,7 +168,9 @@ int main()
 	app.initialize(1280, 768);
 
 	//Set the distance unit for the camera, the fault unit is meter
-	app.renderWindow()->getCamera()->setUnitScale(10.0f);
+	app.renderWindow()->getCamera()->setUnitScale(7.0f);
+	app.renderWindow()->getCamera()->setEyePos(Vec3f(1.36, 1.6, 2.44));
+	app.renderWindow()->getCamera()->setTargetPos(Vec3f(0, 1.1, 0));
 
 	app.mainLoop();
 

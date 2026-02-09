@@ -25,6 +25,7 @@ public:
     typedef typename TDataType::Coord Coord;
     typedef typename TDataType::Matrix Matrix;
     typedef typename dyno::Quat<Real> TQuat;
+    typedef typename ::dyno::HingeJoint<Real> HingeJoint;
 
     struct MulitBodyChainIndices
     {
@@ -60,6 +61,11 @@ public:
     struct BatchRigidBodySystemHingeTorqueControlParam: public BatchRigidBodySystemControlParamBase
     {
       std::vector<std::vector<Real>> torques;
+    };
+
+    struct BatchRigidBodySystemHingeVelocityControlParam: public BatchRigidBodySystemControlParamBase
+    {
+      std::vector<std::vector<Real>> motorVel;
     };
 
     struct BatchRigidBodySystemMassParam: public BatchRigidBodySystemControlParamBase
@@ -108,6 +114,8 @@ public:
     void applyTorqueControl(BatchRigidBodySystemTorqueControlParam& torque_param);
 
     void applyHingeTorqueControl(BatchRigidBodySystemHingeTorqueControlParam& torque_param);
+
+    void applyHingeVelocityControl(BatchRigidBodySystemHingeVelocityControlParam& motor_param);
 
     void setMass(BatchRigidBodySystemMassParam& mass_param);
 
@@ -176,7 +184,7 @@ public:
     
     DEF_VAR(CollisionDetectionType, CollisionDetectionType, TriMesh, "CollisionDetectionType");
 
-    DEF_VAR(Bool, EnableVisualizeCollisionTriSet, false, "Enable visualize collision triSet mesh");
+    DEF_VAR(Bool, EnableVisualizeCollisionTriSet, true, "Enable visualize collision triSet mesh");
     
 protected:
     void resetStates() override;

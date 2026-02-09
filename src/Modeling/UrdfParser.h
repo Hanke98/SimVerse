@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <limits>
 #include <tinyxml/tinyxml2.h>
 #include "Primitive/Primitive3D.h"
 #include "Vector.h"
@@ -34,8 +35,8 @@ namespace dyno
         Transform3f T_visual_bb_world;
         Transform3f T_collision_bb_local;
         Transform3f T_collision_bb_world;
-        uint visualShapeId;
-        uint collisionShapeId;
+        uint visualShapeId = std::numeric_limits<uint>::max();
+        uint collisionShapeId = std::numeric_limits<uint>::max();
         bool isRoot = false;
         Real volume;
         Mat3f localInertia;

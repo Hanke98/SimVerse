@@ -10,6 +10,7 @@
 #include "NewTimer.h"
 #include <cmath>
 #include <cassert>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -25,6 +26,20 @@ namespace dyno
 			return false;
 		}
 		return true;
+	}
+
+	static inline void NMQ_PrintCudaContext(const char* tag)
+	{
+		int dev = -1;
+		int devCount = 0;
+		cudaError_t errDev = cudaGetDevice(&dev);
+		cudaError_t errCnt = cudaGetDeviceCount(&devCount);
+		printf("[NeighborTriMeshQuery][CUDA] %s: device=%d (err=%d), deviceCount=%d (err=%d)\n",
+			tag,
+			dev,
+			(int)errDev,
+			devCount,
+			(int)errCnt);
 	}
 
 	IMPLEMENT_TCLASS(NeighborTriMeshQuery, TDataType)
@@ -382,18 +397,16 @@ namespace dyno
 			int start = NLQ_ClampInt(patch2TriOffsets[patchId], 0, patchTriCount);
 			int end = NLQ_ClampInt(patch2TriOffsets[patchId + 1], 0, patchTriCount);
 			int triCountLocal = end - start;
-		if (triCountLocal <= 0 || triCountLocal > 32)
-		{
-			if (lane == 0)
+			if (triCountLocal <= 0)
 			{
-				AABB box;
-				auto zero = Vec3f(Real(0));
-				box.v0 = zero;
-				box.v1 = zero;
-				outAabbs[warpId] = box;
-			}
-			printf("[NeighborTriMeshQuery] Invalid triCountLocal: %d\n", 
-				triCountLocal);
+				if (lane == 0)
+				{
+					AABB box;
+					auto zero = Vec3f(Real(0));
+					box.v0 = zero;
+					box.v1 = zero;
+					outAabbs[warpId] = box;
+				}
 				return;
 			}
 
@@ -410,13 +423,16 @@ namespace dyno
 
 			Vec3f localMin(REAL_MAX);
 			Vec3f localMax(-REAL_MAX);
+			int hasLocal = 0;
 
-		if (lane < triCountLocal)
-		{
-			int triId = patch2TriIndices[start + lane];
-			bool triValid = (triId >= 0 && triId < triCount);
-			if (triValid)
+			// One warp handles one patch; each lane iterates over triangles with stride 32.
+			for (int localTri = lane; localTri < triCountLocal; localTri += 32)
 			{
+				int triId = patch2TriIndices[start + localTri];
+				bool triValid = (triId >= 0 && triId < triCount);
+				if (!triValid)
+					continue;
+
 				Triangle tri = triangles[triId];
 				int v0 = tri[0];
 				int v1 = tri[1];
@@ -425,44 +441,64 @@ namespace dyno
 				bool vValid = (v0 >= 0 && v0 < vertexCount
 					&& v1 >= 0 && v1 < vertexCount
 					&& v2 >= 0 && v2 < vertexCount);
-					if (vValid)
-					{
-						// get triangle vertices
-						Vec3f p0c = vertices[v0];
-						Vec3f p1c = vertices[v1];
-						Vec3f p2c = vertices[v2];
+				if (!vValid)
+					continue;
 
-						// vertices:
-						// - current world (legacy): directly transform to target rest
-						// - rest world (static): transform to current world by source shape, then to target rest by target shape
-						if (verticesInRestWorld)
-						{
-							p0c = RSource * p0c + tSource;
-							p1c = RSource * p1c + tSource;
-							p2c = RSource * p2c + tSource;
-						}
+				// get triangle vertices
+				Vec3f p0c = vertices[v0];
+				Vec3f p1c = vertices[v1];
+				Vec3f p2c = vertices[v2];
 
-						Vec3f p0 = NLQ_TransformWorldPointToRest(p0c, RTarget, tTarget);
-						Vec3f p1 = NLQ_TransformWorldPointToRest(p1c, RTarget, tTarget);
-						Vec3f p2 = NLQ_TransformWorldPointToRest(p2c, RTarget, tTarget);
+				// vertices:
+				// - current world (legacy): directly transform to target rest
+				// - rest world (static): transform to current world by source shape, then to target rest by target shape
+				if (verticesInRestWorld)
+				{
+					p0c = RSource * p0c + tSource;
+					p1c = RSource * p1c + tSource;
+					p2c = RSource * p2c + tSource;
+				}
 
-						localMin = p0.minimum(p1).minimum(p2);
-						localMax = p0.maximum(p1).maximum(p2);
-					}
+				Vec3f p0 = NLQ_TransformWorldPointToRest(p0c, RTarget, tTarget);
+				Vec3f p1 = NLQ_TransformWorldPointToRest(p1c, RTarget, tTarget);
+				Vec3f p2 = NLQ_TransformWorldPointToRest(p2c, RTarget, tTarget);
+
+				Vec3f triMin = p0.minimum(p1).minimum(p2);
+				Vec3f triMax = p0.maximum(p1).maximum(p2);
+				if (hasLocal == 0)
+				{
+					localMin = triMin;
+					localMax = triMax;
+					hasLocal = 1;
+				}
+				else
+				{
+					localMin = localMin.minimum(triMin);
+					localMax = localMax.maximum(triMax);
+				}
+			}
+
+			Vec3f warpMin = NLQ_WarpReduceMinVec3(localMin);
+			Vec3f warpMax = NLQ_WarpReduceMaxVec3(localMax);
+			int validCount = NLQ_WarpReduceSum(hasLocal);
+
+			if (lane == 0)
+			{
+				AABB box;
+				if (validCount <= 0)
+				{
+					auto zero = Vec3f(Real(0));
+					box.v0 = zero;
+					box.v1 = zero;
+				}
+				else
+				{
+					box.v0 = warpMin;
+					box.v1 = warpMax;
+				}
+				outAabbs[warpId] = box;
 			}
 		}
-
-		Vec3f warpMin = NLQ_WarpReduceMinVec3(localMin);
-		Vec3f warpMax = NLQ_WarpReduceMaxVec3(localMax);
-
-		if (lane == 0)
-		{
-			AABB box;
-			box.v0 = warpMin;
-			box.v1 = warpMax;
-			outAabbs[warpId] = box;
-		}
-	}
 
 	// template<typename Real, typename Coord, typename Matrix, typename AABB>
 	// __global__ void NLQ_UpdateShapeAabbs(
@@ -623,36 +659,77 @@ namespace dyno
 		ElementType eleType = elementOffset.checkElementType((uint)elementId);
 
 		AABB box;
+		auto zero = decltype(box.v0)(Real(0));
+		box.v0 = zero;
+		box.v1 = zero;
+		bool valid = true;
 		switch (eleType)
 		{
 		case ET_SPHERE:
 		{
-			box = spheres[elementId - elementOffset.sphereIndex()].aabb();
+			int localId = elementId - elementOffset.sphereIndex();
+			if (localId < 0 || localId >= (int)spheres.size())
+			{
+				valid = false;
+				break;
+			}
+			box = spheres[localId].aabb();
 			break;
 		}
 		case ET_BOX:
 		{
-			box = boxes[elementId - elementOffset.boxIndex()].aabb();
+			int localId = elementId - elementOffset.boxIndex();
+			if (localId < 0 || localId >= (int)boxes.size())
+			{
+				valid = false;
+				break;
+			}
+			box = boxes[localId].aabb();
 			break;
 		}
 		case ET_TET:
 		{
-			box = tets[elementId - elementOffset.tetIndex()].aabb();
+			int localId = elementId - elementOffset.tetIndex();
+			if (localId < 0 || localId >= (int)tets.size())
+			{
+				valid = false;
+				break;
+			}
+			box = tets[localId].aabb();
 			break;
 		}
 		case ET_CAPSULE:
 		{
-			box = caps[elementId - elementOffset.capsuleIndex()].aabb();
+			int localId = elementId - elementOffset.capsuleIndex();
+			if (localId < 0 || localId >= (int)caps.size())
+			{
+				valid = false;
+				break;
+			}
+			box = caps[localId].aabb();
 			break;
 		}
 		case ET_TRI:
 		{
+			int localId = elementId - elementOffset.triangleIndex();
+			if (localId < 0 || localId >= (int)tris.size())
+			{
+				valid = false;
+				break;
+			}
 			boundary_expand = 0.01;
-			box = tris[elementId - elementOffset.triangleIndex()].aabb();
+			box = tris[localId].aabb();
 			break;
 		}
 		default:
+			valid = false;
 			break;
+		}
+
+		if (!valid)
+		{
+			boundingBox[tId] = box;
+			return;
 		}
 
 		box.v0 -= boundary_expand;
@@ -1306,10 +1383,14 @@ namespace dyno
 				cp.localId2 = triId1;
 				cp.pos1 = manifold.contacts[n].position;
 				cp.pos2 = manifold.contacts[n].position;
+				// cp.pos1 = manifold.contacts[n].position + dHat * manifold.normal;
+				// cp.pos2 = manifold.contacts[n].position + dHat * manifold.normal;
 				cp.normal1 = -manifold.normal;
 				cp.normal2 = manifold.normal;
 				cp.contactType = ContactType::CT_NONPENETRATION;
 				cp.interpenetration = -manifold.contacts[n].penetration;
+				// cp.interpenetration = -manifold.contacts[n].penetration - 2 * dHat;
+
 
 				contacts[outIdx] = cp;
 			}
@@ -1329,7 +1410,7 @@ namespace dyno
 		this->inShapeBVHs()->tagOptional(true);
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
-		this->varDHead()->setValue(Real(0));
+		this->varDHead()->setValue(Real(0.05));
 	}
 
 	template<typename TDataType>
@@ -1829,31 +1910,43 @@ namespace dyno
 			return;
 		}
 
-		// BroadPhase: shape AABB overlap -> i<j shape pairs
-		if (!broadPhase())
+		try
 		{
+			// BroadPhase: shape AABB overlap -> i<j shape pairs
+			if (!broadPhase())
+			{
+				this->outPotentialPatchPairs()->resize(0);
+				this->outContacts()->resize(0);
+				this->triSet->clear();
+				this->outPotentialTriSet()->setDataPtr(this->triSet);
+				// printf("[NeighborTriMeshQuery] BroadPhase failed.\n");
+				finishTiming();
+				return;
+			}
+
+			// MiddlePhase: shape pairs + patch CSR -> patch pairs 
+			if (!middlePhase())
+			{
+				this->outContacts()->resize(0);
+				this->triSet->clear();
+				this->outPotentialTriSet()->setDataPtr(this->triSet);
+				// printf("[NeighborTriMeshQuery] MiddlePhase failed.\n");
+				finishTiming();
+				return;
+			}
+
+			// NarrowPhase: patch pairs + triangle CSR -> contacts
+			narrowPhase();
+		}
+		catch (const std::exception& e)
+		{
+			printf("[NeighborTriMeshQuery] compute caught exception: %s\n", e.what());
+			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			// printf("[NeighborTriMeshQuery] BroadPhase failed.\n");
-			finishTiming();
-			return;
 		}
-
-		// MiddlePhase: shape pairs + patch CSR -> patch pairs 
-		if (!middlePhase())
-		{
-			this->outContacts()->resize(0);
-			this->triSet->clear();
-			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			// printf("[NeighborTriMeshQuery] MiddlePhase failed.\n");
-			finishTiming();
-			return;
-		}
-
-		// NarrowPhase: patch pairs + triangle CSR -> contacts
-		narrowPhase();
 		finishTiming();
 	}
 
@@ -1941,8 +2034,8 @@ namespace dyno
 			elementOffset,
 			dHat);
 		cuSynchronize();
-		// if (!NMQ_CheckCuda("NTQ_SetupAABBFromElementIds"))
-		// 	return false;
+		if (!NMQ_CheckCuda("NTQ_SetupAABBFromElementIds"))
+			return false;
 
 		broadTimer1.stop();
 		// std::cout << "[NeighborTriMeshQuery] compute broad phase time 1: " << broadTimer1.elapsedMilliseconds() << " ms" << std::endl;
@@ -1959,17 +2052,29 @@ namespace dyno
 		{
 		case Spatial::BVH:
 			this->mBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
+			// printf("[NeighborTriMeshQuery] BroadPhase acceleration: BVH\n");
 			break;
 		case Spatial::OCTREE:
 			this->mBroadPhaseCD->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::Octree);
+			printf("[NeighborTriMeshQuery] BroadPhase acceleration: Octree\n");
 			break;
 		default:
+			printf("[NeighborTriMeshQuery] BroadPhase acceleration: Unknown key=%d\n", (int)type);
 			break;
 		}
 
-		this->mBroadPhaseCD->update();
-		// if (!NMQ_CheckCuda("BroadPhaseCD::update"))
-		// 	return false;
+		// NMQ_PrintCudaContext("before BroadPhaseCD::update");
+		try
+		{
+			this->mBroadPhaseCD->update();
+		}
+		catch (const std::exception& e)
+		{
+			printf("[NeighborTriMeshQuery] BroadPhaseCD::update threw exception: %s\n", e.what());
+			return false;
+		}
+		if (!NMQ_CheckCuda("BroadPhaseCD::update"))
+			return false;
 
 		auto& contactList = this->mBroadPhaseCD->outContactList()->getData();
 		if (contactList.elementSize() == 0)

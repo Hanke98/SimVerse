@@ -236,6 +236,68 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     patchBoundingBox.clear();
     patchBoundingBox.resize(links.size());
     const int facesPerPatch = 32;
+    auto getMaxPatchFaceCount = [](const std::vector<int>& patchOffsets) -> int
+    {
+        if (patchOffsets.size() < 2)
+            return 0;
+        int maxCount = 0;
+        for (size_t i = 0; i + 1 < patchOffsets.size(); ++i)
+        {
+            int begin = patchOffsets[i];
+            int end = patchOffsets[i + 1];
+            int count = end - begin;
+            if (count > maxCount)
+                maxCount = count;
+        }
+        return maxCount;
+    };
+    auto enforcePatchFaceUpperBound = [](PatchingResultHost& patchResult, int maxFacesPerPatch)
+    {
+        if (maxFacesPerPatch <= 0)
+            return;
+        if (patchResult.patchOffsets.size() < 2)
+            return;
+
+        std::vector<int> newPatchFaces;
+        newPatchFaces.reserve(patchResult.patchFaces.size());
+        std::vector<int> newPatchOffsets;
+        newPatchOffsets.reserve(patchResult.patchOffsets.size());
+        newPatchOffsets.push_back(0);
+        std::vector<int> newFacePatchId(static_cast<size_t>(patchResult.numFaces), -1);
+
+        int newPatchId = 0;
+        for (int p = 0; p < patchResult.numPatches; ++p)
+        {
+            int begin = patchResult.patchOffsets[p];
+            int end = patchResult.patchOffsets[p + 1];
+            if (begin < 0) begin = 0;
+            if (end < begin) end = begin;
+            if (end > static_cast<int>(patchResult.patchFaces.size()))
+                end = static_cast<int>(patchResult.patchFaces.size());
+
+            for (int i = begin; i < end; i += maxFacesPerPatch)
+            {
+                int chunkEnd = std::min(i + maxFacesPerPatch, end);
+                for (int t = i; t < chunkEnd; ++t)
+                {
+                    int faceId = patchResult.patchFaces[t];
+                    newPatchFaces.push_back(faceId);
+                    if (faceId >= 0 && faceId < patchResult.numFaces)
+                        newFacePatchId[static_cast<size_t>(faceId)] = newPatchId;
+                }
+                newPatchOffsets.push_back(static_cast<int>(newPatchFaces.size()));
+                ++newPatchId;
+            }
+        }
+
+        if (newPatchId <= 0)
+            return;
+
+        patchResult.numPatches = newPatchId;
+        patchResult.patchFaces.swap(newPatchFaces);
+        patchResult.patchOffsets.swap(newPatchOffsets);
+        patchResult.facePatchId.swap(newFacePatchId);
+    };
 
     // Output: linkAABBs[linkId] stores world-space AABBs for links.
     urdfInfo.linkAABBs.clear();
@@ -258,6 +320,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
     // Iterate through each link and handle the visual mesh
     for (size_t linkId = 0; linkId < links.size(); ++linkId) {
         auto& link = links[linkId];
+        const bool hadPatchFromUrdf = link.hasPatch;
         if (!link.visualMeshPath.empty()) {
             // Construct the complete path to the mesh
             auto meshFull = FilePath(getAssetPath() + "/../asset/" + link.visualMeshPath);
@@ -391,7 +454,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             Vec3f lo( REAL_MAX);
             Vec3f hi(-REAL_MAX);
 
-            link.T_world = T_world_mesh;// need double check here!!!!!!
+            // NOTE: Do NOT overwrite link.T_world here. T_world_mesh is only for mesh space.
 
             for (const auto& tshape : shapes)
             {
@@ -501,7 +564,20 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
             // -----------------------------------------------------------------
             // Create patch shapes (world space) for this link (visual mesh).
             // -----------------------------------------------------------------
-            if (!link.hasPatch) {
+            bool needRepatch = !link.hasPatch;
+            if (!needRepatch)
+            {
+                const int maxPatchFaces = getMaxPatchFaceCount(link.patchOffsets);
+                if (maxPatchFaces <= 0 || maxPatchFaces > facesPerPatch)
+                {
+                    needRepatch = true;
+                    std::cout << "[UrdfFunc] Repatch link '" << link.name
+                              << "' due to patch size overflow (max=" << maxPatchFaces
+                              << ", target=" << facesPerPatch << ")" << std::endl;
+                }
+            }
+
+            if (needRepatch) {
                 PatchingParams     patchParams;
                 PatchingResultHost patchResult;
                 // MortonChunkPatcher patcher;
@@ -512,6 +588,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 // topo.numFaces = static_cast<int>(vertexIndex.size());
                 patchParams.targetFacesPerPatch = std::max(0, facesPerPatch);
                 patcher.BuildPatches(topo, patchParams, patchResult);
+                enforcePatchFaceUpperBound(patchResult, facesPerPatch);
 
                 // Add assertions to verify patch allocation correctness
                 assert(patchResult.patchOffsets.back() == topo.numFaces);
@@ -538,6 +615,7 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
 
                 link.patchFaces = patchResult.patchFaces;
                 link.patchOffsets = patchResult.patchOffsets;
+                link.hasPatch = true;
 
                 link.patchAABBs.clear();
                 link.patchAABBs.reserve(patchResult.numPatches);
@@ -613,39 +691,62 @@ bool loadURDFTextureMesh(std::shared_ptr<TextureMesh> texMesh,
                 // auto outputUrdfPath = urdfRoot.string() + "robotarm_with_patches.urdf";
                 auto outputUrdfPath = urdfPath.string().substr(0, urdfPath.string().length() - 5) + "_with_patches.urdf";
                 PatchWriteOptions writeOption;
-                writeOption.overwriteExistingPatch = false;
-                writeOption.writeMissingOnly = true;
+                writeOption.overwriteExistingPatch = hadPatchFromUrdf;
+                writeOption.writeMissingOnly = !hadPatchFromUrdf;
                 WriteUrdfWithPatches(urdfPath.string(), outputUrdfPath, urdfInfo, writeOption);
             }
 
             if (link.hasPatch) {
-                // Divide the visual mesh into patches and compute their bounding boxes
-                size_t numTriangles = reShapes[link.visualShapeId]->vertexIndex.size();
-
-                size_t numPatches = link.patchFaces.size();
+                // Divide the visual mesh into patches and compute their bounding boxes.
+                size_t numPatches = 0;
+                if (link.patchOffsets.size() >= 2)
+                {
+                    numPatches = link.patchOffsets.size() - 1;
+                }
                 patchBoundingBox[linkId].resize(numPatches);
+                link.patchAABBs.clear();
+                link.patchAABBs.resize(numPatches);
+                const size_t patchFaceCount = link.patchFaces.size();
+                const size_t triIndexCount = vertexIndex.size();
 
                 for (size_t p = 0; p < numPatches; ++p)
                 {
                     size_t startTri = link.patchOffsets[p];
                     size_t endTri   = link.patchOffsets[p + 1];
+                    if (startTri > patchFaceCount) startTri = patchFaceCount;
+                    if (endTri > patchFaceCount) endTri = patchFaceCount;
+                    if (startTri > endTri) std::swap(startTri, endTri);
 
                     Vec3f patchLo( REAL_MAX);
                     Vec3f patchHi(-REAL_MAX);
+                    bool hasValidFace = false;
 
                     for (size_t t = startTri; t < endTri; ++t)
                     {
-                        const auto indexTri = link.patchFaces[t];
+                        const auto indexTri = static_cast<size_t>(link.patchFaces[t]);
+                        if (indexTri >= triIndexCount)
+                            continue;
                         auto tri = vertexIndex[indexTri];
                         for (int vi = 0; vi < 3; ++vi)
                         {
                             Vec3f v = vertices[tri[vi]];
                             patchLo = patchLo.minimum(v);
                             patchHi = patchHi.maximum(v);
+                            hasValidFace = true;
                         }
                     }
 
-                    patchBoundingBox[linkId][p] = TAlignedBox3D<Real>(patchLo, patchHi);
+                    TAlignedBox3D<Real> patchBox;
+                    if (hasValidFace)
+                    {
+                        patchBox = TAlignedBox3D<Real>(patchLo, patchHi);
+                    }
+                    else
+                    {
+                        patchBox = TAlignedBox3D<Real>(Vec3f(Real(0)), Vec3f(Real(0)));
+                    }
+                    patchBoundingBox[linkId][p] = patchBox;
+                    link.patchAABBs[p] = patchBox;
                 }
             }
 

@@ -1,6 +1,7 @@
 #include "RenderWindow.h"
 
 #include "OrbitCamera.h"
+#include "Platform.h"
 #include "TrackballCamera.h"
 
 #include <iostream>
@@ -35,6 +36,7 @@ void dyno::RenderWindow::saveScreen(unsigned int frame)
 		adaptor << frame / mSaveScreenInterval;
 		std::string index_str;
 		adaptor >> index_str;
+		mScreenRecordingPath = getAssetPath() + "../examples/Cuda/RigidBody/NMQ_test/screenSave/";
 		std::string file_name = mScreenRecordingPath + std::string("screen_capture_") + index_str + std::string(".bmp");
 
 		this->onSaveScreen(file_name);

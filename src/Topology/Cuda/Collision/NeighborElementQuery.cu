@@ -8,6 +8,8 @@
 
 #include "Timer.h"
 
+#include "NewTimer.h"
+
 namespace dyno
 {
 	IMPLEMENT_TCLASS(NeighborElementQuery, TDataType)
@@ -498,8 +500,8 @@ namespace dyno
 	template<typename TDataType>
 	void NeighborElementQuery<TDataType>::compute()
 	{
-		CTimer broadTimer;
-		CTimer totalTimer;
+		NewTimer broadTimer;
+		NewTimer totalTimer;
 		// totalTimer.start();
 		// broadTimer.start();
 
@@ -533,7 +535,7 @@ namespace dyno
 			mQueryAABB.resize(t_num);
 		}
 		//printf("=========== ============= INSIDE SELF COLLISION %d\n", t_num);
-		CTimer broadTimer1;
+		NewTimer broadTimer1;
 
 		ElementOffset elementOffset = inTopo->calculateElementOffset();
 
@@ -561,9 +563,9 @@ namespace dyno
 		cuSynchronize();
 
 		broadTimer1.stop();
-		std::cout << "[NeighborElementQuery] compute broad phase time 1: " << broadTimer1.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute broad phase time 1: " << broadTimer1.elapsedMilliseconds() << " ms" << std::endl;
 
-		CTimer broadTimer2;
+		NewTimer broadTimer2;
 
 		mQueryAABB.assign(mQueriedAABB);
 
@@ -579,9 +581,9 @@ namespace dyno
 		}
 
 		broadTimer2.stop();
-		std::cout << "[NeighborElementQuery] compute broad phase time 2: " << broadTimer2.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute broad phase time 2: " << broadTimer2.elapsedMilliseconds() << " ms" << std::endl;
 
-		CTimer broadTimer3;
+		NewTimer broadTimer3;
 
 		DArray<int> count(contactList.size());
 		cuExecute(contactList.size(),
@@ -602,9 +604,9 @@ namespace dyno
 		DArray<ContactId> deviceIds(totalSize);
 
 		broadTimer3.stop();
-		std::cout << "[NeighborElementQuery] compute broad phase time 3: " << broadTimer3.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute broad phase time 3: " << broadTimer3.elapsedMilliseconds() << " ms" << std::endl;
 
-		CTimer broadTimer4;
+		NewTimer broadTimer4;
 
 		cuExecute(contactList.size(),
 			CCL_SetupContactIds,
@@ -614,13 +616,13 @@ namespace dyno
 		cuSynchronize();
 
 		broadTimer4.stop();
-		std::cout << "[NeighborElementQuery] compute broad phase time 4: " << broadTimer4.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute broad phase time 4: " << broadTimer4.elapsedMilliseconds() << " ms" << std::endl;
 
 		broadTimer.stop();
-		std::cout << "[NeighborElementQuery] compute broad phase time: " << broadTimer.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute broad phase time: " << broadTimer.elapsedMilliseconds() << " ms" << std::endl;
 
-		CTimer narrowTimer;
-		CTimer narrowTimer1;
+		NewTimer narrowTimer;
+		NewTimer narrowTimer1;
 		
 		// narrowTimer.start();
 
@@ -744,9 +746,9 @@ namespace dyno
 		}
 		cuSynchronize();
 		narrowTimer1.stop();
-		std::cout << "[NeighborElementQuery] compute narrow phase time 1: " << narrowTimer1.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute narrow phase time 1: " << narrowTimer1.elapsedMilliseconds() << " ms" << std::endl;
 		
-		CTimer narrowTimer2;
+		NewTimer narrowTimer2;
 		contactNumCpy.assign(contactNum);
 		
 		int sum = mReduce.accumulate(contactNum.begin(), contactNum.size());
@@ -767,7 +769,7 @@ namespace dyno
 		}
 		cuSynchronize();
 		narrowTimer2.stop();
-		std::cout << "[NeighborElementQuery] compute narrow phase time 2: " << narrowTimer2.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute narrow phase time 2: " << narrowTimer2.elapsedMilliseconds() << " ms" << std::endl;
 
 		contactNumCpy.clear();
 		contactNum.clear();
@@ -776,10 +778,10 @@ namespace dyno
 
 		// finishTiming();
 		narrowTimer.stop();
-		std::cout << "[NeighborElementQuery] compute narrow phase time: " << narrowTimer.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute narrow phase time: " << narrowTimer.elapsedMilliseconds() << " ms" << std::endl;
 
 		totalTimer.stop();
-		std::cout << "[NeighborElementQuery] compute time: " << totalTimer.getElapsedTime() << " ms" << std::endl;
+		std::cout << "[NeighborElementQuery] compute time: " << totalTimer.elapsedMilliseconds() << " ms" << std::endl;
 
 	}
 

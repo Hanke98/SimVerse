@@ -65,6 +65,9 @@ namespace dyno
 		if (tId >= vertices.size()) return;
 
 		uint shapeId = shapeIds[tId];
+		if (shapeId >= localTransform.size()) return;
+		if (shapeId >= globalTransform.size()) return;
+		if (globalTransform[shapeId].size() == 0) return;
 		Coord v = vertices[tId];
 
 		Transform locT = localTransform[shapeId];
@@ -88,9 +91,15 @@ namespace dyno
 	{
 		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
 		if (tId >= vertices.size()) return;
+		if (tId >= sourceVertices.size()) return;
 
 		uint shapeId = shapeIds[tId];
+		if (shapeId >= localTransform.size()) return;
+		if (shapeId >= globalTransform.size()) return;
+		if (instanceID >= globalTransform[shapeId].size()) return;
 		Coord v = sourceVertices[tId];
+		uint outId = tId + instanceID * sourceVertices.size();
+		if (outId >= vertices.size()) return;
 
 		Transform locT = localTransform[shapeId];
 		//TODO: This is a temporary code
@@ -100,7 +109,7 @@ namespace dyno
 
 		Coord s = globalT.scale();
 
-		vertices[tId + instanceID * sourceVertices.size()] = globalT.rotation() * Coord(v.x * s.x, v.y * s.y, v.z * s.z) + globalT.translation();
+		vertices[outId] = globalT.rotation() * Coord(v.x * s.x, v.y * s.y, v.z * s.z) + globalT.translation();
 	}
 
 	template< typename Triangle >
@@ -134,6 +143,7 @@ namespace dyno
 		if (tId >= vertices.size()) return;
 
 		uint shapeId = shapeIds[tId];
+		if (shapeId >= localTransform.size()) return;
 		Coord v = vertices[tId];
 
 		Transform locT = localTransform[shapeId];
@@ -186,14 +196,22 @@ namespace dyno
 			CArray<Transform> hostT(N);
 			DArray<Transform> devT(N);
 
-			for (uint i = 0; i < N; i++)
-			{
-				hostT[i] = mesh->shapes()[i]->boundingTransform;
-			}
+				for (uint i = 0; i < N; i++)
+				{
+					hostT[i] = mesh->shapes()[i]->boundingTransform;
+				}
 
-			devT.assign(hostT);
-			
-			bool transformID0 = false;
+				devT.assign(hostT);
+
+				int transformShapeCount = static_cast<int>(this->inTransform()->constData().size());
+				if (transformShapeCount != static_cast<int>(N))
+				{
+					printf("[TextureMeshToTriangleSet] shape/transform count mismatch: meshShapes=%u transformShapes=%d\n",
+						N,
+						transformShapeCount);
+				}
+				
+				bool transformID0 = false;
 
 			int sizeEqual = -1;
 			int* d_sizeEqual;
@@ -204,6 +222,7 @@ namespace dyno
 				d_sizeEqual
 			);
 			cudaMemcpy(&sizeEqual, d_sizeEqual, sizeof(int), cudaMemcpyDeviceToHost);
+			cudaFree(d_sizeEqual);
 
 			if (transformID0)
 			{

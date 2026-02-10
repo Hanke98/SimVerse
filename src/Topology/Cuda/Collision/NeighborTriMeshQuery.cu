@@ -412,6 +412,7 @@ namespace dyno
 
 			Mat3f RTarget = shapeRestR[targetId];
 			Vec3f tTarget = shapeRestT[targetId];
+			Mat3f RTargetT = RTarget.transpose();
 
 			Mat3f RSource = Mat3f::identityMatrix();
 			Vec3f tSource = Vec3f(Real(0));
@@ -459,9 +460,9 @@ namespace dyno
 					p2c = RSource * p2c + tSource;
 				}
 
-				Vec3f p0 = NLQ_TransformWorldPointToRest(p0c, RTarget, tTarget);
-				Vec3f p1 = NLQ_TransformWorldPointToRest(p1c, RTarget, tTarget);
-				Vec3f p2 = NLQ_TransformWorldPointToRest(p2c, RTarget, tTarget);
+				Vec3f p0 = RTargetT * (p0c - tTarget);
+				Vec3f p1 = RTargetT * (p1c - tTarget);
+				Vec3f p2 = RTargetT * (p2c - tTarget);
 
 				Vec3f triMin = p0.minimum(p1).minimum(p2);
 				Vec3f triMax = p0.maximum(p1).maximum(p2);
@@ -843,14 +844,14 @@ namespace dyno
 			groupedSources[out] = source;
 	}
 
-	__global__ void NLQ_CountContactList(
-		DArray<int> counts,
-		DArrayList<int> contactList)
+	__global__ void NLQ_CopyCountU2I(
+		DArray<int> dst,
+		DArray<uint> src)
 	{
 		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (tId >= contactList.size()) return;
-
-		counts[tId] = contactList[tId].size();
+		if (tId >= dst.size() || tId >= src.size())
+			return;
+		dst[tId] = (int)src[tId];
 	}
 
 	__global__ void NLQ_SetPatchPairsFromContactList(
@@ -1704,6 +1705,62 @@ namespace dyno
 	}
 
 	template<typename TDataType>
+	bool NeighborTriMeshQuery<TDataType>::updateTargetBVHCache(int shapeCount)
+	{
+		if (shapeCount <= 0)
+			return false;
+
+		auto& shapeBVHs = this->inShapeBVHs()->constDataPtr();
+		int hostCount = shapeBVHs != nullptr ? (int)shapeBVHs->size() : 0;
+
+		bool needRebuild = !mTargetBVHCacheReady;
+		needRebuild = needRebuild || mCachedShapeBVHs != shapeBVHs;
+		needRebuild = needRebuild || mCachedShapeBVHCount != hostCount;
+		needRebuild = needRebuild || mTargetBVHs.size() != (uint)shapeCount;
+		needRebuild = needRebuild || mTargetBVHValid.size() != (uint)shapeCount;
+
+		if (!needRebuild)
+			return true;
+
+		CArray<LinearBVH<TDataType>> hTargetBVHs;
+		hTargetBVHs.resize(shapeCount);
+		CArray<int> hTargetBVHValid;
+		hTargetBVHValid.assign((uint)shapeCount, 0);
+
+		if (shapeBVHs != nullptr)
+		{
+			int copyCount = shapeCount;
+			if (copyCount > (int)shapeBVHs->size())
+				copyCount = (int)shapeBVHs->size();
+
+			for (int i = 0; i < copyCount; ++i)
+			{
+				auto& bvh = (*shapeBVHs)[i];
+				if (!bvh)
+					continue;
+
+				hTargetBVHs[i] = *bvh;
+				int nodeCount = (int)bvh->getSortedAABBs().size();
+				hTargetBVHValid[i] = (nodeCount > 0 && (nodeCount % 2) == 1) ? 1 : 0;
+			}
+		}
+
+		if (mTargetBVHs.size() != (uint)shapeCount)
+			mTargetBVHs.resize(shapeCount);
+		if (mTargetBVHValid.size() != (uint)shapeCount)
+			mTargetBVHValid.resize(shapeCount);
+
+		mTargetBVHs.assign(hTargetBVHs);
+		mTargetBVHValid.assign(hTargetBVHValid);
+
+		mCachedShapeBVHs = shapeBVHs;
+		mCachedShapeBVHCount = hostCount;
+		mTargetBVHCacheReady = true;
+
+		return true;
+	}
+
+	template<typename TDataType>
 	bool NeighborTriMeshQuery<TDataType>::buildPatchPairsFromContactList(int shapeCount, int patchCount)
 	{
 		auto& shapePairs = this->outPotentialShapePairs()->getData();
@@ -1906,6 +1963,18 @@ namespace dyno
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			printf("[NeighborTriMeshQuery] Patch2Shape size mismatch.\n");
+			finishTiming();
+			return;
+		}
+
+		if (!updateTargetBVHCache(shapeCount))
+		{
+			this->outPotentialShapePairs()->resize(0);
+			this->outPotentialPatchPairs()->resize(0);
+			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
+			printf("[NeighborTriMeshQuery] Failed to update shape BVH cache.\n");
 			finishTiming();
 			return;
 		}
@@ -2318,37 +2387,12 @@ namespace dyno
 			shapeCount);
 		// Target to source shape mapping built
 
-		// Active target compaction is no longer needed in GPU-parallel middle phase.
-		// Build GPU-accessible BVH table
-		auto& shapeBVHs = this->inShapeBVHs()->constDataPtr();
-		if (mTargetBVHs.size() != (uint)shapeCount)
-			mTargetBVHs.resize(shapeCount);
-		if (mTargetBVHValid.size() != (uint)shapeCount)
-			mTargetBVHValid.resize(shapeCount);
-
-		CArray<LinearBVH<TDataType>> hTargetBVHs;
-		hTargetBVHs.resize(shapeCount);
-		CArray<int> hTargetBVHValid;
-		hTargetBVHValid.assign((uint)shapeCount, 0);
-
-		// TODO: move ouside
-		if (shapeBVHs != nullptr)
+		// BVH tables are cached in compute() and only rebuilt when source BVH input changes.
+		if (mTargetBVHs.size() != (uint)shapeCount || mTargetBVHValid.size() != (uint)shapeCount)
 		{
-			for (int i = 0; i < shapeCount; ++i)
-			{
-				if (i >= (int)shapeBVHs->size())
-					continue;
-				auto& bvh = (*shapeBVHs)[i];
-				if (!bvh)
-					continue;
-				hTargetBVHs[i] = *bvh;
-				int nodeCount = (int)bvh->getSortedAABBs().size();
-				hTargetBVHValid[i] = (nodeCount > 0 && (nodeCount % 2) == 1) ? 1 : 0;
-			}
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
 		}
-
-		mTargetBVHs.assign(hTargetBVHs);
-		mTargetBVHValid.assign(hTargetBVHValid);
 
 		int groupCountAll = (int)mTarget2SourceShapes.size(); // the number of groups
 		if (groupCountAll <= 0)
@@ -2479,6 +2523,7 @@ namespace dyno
 
 		DArray<uint> localBroadPhaseCounter;
 		localBroadPhaseCounter.resize(totalSource);
+		localBroadPhaseCounter.reset();
 
 		// Launch kernel to count BVH intersections for each source patch.
 		cuExecute((uint)totalSource,
@@ -2519,14 +2564,11 @@ namespace dyno
 		}
 
 		DArray<int> contactCount;
-		contactCount.resize(contactList.size());
-		contactCount.reset();
-
-		// Launch kernel to count contacts per source patch.
-		cuExecute(contactList.size(),
-			NLQ_CountContactList,
+		contactCount.resize(totalSource);
+		cuExecute((uint)totalSource,
+			NLQ_CopyCountU2I,
 			contactCount,
-			contactList);
+			localBroadPhaseCounter);
 
 		int totalPairs = mReduce.accumulate(contactCount.begin(), contactCount.size());
 		if (totalPairs <= 0)

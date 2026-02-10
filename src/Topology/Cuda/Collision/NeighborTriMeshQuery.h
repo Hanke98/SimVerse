@@ -130,6 +130,7 @@ namespace dyno
 		void narrowPhase();
 		bool updateShape2RigidBodyIds(int shapeCount);
 		bool updateShape2ElementIds(int shapeCount);
+		bool updateTargetBVHCache(int shapeCount);
 		bool buildPatchPairsFromContactList(int shapeCount, int patchCount);
 
 	private:
@@ -165,6 +166,9 @@ namespace dyno
 		DArray<LinearBVH<TDataType>> mTargetBVHs;
 		DArray<int> mTargetBVHValid;
 		std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> mPatchBroadPhaseCD;
+		std::shared_ptr<ShapeBVHList> mCachedShapeBVHs = nullptr;
+		int mCachedShapeBVHCount = -1;
+		bool mTargetBVHCacheReady = false;
 
 		bool mMappingReady = false;
 		bool mWarnedEmptyMapping = false;

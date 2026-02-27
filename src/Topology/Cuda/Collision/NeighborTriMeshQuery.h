@@ -128,6 +128,7 @@ namespace dyno
 		bool broadPhase();
 		bool middlePhase();
 		void narrowPhase();
+		bool updatePatchFaceLimitState(int patchCount);
 		bool updateShape2RigidBodyIds(int shapeCount);
 		bool updateShape2ElementIds(int shapeCount);
 		bool updateTargetBVHCache(int shapeCount);
@@ -150,8 +151,8 @@ namespace dyno
 		DArray<int> mTouchedShapeIds;
 		DArray<int> mTargetShapeCounts;
 		DArray<int> mTargetShapeOffsets;
-		DArray<int> mTargetShapeWrite;
 		DArray<int> mTarget2SourceShapes;
+		DArray<int> mSortedPairTargets;
 		DArray<Vec3f> mPatchRelCenterTrans;
 		DArray<Mat3f> mPatchRelRotationTrans;
 		DArray<Vec3f> mShapeRestT;
@@ -175,5 +176,12 @@ namespace dyno
 		bool mUseBroadPhasePatchPairs = false;
 		bool mWarnedEmptyPatchMapping = false;
 		bool mWarnedEmptyElementMapping = false;
+		bool mPatchFaceLimitReady = false;
+		bool mPatchFaceLimitValid = false;
+		bool mWarnedPatchFaceLimit = false;
+		int mCachedPatchCount = -1;
+		uint mCachedPatch2TriOffsetsSize = 0;
+		uint mCachedPatch2TriIndicesSize = 0;
+		int mCachedMaxPatchFaces = 0;
 	};
 }

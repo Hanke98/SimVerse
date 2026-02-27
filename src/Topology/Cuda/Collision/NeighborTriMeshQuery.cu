@@ -14,6 +14,7 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <thrust/sort.h>
 
 namespace dyno
 {
@@ -41,6 +42,8 @@ namespace dyno
 			devCount,
 			(int)errCnt);
 	}
+
+	static constexpr int NMQ_MaxPatchFaces = 32;
 
 	IMPLEMENT_TCLASS(NeighborTriMeshQuery, TDataType)
 
@@ -279,38 +282,7 @@ namespace dyno
 		group2GlobalOffsets[g] = target2SourceOffsets[target] + group2PatchOffsets[g];
 	}
 
-	__device__ inline int NLQ_FindGroupByOffset(
-		int idx,
-		const DArray<int>& group2GlobalOffsets,
-		const DArray<int>& group2PatchCounts)
-	{
-		int lo = 0;
-		int hi = (int)group2GlobalOffsets.size() - 1;
-		int res = -1;
-		while (lo <= hi)
-		{
-			int mid = (lo + hi) >> 1;
-			int start = group2GlobalOffsets[mid];
-			if (start <= idx)
-			{
-				res = mid;
-				lo = mid + 1;
-			}
-			else
-			{
-				hi = mid - 1;
-			}
-		}
-		if (res < 0)
-			return -1;
-		int start = group2GlobalOffsets[res];
-		int count = group2PatchCounts[res];
-		if (idx >= start && idx < (start + count))
-			return res;
-		return -1;
-	}
-
-	__global__ void NLQ_FillGroup2PatchData(
+	__global__ void NLQ_FillGroup2PatchDataByGroup(
 		DArray<AABB> outAabbs,
 		DArray<uint> outIds,
 		DArray<int> outTargetIds,
@@ -322,12 +294,8 @@ namespace dyno
 		DArray<int> group2TargetIds,
 		int patchCount)
 	{
-		int outIdx = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (outIdx >= outAabbs.size() || outIdx >= outIds.size() || outIdx >= outTargetIds.size())
-			return;
-
-		int g = NLQ_FindGroupByOffset(outIdx, group2GlobalOffsets, group2PatchCounts);
-		if (g < 0 || g >= groupedSources.size() || g >= group2TargetIds.size())
+		int g = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (g >= groupedSources.size() || g >= group2GlobalOffsets.size() || g >= group2PatchCounts.size() || g >= group2TargetIds.size())
 			return;
 
 		int target = group2TargetIds[g];
@@ -341,17 +309,23 @@ namespace dyno
 		if (sCount <= 0)
 			return;
 
-		int localIdx = outIdx - group2GlobalOffsets[g];
-		if (localIdx < 0 || localIdx >= sCount)
+		int outBegin = group2GlobalOffsets[g];
+		int outCount = group2PatchCounts[g];
+		if (outBegin < 0 || outCount <= 0)
 			return;
 
-		int srcIdx = sBegin + localIdx;
-		if (srcIdx < 0 || srcIdx >= patchAabbsWorld.size())
-			return;
+		int copyCount = sCount < outCount ? sCount : outCount;
+		for (int localIdx = 0; localIdx < copyCount; ++localIdx)
+		{
+			int outIdx = outBegin + localIdx;
+			int srcIdx = sBegin + localIdx;
+			if (outIdx >= outAabbs.size() || outIdx >= outIds.size() || outIdx >= outTargetIds.size() || srcIdx < 0 || srcIdx >= patchAabbsWorld.size())
+				break;
 
-		outAabbs[outIdx] = patchAabbsWorld[srcIdx];
-		outIds[outIdx] = (uint)srcIdx;
-		outTargetIds[outIdx] = target;
+			outAabbs[outIdx] = patchAabbsWorld[srcIdx];
+			outIds[outIdx] = (uint)srcIdx;
+			outTargetIds[outIdx] = target;
+		}
 	}
 
 		// Warp-per-patch: build source patch AABBs directly from triangles (current world) in target rest-world space.
@@ -426,56 +400,46 @@ namespace dyno
 			Vec3f localMax(-REAL_MAX);
 			int hasLocal = 0;
 
-			// One warp handles one patch; each lane iterates over triangles with stride 32.
-			for (int localTri = lane; localTri < triCountLocal; localTri += 32)
+			// One warp handles one patch; precondition from host check: triCountLocal <= 32.
+			if (lane < triCountLocal)
 			{
-				int triId = patch2TriIndices[start + localTri];
+				int triId = patch2TriIndices[start + lane];
 				bool triValid = (triId >= 0 && triId < triCount);
-				if (!triValid)
-					continue;
-
-				Triangle tri = triangles[triId];
-				int v0 = tri[0];
-				int v1 = tri[1];
-				int v2 = tri[2];
-
-				bool vValid = (v0 >= 0 && v0 < vertexCount
-					&& v1 >= 0 && v1 < vertexCount
-					&& v2 >= 0 && v2 < vertexCount);
-				if (!vValid)
-					continue;
-
-				// get triangle vertices
-				Vec3f p0c = vertices[v0];
-				Vec3f p1c = vertices[v1];
-				Vec3f p2c = vertices[v2];
-
-				// vertices:
-				// - current world (legacy): directly transform to target rest
-				// - rest world (static): transform to current world by source shape, then to target rest by target shape
-				if (verticesInRestWorld)
+				if (triValid)
 				{
-					p0c = RSource * p0c + tSource;
-					p1c = RSource * p1c + tSource;
-					p2c = RSource * p2c + tSource;
-				}
+					Triangle tri = triangles[triId];
+					int v0 = tri[0];
+					int v1 = tri[1];
+					int v2 = tri[2];
 
-				Vec3f p0 = RTargetT * (p0c - tTarget);
-				Vec3f p1 = RTargetT * (p1c - tTarget);
-				Vec3f p2 = RTargetT * (p2c - tTarget);
+					bool vValid = (v0 >= 0 && v0 < vertexCount
+						&& v1 >= 0 && v1 < vertexCount
+						&& v2 >= 0 && v2 < vertexCount);
+					if (vValid)
+					{
+						// get triangle vertices
+						Vec3f p0c = vertices[v0];
+						Vec3f p1c = vertices[v1];
+						Vec3f p2c = vertices[v2];
 
-				Vec3f triMin = p0.minimum(p1).minimum(p2);
-				Vec3f triMax = p0.maximum(p1).maximum(p2);
-				if (hasLocal == 0)
-				{
-					localMin = triMin;
-					localMax = triMax;
-					hasLocal = 1;
-				}
-				else
-				{
-					localMin = localMin.minimum(triMin);
-					localMax = localMax.maximum(triMax);
+						// vertices:
+						// - current world (legacy): directly transform to target rest
+						// - rest world (static): transform to current world by source shape, then to target rest by target shape
+						if (verticesInRestWorld)
+						{
+							p0c = RSource * p0c + tSource;
+							p1c = RSource * p1c + tSource;
+							p2c = RSource * p2c + tSource;
+						}
+
+						Vec3f p0 = RTargetT * (p0c - tTarget);
+						Vec3f p1 = RTargetT * (p1c - tTarget);
+						Vec3f p2 = RTargetT * (p2c - tTarget);
+
+						localMin = p0.minimum(p1).minimum(p2);
+						localMax = p0.maximum(p1).maximum(p2);
+						hasLocal = 1;
+					}
 				}
 			}
 
@@ -844,6 +808,55 @@ namespace dyno
 			groupedSources[out] = source;
 	}
 
+	__global__ void NLQ_ExtractSourceTargetFromShapePairs(
+		DArray<int> outTargets,
+		DArray<int> outSources,
+		DArray<Pair<uint, uint>> shapePairs,
+		int shapeCount)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= shapePairs.size() || tId >= outTargets.size() || tId >= outSources.size())
+			return;
+
+		Pair<uint, uint> pair = shapePairs[tId];
+		int source = (int)pair.first;
+		int target = (int)pair.second;
+		if (source < 0 || source >= shapeCount || target < 0 || target >= shapeCount)
+		{
+			outTargets[tId] = shapeCount;
+			outSources[tId] = -1;
+			return;
+		}
+
+		outTargets[tId] = target;
+		outSources[tId] = source;
+	}
+
+	__global__ void NLQ_CountTargetShapesFromSortedKeys(
+		DArray<int> targetCounts,
+		DArray<int> sortedTargets,
+		int shapeCount)
+	{
+		int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (tId >= sortedTargets.size())
+			return;
+
+		int target = sortedTargets[tId];
+		if (target < 0 || target >= shapeCount)
+			return;
+
+		int prev = (tId > 0) ? sortedTargets[tId - 1] : -1;
+		if (tId > 0 && prev == target)
+			return;
+
+		int end = tId + 1;
+		int N = (int)sortedTargets.size();
+		while (end < N && sortedTargets[end] == target)
+			++end;
+
+		targetCounts[target] = end - tId;
+	}
+
 	__global__ void NLQ_CopyCountU2I(
 		DArray<int> dst,
 		DArray<uint> src)
@@ -1108,7 +1121,7 @@ namespace dyno
 				// Only add if triId1 > triId0 to avoid duplicates and self-checks
 				if (triId1 <= triId0)
 					continue;
-				// Note: If list size reaches 32, subsequent insertions are ignored (capacity limit).
+				// Precondition: host-side validation guarantees patch face count <= 32.
 				list.insert(triId1);
 			}
 		}
@@ -1139,7 +1152,7 @@ namespace dyno
 				// Only add if triId0 > triId1 to avoid duplicates and self-checks
 				if (triId0 <= triId1)
 					continue;
-				// Note: If list size reaches 32, subsequent insertions are ignored (capacity limit).
+				// Precondition: host-side validation guarantees patch face count <= 32.
 				list.insert(triId0);
 			}
 		}
@@ -1826,6 +1839,73 @@ namespace dyno
 	}
 
 	template<typename TDataType>
+	bool NeighborTriMeshQuery<TDataType>::updatePatchFaceLimitState(int patchCount)
+	{
+		auto& patch2TriOffsets = this->inPatch2TriOffsets()->getData();
+		auto& patch2TriIndices = this->inPatch2TriIndices()->getData();
+
+		const uint offsetsSize = patch2TriOffsets.size();
+		const uint indicesSize = patch2TriIndices.size();
+
+		const bool needRebuild = (!mPatchFaceLimitReady)
+			|| (mCachedPatchCount != patchCount)
+			|| (mCachedPatch2TriOffsetsSize != offsetsSize)
+			|| (mCachedPatch2TriIndicesSize != indicesSize);
+
+		if (!needRebuild)
+			return mPatchFaceLimitValid;
+
+		mPatchFaceLimitReady = true;
+		mCachedPatchCount = patchCount;
+		mCachedPatch2TriOffsetsSize = offsetsSize;
+		mCachedPatch2TriIndicesSize = indicesSize;
+		mCachedMaxPatchFaces = 0;
+		mPatchFaceLimitValid = false;
+
+		if (patchCount <= 0 || offsetsSize < (uint)(patchCount + 1))
+			return false;
+
+		CArray<int> hPatch2TriOffsets;
+		hPatch2TriOffsets.assign(patch2TriOffsets);
+		if (hPatch2TriOffsets.size() < (uint)(patchCount + 1))
+			return false;
+
+		int maxPatchFaces = 0;
+		const int patchTriCount = (int)indicesSize;
+		auto clampHost = [](int v, int lo, int hi) {
+			return v < lo ? lo : (v > hi ? hi : v);
+		};
+		for (int p = 0; p < patchCount; ++p)
+		{
+			int begin = hPatch2TriOffsets[p];
+			int end = hPatch2TriOffsets[p + 1];
+			begin = clampHost(begin, 0, patchTriCount);
+			end = clampHost(end, 0, patchTriCount);
+			if (end < begin)
+			{
+				int tmp = begin;
+				begin = end;
+				end = tmp;
+			}
+			int count = end - begin;
+			if (count > maxPatchFaces)
+				maxPatchFaces = count;
+		}
+
+		mCachedMaxPatchFaces = maxPatchFaces;
+		mPatchFaceLimitValid = (maxPatchFaces <= NMQ_MaxPatchFaces);
+		if (!mPatchFaceLimitValid && !mWarnedPatchFaceLimit)
+		{
+			printf("[NeighborTriMeshQuery] patch face count overflow (max=%d, limit=%d), skip this frame.\n",
+				mCachedMaxPatchFaces,
+				NMQ_MaxPatchFaces);
+			mWarnedPatchFaceLimit = true;
+		}
+
+		return mPatchFaceLimitValid;
+	}
+
+	template<typename TDataType>
 	void NeighborTriMeshQuery<TDataType>::compute()
 	{
 		CTimer timer;
@@ -2218,6 +2298,10 @@ namespace dyno
 		// printf("[NeighborTriMeshQuery] MiddlePhase started.\n");
 		NewTimer middleTimer;
 		middleTimer.start();
+		double bvhQueryMs = 0.0;
+		double listResizeMs = 0.0;
+		double prefixScanMs = 0.0;
+		NewTimer stageTimer;
 
 		// Get potential shape pairs from broad phase
 		auto& shapePairs = this->outPotentialShapePairs()->getData();
@@ -2245,22 +2329,27 @@ namespace dyno
 			return false;
 		}
 
-		auto ts = this->inTriangleSet()->constDataPtr();
-		if (ts == nullptr)
-		{
-			this->outPotentialPatchPairs()->resize(0);
-			return false;
-		}
-		auto& vertices = ts->getPoints();
-		auto& triIndices = ts->triangleIndices();
-		int triCount = (int)triIndices.size();
-		int vertexCount = (int)vertices.size();
-		if (triCount <= 0 || vertexCount <= 0)
-		{
-			this->outPotentialPatchPairs()->resize(0);
-			return false;
-		}
-		int patchTriCount = (int)patch2TriIndices.size();
+			auto ts = this->inTriangleSet()->constDataPtr();
+			if (ts == nullptr)
+			{
+				this->outPotentialPatchPairs()->resize(0);
+				return false;
+			}
+			auto& vertices = ts->getPoints();
+			auto& triIndices = ts->triangleIndices();
+			int triCount = (int)triIndices.size();
+			int vertexCount = (int)vertices.size();
+			if (triCount <= 0 || vertexCount <= 0)
+			{
+				this->outPotentialPatchPairs()->resize(0);
+				return false;
+			}
+			int patchTriCount = (int)patch2TriIndices.size();
+			if (!updatePatchFaceLimitState(patchCount))
+			{
+				this->outPotentialPatchPairs()->resize(0);
+				return false;
+			}
 
 		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
 		if (shapeCount <= 0)
@@ -2353,39 +2442,48 @@ namespace dyno
 			mTargetShapeCounts.resize(shapeCount);
 		mTargetShapeCounts.reset();
 
-		// Count how many souce shapes each target shape has from shapePairs
-		// Launch kernel to count target shapes per shape pair.
-		cuExecute(shapePairs.size(),
-			NLQ_CountTargetShapes,
-			mTargetShapeCounts,
+		int shapePairCount = (int)shapePairs.size();
+		if (shapePairCount <= 0)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+
+		if (mSortedPairTargets.size() != (uint)shapePairCount)
+			mSortedPairTargets.resize(shapePairCount);
+		if (mTarget2SourceShapes.size() != (uint)shapePairCount)
+			mTarget2SourceShapes.resize(shapePairCount);
+
+		cuExecute((uint)shapePairCount,
+			NLQ_ExtractSourceTargetFromShapePairs,
+			mSortedPairTargets,
+			mTarget2SourceShapes,
 			shapePairs,
 			shapeCount);
+		if (!NMQ_CheckCuda("NLQ_ExtractSourceTargetFromShapePairs"))
+			return false;
+
+		thrust::sort_by_key(
+			thrust::device,
+			mSortedPairTargets.begin(),
+			mSortedPairTargets.begin() + mSortedPairTargets.size(),
+			mTarget2SourceShapes.begin());
+		if (!NMQ_CheckCuda("sort_by_target"))
+			return false;
+
+		cuExecute((uint)shapePairCount,
+			NLQ_CountTargetShapesFromSortedKeys,
+			mTargetShapeCounts,
+			mSortedPairTargets,
+			shapeCount);
+		if (!NMQ_CheckCuda("NLQ_CountTargetShapesFromSortedKeys"))
+			return false;
 		// Target shape counts computed
 		// Exclusive scan to build target shape offsets
 		if (mTargetShapeOffsets.size() != (uint)shapeCount)
 			mTargetShapeOffsets.resize(shapeCount);
 		mTargetShapeOffsets.assign(mTargetShapeCounts);
 		mScan.exclusive(mTargetShapeOffsets, true);
-
-		// Build target shape write flags and target->source shape mapping
-		if (mTargetShapeWrite.size() != (uint)shapeCount)
-			mTargetShapeWrite.resize(shapeCount);
-		mTargetShapeWrite.reset(); 
-
-		if (mTarget2SourceShapes.size() != shapePairs.size())
-			mTarget2SourceShapes.resize(shapePairs.size());
-		mTarget2SourceShapes.reset();
-
-		// Group source shapes by target shapes from shapePairs
-		// Launch kernel to group source shapes by target.
-		cuExecute(shapePairs.size(),
-			NLQ_GroupShapePairsByTarget,
-			mTarget2SourceShapes,
-			mTargetShapeOffsets,
-			mTargetShapeWrite,
-			shapePairs,
-			shapeCount);
-		// Target to source shape mapping built
 
 		// BVH tables are cached in compute() and only rebuilt when source BVH input changes.
 		if (mTargetBVHs.size() != (uint)shapeCount || mTargetBVHValid.size() != (uint)shapeCount)
@@ -2394,7 +2492,7 @@ namespace dyno
 			return false;
 		}
 
-		int groupCountAll = (int)mTarget2SourceShapes.size(); // the number of groups
+		int groupCountAll = mReduce.accumulate(mTargetShapeCounts.begin(), mTargetShapeCounts.size()); // number of valid (target, source-shape) groups
 		if (groupCountAll <= 0)
 		{
 			this->outPotentialPatchPairs()->resize(0);
@@ -2471,8 +2569,8 @@ namespace dyno
 			mSource2TargetIds.resize(totalSource);
 
 		// Launch kernel to fill global source patch arrays (patch-level).
-		cuExecute((uint)totalSource,
-			NLQ_FillGroup2PatchData,
+		cuExecute((uint)groupCountAll,
+			NLQ_FillGroup2PatchDataByGroup,
 			mSourcePatchAabbs,
 			mSource2PatchIds,
 			mSource2TargetIds,
@@ -2525,6 +2623,7 @@ namespace dyno
 		localBroadPhaseCounter.resize(totalSource);
 		localBroadPhaseCounter.reset();
 
+		stageTimer.start();
 		// Launch kernel to count BVH intersections for each source patch.
 		cuExecute((uint)totalSource,
 			NLQ_RequestIntersectionNumberBVH,
@@ -2537,11 +2636,17 @@ namespace dyno
 			patchAabbs);
 		if (!NMQ_CheckCuda("NLQ_RequestIntersectionNumberBVH"))
 			return false;
-
-		DArrayList<int> contactList;
-		contactList.resize(localBroadPhaseCounter);
-
 		// Launch kernel to fetch BVH intersection ids for each source patch.
+		DArrayList<int> contactList;
+		stageTimer.stop();
+		bvhQueryMs += stageTimer.elapsedMilliseconds();
+
+		stageTimer.start();
+		contactList.resize(localBroadPhaseCounter);
+		stageTimer.stop();
+		listResizeMs += stageTimer.elapsedMilliseconds();
+
+		stageTimer.start();
 		cuExecute((uint)totalSource,
 			NLQ_RequestIntersectionIdsBVH,
 			contactList,
@@ -2553,6 +2658,8 @@ namespace dyno
 			patchAabbs);
 		if (!NMQ_CheckCuda("NLQ_RequestIntersectionIdsBVH"))
 			return false;
+		stageTimer.stop();
+		bvhQueryMs += stageTimer.elapsedMilliseconds();
 
 		// printf("[NeighborTriMeshQuery] middle phase contacts=%u (lists=%u)\n",
 			// (unsigned int)contactList.elementSize(),
@@ -2580,9 +2687,15 @@ namespace dyno
 
 		DArray<int> contactCountCpy;
 		contactCountCpy.assign(contactCount);
+		stageTimer.start();
 		mScan.exclusive(contactCount, true);
+		stageTimer.stop();
+		prefixScanMs += stageTimer.elapsedMilliseconds();
 
+		stageTimer.start();
 		this->outPotentialPatchPairs()->resize(totalPairs);
+		stageTimer.stop();
+		listResizeMs += stageTimer.elapsedMilliseconds();
 		// Launch kernel to write patch pairs from contact lists.
 		cuExecute(contactList.size(),
 			NLQ_SetPatchPairsFromContactList,
@@ -2600,6 +2713,13 @@ namespace dyno
 		// std::cout << "[NeighborTriMeshQuery] middlePhase found " << totalPairs << " patch pairs." << std::endl;
 		// printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
 		middleTimer.stop();
+		std::cout << "[NeighborTriMeshQuery] middle phase breakdown: BVH query="
+			<< bvhQueryMs
+			<< " ms, list resize="
+			<< listResizeMs
+			<< " ms, prefix-scan="
+			<< prefixScanMs
+			<< " ms" << std::endl;
 		std::cout << "[NeighborTriMeshQuery] compute middle phase time: " << middleTimer.elapsedMilliseconds() << " ms" << std::endl;
 		
 		return true;
@@ -2625,6 +2745,13 @@ namespace dyno
 
 		int patchCount = (int)this->inPatchAABBs()->size();
 		if (patch2TriOffsets.size() < (uint)(patchCount + 1) || patch2TriIndices.size() == 0)
+		{
+			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
+			return;
+		}
+		if (!updatePatchFaceLimitState(patchCount))
 		{
 			this->outContacts()->resize(0);
 			this->triSet->clear();
@@ -2679,9 +2806,8 @@ namespace dyno
 		mScan.exclusive(triListOffsets, true);
 
 		DArrayList<int> triContactList;
-		// Resize each list to capacity 32. Unused slots contain undefined values but are ignored by size().
-		// TODO: To optimize memory, a CSR approach could be used to build a compact array. However, maybe it will slow down the performance?
-		triContactList.resize((uint)totalTriLists, 32);
+		// Precondition: host-side validation guarantees each patch has <= 32 faces.
+		triContactList.resize((uint)totalTriLists, NMQ_MaxPatchFaces);
 
 		DArray<int> triListTriIds;
 		DArray<int> triListPairIds;

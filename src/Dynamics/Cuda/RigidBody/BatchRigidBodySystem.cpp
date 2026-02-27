@@ -352,10 +352,35 @@ namespace dyno
 
         auto TransformAABB = [&](const AABB& aabb, const Transform3f& T) -> AABB
         {
-            AABB out;
-            out.v0 = aabb.v0 + T.translation();
-            out.v1 = aabb.v1 + T.translation();
+            const Vec3f corners[8] = {
+                Vec3f(aabb.v0[0], aabb.v0[1], aabb.v0[2]),
+                Vec3f(aabb.v1[0], aabb.v0[1], aabb.v0[2]),
+                Vec3f(aabb.v0[0], aabb.v1[1], aabb.v0[2]),
+                Vec3f(aabb.v1[0], aabb.v1[1], aabb.v0[2]),
+                Vec3f(aabb.v0[0], aabb.v0[1], aabb.v1[2]),
+                Vec3f(aabb.v1[0], aabb.v0[1], aabb.v1[2]),
+                Vec3f(aabb.v0[0], aabb.v1[1], aabb.v1[2]),
+                Vec3f(aabb.v1[0], aabb.v1[1], aabb.v1[2])
+            };
 
+            Vec3f p0 = T.rotation() * corners[0] + T.translation();
+            Vec3f lo = p0;
+            Vec3f hi = p0;
+
+            for (int i = 1; i < 8; ++i)
+            {
+                Vec3f p = T.rotation() * corners[i] + T.translation();
+                lo[0] = lo[0] < p[0] ? lo[0] : p[0];
+                lo[1] = lo[1] < p[1] ? lo[1] : p[1];
+                lo[2] = lo[2] < p[2] ? lo[2] : p[2];
+                hi[0] = hi[0] > p[0] ? hi[0] : p[0];
+                hi[1] = hi[1] > p[1] ? hi[1] : p[1];
+                hi[2] = hi[2] > p[2] ? hi[2] : p[2];
+            }
+
+            AABB out;
+            out.v0 = lo;
+            out.v1 = hi;
             return out;
         };
         

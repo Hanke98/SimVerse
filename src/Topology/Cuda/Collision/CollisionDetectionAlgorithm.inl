@@ -2304,7 +2304,7 @@ namespace dyno
             return true;
         };
 
-        if (handleCoplanarOverlap()) return;
+        // if (handleCoplanarOverlap()) return;
         
         // Minkowski Face Normal
         // tri face

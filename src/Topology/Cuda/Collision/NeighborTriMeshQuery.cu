@@ -8,11 +8,16 @@
 #include "Vector/Vector3D.h"
 #include "Timer.h"
 #include "NewTimer.h"
+#include <algorithm>
 #include <cmath>
 #include <cassert>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <sstream>
+#include <string>
 #include <vector>
 #include <thrust/sort.h>
 
@@ -20,7 +25,7 @@ namespace dyno
 {
 	static inline bool NMQ_CheckCuda(const char* tag)
 	{
-		cudaError_t err = cudaDeviceSynchronize();
+		cudaError_t err = cudaPeekAtLastError();
 		if (err != cudaSuccess)
 		{
 			printf("[NeighborTriMeshQuery][CUDA] %s: %s\n", tag, cudaGetErrorString(err));
@@ -29,20 +34,8 @@ namespace dyno
 		return true;
 	}
 
-	static inline void NMQ_PrintCudaContext(const char* tag)
-	{
-		int dev = -1;
-		int devCount = 0;
-		cudaError_t errDev = cudaGetDevice(&dev);
-		cudaError_t errCnt = cudaGetDeviceCount(&devCount);
-		printf("[NeighborTriMeshQuery][CUDA] %s: device=%d (err=%d), deviceCount=%d (err=%d)\n",
-			tag,
-			dev,
-			(int)errDev,
-			devCount,
-			(int)errCnt);
-	}
-
+	// Hard cap for triangles per patch in narrow/middle phase temporary buffers.
+	// This matches one warp (32 lanes), so one lane can process one triangle candidate.
 	static constexpr int NMQ_MaxPatchFaces = 32;
 
 	IMPLEMENT_TCLASS(NeighborTriMeshQuery, TDataType)
@@ -985,23 +978,6 @@ namespace dyno
 		}
 	}
 
-	__global__ void NLQ_BuildPatch2Shape(
-		DArray<uint> patch2Shape,
-		DArray<int> shape2PatchOffsets,
-		int patchCount)
-	{
-		int shapeId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (shapeId + 1 >= shape2PatchOffsets.size()) return;
-
-		int start = NLQ_ClampInt(shape2PatchOffsets[shapeId], 0, patchCount);
-		int end = NLQ_ClampInt(shape2PatchOffsets[shapeId + 1], 0, patchCount);
-
-		for (int p = start; p < end; ++p)
-		{
-			patch2Shape[p] = (uint)shapeId;
-		}
-	}
-
 	// Calculate the number of triangle-lists to be generated for each patch pair.
 	// For a pair of patches (P0, P1) with N0 and N1 triangles respectively:
 	// We generate N0 lists (one for each triangle in P0 checking against all in P1)
@@ -1414,8 +1390,6 @@ namespace dyno
 	template<typename TDataType>
 	NeighborTriMeshQuery<TDataType>::NeighborTriMeshQuery()
 		: NeighborElementQuery<TDataType>()
-	// NeighborTriMeshQuery<TDataType>::NeighborTriMeshQuery()
-	// 	: NeighborElementQuery<TDataType>()
 	{
 		this->inAdjacentShapes()->tagOptional(true);
 		// this->inShape2PatchCounts()->tagOptional(true);
@@ -1424,7 +1398,7 @@ namespace dyno
 		this->inShapeBVHs()->tagOptional(true);
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
-		this->varDHead()->setValue(Real(0.05));
+		this->varDHead()->setValue(Real(0.0));
 	}
 
 	template<typename TDataType>
@@ -1441,6 +1415,158 @@ namespace dyno
 				}
 			}
 		}
+
+		clearWorkspace();
+	}
+
+	template<typename TDataType>
+	bool NeighborTriMeshQuery<TDataType>::setStaticShape2PatchOffsets(const std::vector<int>& offsets)
+	{
+		mShape2PatchOffsets.clear();
+		mStaticShape2PatchOffsetsReady = false;
+		mPatch2Shape.clear();
+		mStaticPatch2ShapeReady = false;
+		mTargetBVHs.clear();
+		mTargetBVHValid.clear();
+		mStaticTargetBVHCacheReady = false;
+
+		if (offsets.size() < 2)
+		{
+			printf("[NeighborTriMeshQuery] Invalid Shape2PatchOffsets: size=%zu (<2).\n", offsets.size());
+			return false;
+		}
+		if (offsets[0] != 0)
+		{
+			printf("[NeighborTriMeshQuery] Invalid Shape2PatchOffsets: offsets[0]=%d (expected 0).\n", offsets[0]);
+			return false;
+		}
+		for (size_t i = 0; i < offsets.size(); ++i)
+		{
+			if (offsets[i] < 0)
+			{
+				printf("[NeighborTriMeshQuery] Invalid Shape2PatchOffsets: offsets[%zu]=%d (<0).\n", i, offsets[i]);
+				return false;
+			}
+			if (i > 0 && offsets[i] < offsets[i - 1])
+			{
+				printf("[NeighborTriMeshQuery] Invalid Shape2PatchOffsets: non-monotonic at [%zu]=%d < [%zu]=%d.\n",
+					i,
+					offsets[i],
+					i - 1,
+					offsets[i - 1]);
+				return false;
+			}
+		}
+
+		mShape2PatchOffsets.assign(offsets);
+		mStaticShape2PatchOffsetsReady = true;
+		return true;
+	}
+
+	template<typename TDataType>
+	bool NeighborTriMeshQuery<TDataType>::setStaticPatch2Shape(const std::vector<uint>& patch2Shape)
+	{
+		mPatch2Shape.clear();
+		mStaticPatch2ShapeReady = false;
+
+		if (!mStaticShape2PatchOffsetsReady || mShape2PatchOffsets.size() < 2)
+		{
+			printf("[NeighborTriMeshQuery] Invalid setStaticPatch2Shape call: Shape2PatchOffsets not ready.\n");
+			return false;
+		}
+
+		const int shapeCount = (int)mShape2PatchOffsets.size() - 1;
+		if (shapeCount <= 0)
+		{
+			printf("[NeighborTriMeshQuery] Invalid Shape2PatchOffsets for Patch2Shape: shapeCount=%d.\n", shapeCount);
+			return false;
+		}
+
+		CArray<int> hShape2PatchOffsets;
+		hShape2PatchOffsets.assign(mShape2PatchOffsets);
+		const int expectedPatchCount = hShape2PatchOffsets[hShape2PatchOffsets.size() - 1];
+		if (expectedPatchCount < 0)
+		{
+			printf("[NeighborTriMeshQuery] Invalid Shape2PatchOffsets for Patch2Shape: back=%d (<0).\n",
+				expectedPatchCount);
+			return false;
+		}
+
+		if ((int)patch2Shape.size() != expectedPatchCount)
+		{
+			printf("[NeighborTriMeshQuery] Invalid Patch2Shape size: expected=%d, actual=%zu.\n",
+				expectedPatchCount,
+				patch2Shape.size());
+			return false;
+		}
+
+		for (int patchId = 0; patchId < expectedPatchCount; ++patchId)
+		{
+			const uint shapeId = patch2Shape[patchId];
+			if (shapeId >= (uint)shapeCount)
+			{
+				printf("[NeighborTriMeshQuery] Invalid Patch2Shape[%d]=%u (shapeCount=%d).\n",
+					patchId,
+					(unsigned int)shapeId,
+					shapeCount);
+				return false;
+			}
+		}
+
+		mPatch2Shape.assign(patch2Shape);
+		mStaticPatch2ShapeReady = true;
+		return true;
+	}
+
+	template<typename TDataType>
+	bool NeighborTriMeshQuery<TDataType>::setStaticTargetBVHCache(const ShapeBVHList& shapeBVHs)
+	{
+		mTargetBVHs.clear();
+		mTargetBVHValid.clear();
+		mStaticTargetBVHCacheReady = false;
+
+		if (!mStaticShape2PatchOffsetsReady || mShape2PatchOffsets.size() < 2)
+		{
+			printf("[NeighborTriMeshQuery] Invalid setStaticTargetBVHCache call: Shape2PatchOffsets not ready.\n");
+			return false;
+		}
+
+		const int shapeCount = (int)mShape2PatchOffsets.size() - 1;
+		if (shapeCount <= 0)
+		{
+			printf("[NeighborTriMeshQuery] Invalid Shape2PatchOffsets for TargetBVH cache: shapeCount=%d.\n", shapeCount);
+			return false;
+		}
+
+		CArray<LinearBVH<TDataType>> hTargetBVHs;
+		hTargetBVHs.resize(shapeCount);
+		CArray<int> hTargetBVHValid;
+		hTargetBVHValid.assign((uint)shapeCount, 0);
+
+		int copyCount = shapeCount;
+		if (copyCount > (int)shapeBVHs.size())
+			copyCount = (int)shapeBVHs.size();
+
+		for (int i = 0; i < copyCount; ++i)
+		{
+			auto& bvh = shapeBVHs[i];
+			if (!bvh)
+				continue;
+
+			hTargetBVHs[i] = *bvh;
+			int nodeCount = (int)bvh->getSortedAABBs().size();
+			hTargetBVHValid[i] = (nodeCount > 0 && (nodeCount % 2) == 1) ? 1 : 0;
+		}
+
+		if (mTargetBVHs.size() != (uint)shapeCount)
+			mTargetBVHs.resize(shapeCount);
+		if (mTargetBVHValid.size() != (uint)shapeCount)
+			mTargetBVHValid.resize(shapeCount);
+
+		mTargetBVHs.assign(hTargetBVHs);
+		mTargetBVHValid.assign(hTargetBVHValid);
+		mStaticTargetBVHCacheReady = true;
+		return true;
 	}
 
 	// template<typename TDataType>
@@ -1552,228 +1678,6 @@ namespace dyno
 	// }
 
 	template<typename TDataType>
-	bool NeighborTriMeshQuery<TDataType>::updateShape2ElementIds(int shapeCount)
-	{
-		if (shapeCount <= 0)
-			return false;
-
-		// const uint invalidElementId = static_cast<uint>(-1);
-
-		// if (!this->inShape2ElementIds()->isEmpty())
-		// {
-		// 	auto& pairs = this->inShape2ElementIds()->getData();
-		// 	if (pairs.size() != (uint)shapeCount)
-		// 	{
-		// 		if (!mWarnedEmptyElementMapping)
-		// 		{
-		// 			printf("[NeighborTriMeshQuery] Shape2ElementIds size mismatch (shapeCount=%d, pairCount=%u), skip this frame.\n",
-		// 				shapeCount,
-		// 				(unsigned int)pairs.size());
-		// 			mWarnedEmptyElementMapping = true;
-		// 		}
-		// 		return false;
-		// 	}
-
-		// 	CArray<Pair<uint, uint>> hostPairs;
-		// 	hostPairs.assign(pairs);
-
-		// 	std::vector<int> shape2ElementIds(shapeCount, -1);
-		// 	bool warnedDuplicate = false;
-		// 	bool warnedOutOfRange = false;
-		// 	for (uint i = 0; i < hostPairs.size(); ++i)
-		// 	{
-		// 		uint shapeId = hostPairs[i].first;
-		// 		uint elementId = hostPairs[i].second;
-
-		// 		if (elementId == invalidElementId)
-		// 			continue;
-		// 		if (shapeId >= (uint)shapeCount)
-		// 		{
-		// 			if (!warnedOutOfRange)
-		// 			{
-		// 				printf("[NeighborTriMeshQuery] Shape2ElementPairs has out-of-range shapeId=%u (shapeCount=%d), skipping.\n",
-		// 					shapeId, shapeCount);
-		// 				warnedOutOfRange = true;
-		// 			}
-		// 			continue;
-		// 		}
-
-		// 		if (shape2ElementIds[shapeId] >= 0 && !warnedDuplicate)
-		// 		{
-		// 			printf("[NeighborTriMeshQuery] Shape2ElementPairs has duplicate shapeId=%u, overwriting.\n", shapeId);
-		// 			warnedDuplicate = true;
-		// 		}
-		// 		shape2ElementIds[shapeId] = (int)elementId;
-		// 	}
-
-		// 	bool allReady = true;
-		// 	for (int i = 0; i < shapeCount; ++i)
-		// 	{
-		// 		if (shape2ElementIds[i] < 0)
-		// 			allReady = false;
-		// 	}
-
-		// 	if (!allReady)
-		// 	{
-		// 		if (!mWarnedEmptyElementMapping)
-		// 		{
-		// 			printf("[NeighborTriMeshQuery] Shape2ElementMapping incomplete (shapeCount=%d), skip this frame.\n", shapeCount);
-		// 			mWarnedEmptyElementMapping = true;
-		// 		}
-		// 		return false;
-		// 	}
-
-			// auto topo = this->inDiscreteElements()->getDataPtr();
-			// if (topo == nullptr)
-			// {
-			// 	if (!mWarnedEmptyElementMapping)
-			// 	{
-			// 		printf("[NeighborTriMeshQuery] Shape2ElementMapping not ready yet (topology unavailable, shapeCount=%d), skip this frame.\n",
-			// 			shapeCount);
-			// 		mWarnedEmptyElementMapping = true;
-			// 	}
-			// 	return false;
-			// }
-
-			// auto& mapping = topo->shape2RigidBodyMapping();
-			// if (mapping.size() == 0)
-			// {
-			// 	if (!mWarnedEmptyMapping)
-			// 	{
-			// 		printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (shapeCount=%d, mappingSize=%u), skip this frame.\n",
-			// 			shapeCount,
-			// 			(unsigned int)mapping.size());
-			// 		mWarnedEmptyMapping = true;
-			// 	}
-			// 	return false;
-			// }
-
-			// CArray<Pair<uint, uint>> hostMapping;
-			// hostMapping.assign(mapping);
-
-			// uint totalSize = topo->totalSize();
-			// if (totalSize == 0)
-			// {
-			// 	if (!mWarnedEmptyMapping)
-			// 	{
-			// 		printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping not ready yet (totalSize=0), skip this frame.\n");
-			// 		mWarnedEmptyMapping = true;
-			// 	}
-			// 	return false;
-			// }
-
-			// std::vector<int> element2Rigid(totalSize, -1);
-			// for (uint i = 0; i < hostMapping.size(); ++i)
-			// {
-			// 	uint elementId = hostMapping[i].first;
-			// 	if (elementId < totalSize)
-			// 		element2Rigid[elementId] = (int)hostMapping[i].second;
-			// }
-
-			// std::vector<int> shape2RigidBodyIds(shapeCount, -1);
-			// bool rigidReady = true;
-			// for (int i = 0; i < shapeCount; ++i)
-			// {
-			// 	int elementId = shape2ElementIds[i];
-			// 	if (elementId < 0 || (uint)elementId >= totalSize)
-			// 	{
-			// 		rigidReady = false;
-			// 		continue;
-			// 	}
-			// 	int bodyId = element2Rigid[elementId];
-			// 	if (bodyId < 0)
-			// 	{
-			// 		rigidReady = false;
-			// 		continue;
-			// 	}
-			// 	shape2RigidBodyIds[i] = bodyId;
-			// }
-
-			// if (!rigidReady)
-			// {
-			// 	if (!mWarnedEmptyMapping)
-			// 	{
-			// 		printf("[NeighborTriMeshQuery] Shape2RigidBodyMapping incomplete (shapeCount=%d), skip this frame.\n", shapeCount);
-			// 		mWarnedEmptyMapping = true;
-			// 	}
-			// 	return false;
-			// }
-
-			// mShape2ElementIds.assign(shape2ElementIds);
-			// mShape2RigidBodyIds.assign(shape2RigidBodyIds);
-		// 	mWarnedEmptyElementMapping = false;
-		// 	mWarnedEmptyMapping = false;
-		// 	mMappingReady = true;
-
-		// 	return true;
-		// } else {
-		// 	printf("[NeighborTriMeshQuery] Shape2ElementIds input is empty, skip this frame.\n");
-		// 	return false;
-		// }
-
-		// Move to BatchRigidBodySystem.cpp
-		mShape2ElementIds.assign(this->inShape2ElementIdsDense()->getData());
-		mShape2RigidBodyIds.assign(this->inShape2RigidBodyIds()->getData());
-		return true;
-	}
-
-	template<typename TDataType>
-	bool NeighborTriMeshQuery<TDataType>::updateTargetBVHCache(int shapeCount)
-	{
-		if (shapeCount <= 0)
-			return false;
-
-		auto& shapeBVHs = this->inShapeBVHs()->constDataPtr();
-		int hostCount = shapeBVHs != nullptr ? (int)shapeBVHs->size() : 0;
-
-		bool needRebuild = !mTargetBVHCacheReady;
-		needRebuild = needRebuild || mCachedShapeBVHs != shapeBVHs;
-		needRebuild = needRebuild || mCachedShapeBVHCount != hostCount;
-		needRebuild = needRebuild || mTargetBVHs.size() != (uint)shapeCount;
-		needRebuild = needRebuild || mTargetBVHValid.size() != (uint)shapeCount;
-
-		if (!needRebuild)
-			return true;
-
-		CArray<LinearBVH<TDataType>> hTargetBVHs;
-		hTargetBVHs.resize(shapeCount);
-		CArray<int> hTargetBVHValid;
-		hTargetBVHValid.assign((uint)shapeCount, 0);
-
-		if (shapeBVHs != nullptr)
-		{
-			int copyCount = shapeCount;
-			if (copyCount > (int)shapeBVHs->size())
-				copyCount = (int)shapeBVHs->size();
-
-			for (int i = 0; i < copyCount; ++i)
-			{
-				auto& bvh = (*shapeBVHs)[i];
-				if (!bvh)
-					continue;
-
-				hTargetBVHs[i] = *bvh;
-				int nodeCount = (int)bvh->getSortedAABBs().size();
-				hTargetBVHValid[i] = (nodeCount > 0 && (nodeCount % 2) == 1) ? 1 : 0;
-			}
-		}
-
-		if (mTargetBVHs.size() != (uint)shapeCount)
-			mTargetBVHs.resize(shapeCount);
-		if (mTargetBVHValid.size() != (uint)shapeCount)
-			mTargetBVHValid.resize(shapeCount);
-
-		mTargetBVHs.assign(hTargetBVHs);
-		mTargetBVHValid.assign(hTargetBVHValid);
-
-		mCachedShapeBVHs = shapeBVHs;
-		mCachedShapeBVHCount = hostCount;
-		mTargetBVHCacheReady = true;
-
-		return true;
-	}
-
-	template<typename TDataType>
 	bool NeighborTriMeshQuery<TDataType>::buildPatchPairsFromContactList(int shapeCount, int patchCount)
 	{
 		auto& shapePairs = this->outPotentialShapePairs()->getData();
@@ -1841,12 +1745,15 @@ namespace dyno
 	template<typename TDataType>
 	bool NeighborTriMeshQuery<TDataType>::updatePatchFaceLimitState(int patchCount)
 	{
+		// Host-side guard for kernels that assume "one patch <= one warp".
+		// If a patch has more than NMQ_MaxPatchFaces triangles, we skip this frame safely.
 		auto& patch2TriOffsets = this->inPatch2TriOffsets()->getData();
 		auto& patch2TriIndices = this->inPatch2TriIndices()->getData();
 
 		const uint offsetsSize = patch2TriOffsets.size();
 		const uint indicesSize = patch2TriIndices.size();
 
+		// Cache by sizes/counts to avoid CPU readback every frame when inputs are unchanged.
 		const bool needRebuild = (!mPatchFaceLimitReady)
 			|| (mCachedPatchCount != patchCount)
 			|| (mCachedPatch2TriOffsetsSize != offsetsSize)
@@ -1906,8 +1813,71 @@ namespace dyno
 	}
 
 	template<typename TDataType>
+	void NeighborTriMeshQuery<TDataType>::ensureMiddleWorkspace(int totalSource)
+	{
+		// Allocate per-source-patch temporaries used by middle phase BVH query and compaction.
+		if (totalSource <= 0)
+			return;
+
+		if (mMiddleLocalBroadPhaseCounter.size() != (uint)totalSource)
+			mMiddleLocalBroadPhaseCounter.resize(totalSource);
+		if (mMiddleContactCount.size() != (uint)totalSource)
+			mMiddleContactCount.resize(totalSource);
+		if (mMiddleContactCountCpy.size() != (uint)totalSource)
+			mMiddleContactCountCpy.resize(totalSource);
+		if (mMiddleContactList.size() != (uint)totalSource)
+			mMiddleContactList.resize((uint)totalSource);
+	}
+
+	template<typename TDataType>
+	void NeighborTriMeshQuery<TDataType>::ensureNarrowWorkspace(int totalTriLists)
+	{
+		// Allocate per-triangle-list temporaries used by narrow phase.
+		if (totalTriLists <= 0)
+			return;
+
+		if (mNarrowTriListOffsets.size() != (uint)totalTriLists)
+			mNarrowTriListOffsets.resize(totalTriLists);
+		if (mNarrowTriListTriIds.size() != (uint)totalTriLists)
+			mNarrowTriListTriIds.resize(totalTriLists);
+		if (mNarrowTriListPairIds.size() != (uint)totalTriLists)
+			mNarrowTriListPairIds.resize(totalTriLists);
+		if (mNarrowTriListSide.size() != (uint)totalTriLists)
+			mNarrowTriListSide.resize(totalTriLists);
+		if (mNarrowTriContactCounts.size() != (uint)totalTriLists)
+			mNarrowTriContactCounts.resize(totalTriLists);
+		if (mNarrowTriContactOffsets.size() != (uint)totalTriLists)
+			mNarrowTriContactOffsets.resize(totalTriLists);
+		if (mNarrowTriContactList.size() != (uint)totalTriLists)
+			// Each list stores candidate triangles from the opposite patch; bounded by warp-sized patch face limit.
+			mNarrowTriContactList.resize((uint)totalTriLists, NMQ_MaxPatchFaces);
+	}
+
+	template<typename TDataType>
+	void NeighborTriMeshQuery<TDataType>::clearWorkspace()
+	{
+		mMiddleLocalBroadPhaseCounter.clear();
+		mMiddleContactList.clear();
+		mMiddleContactCount.clear();
+		mMiddleContactCountCpy.clear();
+
+		mNarrowTriListSizes.clear();
+		mNarrowTriListOffsets.clear();
+		mNarrowTriContactList.clear();
+		mNarrowTriListTriIds.clear();
+		mNarrowTriListPairIds.clear();
+		mNarrowTriListSide.clear();
+		mNarrowTriContactCounts.clear();
+		mNarrowTriContactOffsets.clear();
+	}
+
+	template<typename TDataType>
 	void NeighborTriMeshQuery<TDataType>::compute()
 	{
+		// Pipeline overview:
+		// 1) broadPhase  : shape-level culling
+		// 2) middlePhase : patch-level culling
+		// 3) narrowPhase : triangle-level contact generation
 		CTimer timer;
 		timer.start();
 
@@ -1917,6 +1887,7 @@ namespace dyno
 		};
 
 		mUseBroadPhasePatchPairs = false;
+		// Ensure output buffers are available before early exits.
 		if (this->outPotentialShapePairs()->isEmpty())
 			this->outPotentialShapePairs()->allocate();
 		if (this->outPotentialPatchPairs()->isEmpty())
@@ -1926,16 +1897,19 @@ namespace dyno
 		if (this->outPotentialTriSet()->isEmpty())
 			this->outPotentialTriSet()->allocate();
 
-		// examine inputs
+		// Validate all required inputs up front; on failure clear outputs and return early.
 		if (this->inPatchAABBs()->isEmpty()
-			|| this->inShape2PatchOffsets()->isEmpty()
 			|| this->inPatch2TriOffsets()->isEmpty()
 			|| this->inPatch2TriIndices()->isEmpty()
 			|| this->inCenter()->isEmpty()
 			|| this->inRotationMatrix()->isEmpty()
 			|| this->inRestShapeCenter()->isEmpty()
 			|| this->inRestShapeRotation()->isEmpty()
-			|| this->inTriangleSet()->isEmpty())
+			|| this->inTriangleSet()->isEmpty()
+			|| this->inShape2ElementIdsDense()->size() <= 0
+			|| this->inShape2RigidBodyIds()->size() <= 0
+			|| !mStaticShape2PatchOffsetsReady
+			|| !mStaticPatch2ShapeReady)
 		{
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
@@ -1947,69 +1921,21 @@ namespace dyno
 			return;
 		}
 
-		int shapeCount = this->inShape2ElementIds()->size();
-		if (shapeCount <= 0)
+		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
+		if ((int)this->inShape2ElementIdsDense()->size() != shapeCount
+			|| (int)this->inShape2RigidBodyIds()->size() != shapeCount)
 		{
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			printf("[NeighborTriMeshQuery] Shape2ElementIds is empty.\n");
+			printf("[NeighborTriMeshQuery] Mapping size mismatch (shapeCount=%d, dense=%u, rigid=%u).\n",
+				shapeCount,
+				(unsigned int)this->inShape2ElementIdsDense()->size(),
+				(unsigned int)this->inShape2RigidBodyIds()->size());
 			finishTiming();
 			return;
-		}
-
-		// examine inputs of shape transforms
-		if (this->inRestShapeCenter()->isEmpty() ) // && (int)this->inRestShapeCenter()->size() != shapeCount
-		{
-			this->outPotentialShapePairs()->resize(0);
-			this->outPotentialPatchPairs()->resize(0);
-			this->outContacts()->resize(0);
-			this->triSet->clear();
-			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			printf("[NeighborTriMeshQuery] RestShapeCenter missing.\n");
-			finishTiming();
-			return;
-		}
-
-		if (this->inRestShapeRotation()->isEmpty() ) // && (int)this->inRestShapeRotation()->size() != shapeCount
-		{
-			this->outPotentialShapePairs()->resize(0);
-			this->outPotentialPatchPairs()->resize(0);
-			this->outContacts()->resize(0);
-			this->triSet->clear();
-			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			printf("[NeighborTriMeshQuery] RestShapeRotation missing.\n");
-			finishTiming();
-			return;
-		}
-
-		if (!updateShape2ElementIds(shapeCount))
-		{
-			this->outPotentialShapePairs()->resize(0);
-			this->outPotentialPatchPairs()->resize(0);
-			this->outContacts()->resize(0);
-			this->triSet->clear();
-			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			finishTiming();
-			return;
-		}
-
-		if (!this->inShape2PatchOffsets()->isEmpty())
-		{
-			mShape2PatchOffsets.assign(this->inShape2PatchOffsets()->getData());
-			if (mShape2PatchOffsets.size() != (uint)(shapeCount + 1))
-			{
-				this->outPotentialShapePairs()->resize(0);
-				this->outPotentialPatchPairs()->resize(0);
-				this->outContacts()->resize(0);
-				this->triSet->clear();
-				this->outPotentialTriSet()->setDataPtr(this->triSet);
-				printf("[NeighborTriMeshQuery] Shape2PatchOffsets size mismatch.\n");
-				finishTiming();
-				return;
-			}
 		}
 
 		int patchCount = (int)this->inPatchAABBs()->size();
@@ -2025,77 +1951,63 @@ namespace dyno
 		}
 
 		if (mPatch2Shape.size() != (uint)patchCount)
-			mPatch2Shape.resize(patchCount);
-
-		// Build patch2shape mapping
-		mPatch2Shape.reset();
-		cuExecute(shapeCount,
-			NLQ_BuildPatch2Shape,
-			mPatch2Shape,
-			mShape2PatchOffsets,
-			patchCount);
-
-		if (mPatch2Shape.size() != (uint)patchCount)
 		{
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			printf("[NeighborTriMeshQuery] Patch2Shape size mismatch.\n");
+			printf("[NeighborTriMeshQuery] Patch2Shape size mismatch (patchCount=%d, cached=%u).\n",
+				patchCount,
+				(unsigned int)mPatch2Shape.size());
 			finishTiming();
 			return;
 		}
 
-		if (!updateTargetBVHCache(shapeCount))
+		if (!mStaticTargetBVHCacheReady
+			|| mTargetBVHs.size() != (uint)shapeCount
+			|| mTargetBVHValid.size() != (uint)shapeCount)
 		{
 			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
-			printf("[NeighborTriMeshQuery] Failed to update shape BVH cache.\n");
+			printf("[NeighborTriMeshQuery] TargetBVH cache mismatch (ready=%d, shapeCount=%d, bvh=%u, valid=%u).\n",
+				mStaticTargetBVHCacheReady ? 1 : 0,
+				shapeCount,
+				(unsigned int)mTargetBVHs.size(),
+				(unsigned int)mTargetBVHValid.size());
 			finishTiming();
 			return;
 		}
 
-		try
+		// BroadPhase: shape AABB overlap -> unique (i < j) shape pairs.
+		if (!broadPhase())
 		{
-			// BroadPhase: shape AABB overlap -> i<j shape pairs
-			if (!broadPhase())
-			{
-				this->outPotentialPatchPairs()->resize(0);
-				this->outContacts()->resize(0);
-				this->triSet->clear();
-				this->outPotentialTriSet()->setDataPtr(this->triSet);
-				// printf("[NeighborTriMeshQuery] BroadPhase failed.\n");
-				finishTiming();
-				return;
-			}
-
-			// MiddlePhase: shape pairs + patch CSR -> patch pairs 
-			if (!middlePhase())
-			{
-				this->outContacts()->resize(0);
-				this->triSet->clear();
-				this->outPotentialTriSet()->setDataPtr(this->triSet);
-				// printf("[NeighborTriMeshQuery] MiddlePhase failed.\n");
-				finishTiming();
-				return;
-			}
-
-			// NarrowPhase: patch pairs + triangle CSR -> contacts
-			narrowPhase();
-		}
-		catch (const std::exception& e)
-		{
-			printf("[NeighborTriMeshQuery] compute caught exception: %s\n", e.what());
-			this->outPotentialShapePairs()->resize(0);
 			this->outPotentialPatchPairs()->resize(0);
 			this->outContacts()->resize(0);
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
+			// printf("[NeighborTriMeshQuery] BroadPhase failed.\n");
+			finishTiming();
+			return;
 		}
+
+		// MiddlePhase: shape pairs + patch CSR -> candidate patch pairs.
+		if (!middlePhase())
+		{
+			this->outContacts()->resize(0);
+			this->triSet->clear();
+			this->outPotentialTriSet()->setDataPtr(this->triSet);
+			// printf("[NeighborTriMeshQuery] MiddlePhase failed.\n");
+			finishTiming();
+			return;
+		}
+
+		// NarrowPhase: patch pairs + triangle CSR -> final contact manifolds.
+		narrowPhase();
+		
 		finishTiming();
 	}
 
@@ -2103,6 +2015,7 @@ namespace dyno
 	bool NeighborTriMeshQuery<TDataType>::broadPhase()
 	{
 		// printf("[NeighborTriMeshQuery] BroadPhase started.\n");
+		// Build per-shape world AABBs, query broad-phase accelerator, then compact valid shape pairs.
 		NewTimer broadTimer;
 		broadTimer.start();
 
@@ -2125,26 +2038,12 @@ namespace dyno
 		}
 
 		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
-		if (shapeCount <= 0)
-		{
-			this->outPotentialShapePairs()->resize(0);
-			printf("[NeighborTriMeshQuery] Shape2PatchOffsets size mismatch.\n");
-			return false;
-		}
 
-		if (mShape2ElementIds.size() != (uint)shapeCount)
-		{
-			if (!updateShape2ElementIds(shapeCount))
-			{
-				this->outPotentialShapePairs()->resize(0);
-				printf("[NeighborTriMeshQuery] Shape2ElementIds size mismatch.\n");
-				return false;
-			}
-		}
-		if (mShape2ElementIds.size() != (uint)shapeCount)
+		auto& shape2ElementIds = this->inShape2ElementIdsDense()->getData();
+		if (shape2ElementIds.size() != (uint)shapeCount)
 		{
 			this->outPotentialShapePairs()->resize(0);
-			printf("[NeighborTriMeshQuery] Shape2ElementIds size mismatch.\n");
+			printf("[NeighborTriMeshQuery] Shape2ElementIdsDense size mismatch.\n");
 			return false;
 		}
 
@@ -2170,11 +2069,11 @@ namespace dyno
 		auto& capsuleInGlobal = inTopo->capsulesInGlobal();
 		auto& triangleInGlobal = inTopo->trianglesInGlobal();
 
-		// TODO: not shapeCount but actual number of elements
+		// Convert shape -> element id to a conservative AABB used for broad-phase culling.
 		cuExecute((uint)shapeCount,
 			NTQ_SetupAABBFromElementIds,
 			this->mQueriedAABB,
-			mShape2ElementIds,
+			shape2ElementIds,
 			boxInGlobal,
 			sphereInGlobal,
 			tetInGlobal,
@@ -2182,7 +2081,6 @@ namespace dyno
 			triangleInGlobal,
 			elementOffset,
 			dHat);
-		cuSynchronize();
 		if (!NMQ_CheckCuda("NTQ_SetupAABBFromElementIds"))
 			return false;
 
@@ -2212,18 +2110,7 @@ namespace dyno
 			break;
 		}
 
-		// NMQ_PrintCudaContext("before BroadPhaseCD::update");
-		try
-		{
-			this->mBroadPhaseCD->update();
-		}
-		catch (const std::exception& e)
-		{
-			printf("[NeighborTriMeshQuery] BroadPhaseCD::update threw exception: %s\n", e.what());
-			return false;
-		}
-		if (!NMQ_CheckCuda("BroadPhaseCD::update"))
-			return false;
+		this->mBroadPhaseCD->update();
 
 		auto& contactList = this->mBroadPhaseCD->outContactList()->getData();
 		if (contactList.elementSize() == 0)
@@ -2242,6 +2129,7 @@ namespace dyno
 		DArrayList<int> dummyAdj;
 		auto& adj = useAdj ? this->inAdjacentShapes()->getData() : dummyAdj;
 
+		// Count valid neighbors per shape, then use scan+scatter to emit compact (shapeA, shapeB) pairs.
 		cuExecute(contactList.size(),
 			NLQ_CountShapePairs,
 			pairCount,
@@ -2249,11 +2137,9 @@ namespace dyno
 			adj,
 			useAdj,
 			shapeCount);
-		cuSynchronize();
 
 		broadTimer2.stop();
 		std::cout << "[NeighborTriMeshQuery] compute broad phase time 1: " << broadTimer2.elapsedMilliseconds() << " ms" << std::endl;
-
 
 		int total = mReduce.accumulate(pairCount.begin(), pairCount.size());
 		if (total <= 0)
@@ -2278,10 +2164,9 @@ namespace dyno
 			adj,
 			useAdj,
 			shapeCount);
-		cuSynchronize();
 
 		broadTimer3.stop();
-		std::cout << "[NeighborTriMeshQuery] compute broad phase time 1: " << broadTimer3.elapsedMilliseconds() << " ms" << std::endl;
+		std::cout << "[NeighborTriMeshQuery] compute broad phase time 2: " << broadTimer3.elapsedMilliseconds() << " ms" << std::endl;
 
 		pairCountCpy.clear();
 		pairCount.clear();
@@ -2296,12 +2181,13 @@ namespace dyno
 	bool NeighborTriMeshQuery<TDataType>::middlePhase()
 	{
 		// printf("[NeighborTriMeshQuery] MiddlePhase started.\n");
+		// Convert shape pairs to patch pairs:
+		// - group by target shape
+		// - flatten source shape patches
+		// - query target patch BVH in target-rest space
+		// - compact overlap pairs
 		NewTimer middleTimer;
 		middleTimer.start();
-		double bvhQueryMs = 0.0;
-		double listResizeMs = 0.0;
-		double prefixScanMs = 0.0;
-		NewTimer stageTimer;
 
 		// Get potential shape pairs from broad phase
 		auto& shapePairs = this->outPotentialShapePairs()->getData();
@@ -2329,27 +2215,27 @@ namespace dyno
 			return false;
 		}
 
-			auto ts = this->inTriangleSet()->constDataPtr();
-			if (ts == nullptr)
-			{
-				this->outPotentialPatchPairs()->resize(0);
-				return false;
-			}
-			auto& vertices = ts->getPoints();
-			auto& triIndices = ts->triangleIndices();
-			int triCount = (int)triIndices.size();
-			int vertexCount = (int)vertices.size();
-			if (triCount <= 0 || vertexCount <= 0)
-			{
-				this->outPotentialPatchPairs()->resize(0);
-				return false;
-			}
-			int patchTriCount = (int)patch2TriIndices.size();
-			if (!updatePatchFaceLimitState(patchCount))
-			{
-				this->outPotentialPatchPairs()->resize(0);
-				return false;
-			}
+		auto ts = this->inTriangleSet()->constDataPtr();
+		if (ts == nullptr)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+		auto& vertices = ts->getPoints();
+		auto& triIndices = ts->triangleIndices();
+		int triCount = (int)triIndices.size();
+		int vertexCount = (int)vertices.size();
+		if (triCount <= 0 || vertexCount <= 0)
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
+		int patchTriCount = (int)patch2TriIndices.size();
+		if (!updatePatchFaceLimitState(patchCount))
+		{
+			this->outPotentialPatchPairs()->resize(0);
+			return false;
+		}
 
 		int shapeCount = (int)mShape2PatchOffsets.size() - 1;
 		if (shapeCount <= 0)
@@ -2372,29 +2258,7 @@ namespace dyno
 			this->inRotationMatrix()->getData(),
 			this->inRestShapeCenter()->getData(),
 			this->inRestShapeRotation()->getData(),
-			mShape2RigidBodyIds);
-		cuSynchronize();
-
-		// Legacy: update patch AABBs by transforming rest-world AABB corners.
-		// Kept for comparison/backward reference (do not delete).
-		/*
-		// Ensure mPatchAabbsWorld is properly sized before the kernel writes to it
-		if (mPatchAabbsWorld.size() != patchCount)
-			mPatchAabbsWorld.resize(patchCount);
-
-		// Update patch AABBs in world space (current pose) from rest-world patch AABBs.
-		// Notd: Is full update is necessary?
-		// Launch kernel to update patch AABBs to world space.
-		cuExecute((uint)patchCount,
-			NLQ_UpdatePatchAabbsFromRestWorld,
-			mPatchAabbsWorld,
-			patchAabbs,
-			mPatch2Shape,
-			mShapeRestR,
-			mShapeRestT);
-		cuSynchronize();
-		*/
-
+			this->inShape2RigidBodyIds()->getData());
 
 		// Patch AABBs updated
 		// if (mTouchedShapeFlags.size() != (uint)shapeCount)
@@ -2460,37 +2324,31 @@ namespace dyno
 			mTarget2SourceShapes,
 			shapePairs,
 			shapeCount);
-		if (!NMQ_CheckCuda("NLQ_ExtractSourceTargetFromShapePairs"))
-			return false;
+		// if (!NMQ_CheckCuda("NLQ_ExtractSourceTargetFromShapePairs"))
+		// 	return false;
 
 		thrust::sort_by_key(
 			thrust::device,
 			mSortedPairTargets.begin(),
 			mSortedPairTargets.begin() + mSortedPairTargets.size(),
 			mTarget2SourceShapes.begin());
-		if (!NMQ_CheckCuda("sort_by_target"))
-			return false;
+		// if (!NMQ_CheckCuda("sort_by_target"))
+		// 	return false;
 
 		cuExecute((uint)shapePairCount,
 			NLQ_CountTargetShapesFromSortedKeys,
 			mTargetShapeCounts,
 			mSortedPairTargets,
 			shapeCount);
-		if (!NMQ_CheckCuda("NLQ_CountTargetShapesFromSortedKeys"))
-			return false;
+		// if (!NMQ_CheckCuda("NLQ_CountTargetShapesFromSortedKeys"))
+		// 	return false;
+		
 		// Target shape counts computed
 		// Exclusive scan to build target shape offsets
 		if (mTargetShapeOffsets.size() != (uint)shapeCount)
 			mTargetShapeOffsets.resize(shapeCount);
 		mTargetShapeOffsets.assign(mTargetShapeCounts);
 		mScan.exclusive(mTargetShapeOffsets, true);
-
-		// BVH tables are cached in compute() and only rebuilt when source BVH input changes.
-		if (mTargetBVHs.size() != (uint)shapeCount || mTargetBVHValid.size() != (uint)shapeCount)
-		{
-			this->outPotentialPatchPairs()->resize(0);
-			return false;
-		}
 
 		int groupCountAll = mReduce.accumulate(mTargetShapeCounts.begin(), mTargetShapeCounts.size()); // number of valid (target, source-shape) groups
 		if (groupCountAll <= 0)
@@ -2503,8 +2361,7 @@ namespace dyno
 			mGroup2PatchCounts.resize(groupCountAll);
 		mGroup2PatchCounts.reset();
 
-		// ======= flatten the source patches =======
-		// flatten the (target, sourceShape) to (target, sourcePatch)
+		// Flatten (target, sourceShape) groups into a dense (target, sourcePatch) stream.
 
 		// Launch kernel to count patches for each source shape in each target group.
 		cuExecute((uint)groupCountAll,
@@ -2524,11 +2381,11 @@ namespace dyno
 
 		// Launch kernel to build per-target source counts and per-source offsets.
 		// mTarget2SourceCounts, mGroup2PatchOffsets and mGroup2TargetIds are computed here.
-		// mTarget2SourceCounts：how many patches of source shapes are in each target shape
+		// mTarget2SourceCounts: number of source patches considered for each target shape.
 		// mGroup2PatchOffsets: offsets of patches for each source shape in a target shape
 		// mGroup2TargetIds: target shape id for each patch of source shape
-		// mGroup2PatchOffsets[g]：group g 在其 target 内部的 patch 起始偏移
-		// mGroup2TargetIds[g]：group g 属于哪个 target
+		// mGroup2PatchOffsets[g]: patch start offset of group g within its target.
+		// mGroup2TargetIds[g]: owning target shape id of group g.
 		cuExecute((uint)shapeCount,
 			NLQ_BuildTarget2SourceCountsAndGroupOffsets,
 			mTarget2SourceCounts,
@@ -2596,34 +2453,34 @@ namespace dyno
 				mShapeRestT);
 			*/
 
-			// Build patch AABBs directly from triangles (current world space) in target rest-world space.
+			// Build source patch AABBs directly from triangles in the target rest frame.
+			// One warp handles one source patch (validated by NMQ_MaxPatchFaces guard).
 			// p_world comes from triangleSet; transform to target rest with RRest^T * (p_world - tRest).
 			uint totalThreads = (uint)totalSource * 32;
-				cuExecute(totalThreads,
-					NLQ_UpdateSourcePatchAabbsFromTrianglesWarp,
-					mSourcePatchAabbs,
-					mSource2PatchIds,
-					mSource2TargetIds,
-					patch2TriOffsets,
-					patch2TriIndices,
-					triIndices,
-					vertices,
-					mPatch2Shape,
-					mShapeRestR,
-					mShapeRestT,
-					patchTriCount,
-					triCount,
-					vertexCount,
-					this->varInputVerticesInRestWorld()->getValue());
-				if (!NMQ_CheckCuda("NLQ_UpdateSourcePatchAabbsFromTrianglesWarp"))
-					return false;
+			cuExecute(totalThreads,
+				NLQ_UpdateSourcePatchAabbsFromTrianglesWarp,
+				mSourcePatchAabbs,
+				mSource2PatchIds,
+				mSource2TargetIds,
+				patch2TriOffsets,
+				patch2TriIndices,
+				triIndices,
+				vertices,
+				mPatch2Shape,
+				mShapeRestR,
+				mShapeRestT,
+				patchTriCount,
+				triCount,
+				vertexCount,
+				this->varInputVerticesInRestWorld()->getValue());
+			// if (!NMQ_CheckCuda("NLQ_UpdateSourcePatchAabbsFromTrianglesWarp"))
+			// 	return false;
 			}
 
-		DArray<uint> localBroadPhaseCounter;
-		localBroadPhaseCounter.resize(totalSource);
+		ensureMiddleWorkspace(totalSource);
+		auto& localBroadPhaseCounter = mMiddleLocalBroadPhaseCounter;
 		localBroadPhaseCounter.reset();
 
-		stageTimer.start();
 		// Launch kernel to count BVH intersections for each source patch.
 		cuExecute((uint)totalSource,
 			NLQ_RequestIntersectionNumberBVH,
@@ -2634,19 +2491,13 @@ namespace dyno
 			mTargetBVHValid,
 			mShape2PatchOffsets,
 			patchAabbs);
-		if (!NMQ_CheckCuda("NLQ_RequestIntersectionNumberBVH"))
-			return false;
+		// if (!NMQ_CheckCuda("NLQ_RequestIntersectionNumberBVH"))
+		// 	return false;
 		// Launch kernel to fetch BVH intersection ids for each source patch.
-		DArrayList<int> contactList;
-		stageTimer.stop();
-		bvhQueryMs += stageTimer.elapsedMilliseconds();
+		auto& contactList = mMiddleContactList;
 
-		stageTimer.start();
 		contactList.resize(localBroadPhaseCounter);
-		stageTimer.stop();
-		listResizeMs += stageTimer.elapsedMilliseconds();
 
-		stageTimer.start();
 		cuExecute((uint)totalSource,
 			NLQ_RequestIntersectionIdsBVH,
 			contactList,
@@ -2656,10 +2507,8 @@ namespace dyno
 			mTargetBVHValid,
 			mShape2PatchOffsets,
 			patchAabbs);
-		if (!NMQ_CheckCuda("NLQ_RequestIntersectionIdsBVH"))
-			return false;
-		stageTimer.stop();
-		bvhQueryMs += stageTimer.elapsedMilliseconds();
+		// if (!NMQ_CheckCuda("NLQ_RequestIntersectionIdsBVH"))
+		// 	return false;
 
 		// printf("[NeighborTriMeshQuery] middle phase contacts=%u (lists=%u)\n",
 			// (unsigned int)contactList.elementSize(),
@@ -2670,8 +2519,7 @@ namespace dyno
 			return false;
 		}
 
-		DArray<int> contactCount;
-		contactCount.resize(totalSource);
+		auto& contactCount = mMiddleContactCount;
 		cuExecute((uint)totalSource,
 			NLQ_CopyCountU2I,
 			contactCount,
@@ -2681,21 +2529,14 @@ namespace dyno
 		if (totalPairs <= 0)
 		{
 			this->outPotentialPatchPairs()->resize(0);
-			contactCount.clear();
 			return false;
 		}
 
-		DArray<int> contactCountCpy;
+		auto& contactCountCpy = mMiddleContactCountCpy;
 		contactCountCpy.assign(contactCount);
-		stageTimer.start();
 		mScan.exclusive(contactCount, true);
-		stageTimer.stop();
-		prefixScanMs += stageTimer.elapsedMilliseconds();
 
-		stageTimer.start();
 		this->outPotentialPatchPairs()->resize(totalPairs);
-		stageTimer.stop();
-		listResizeMs += stageTimer.elapsedMilliseconds();
 		// Launch kernel to write patch pairs from contact lists.
 		cuExecute(contactList.size(),
 			NLQ_SetPatchPairsFromContactList,
@@ -2707,19 +2548,9 @@ namespace dyno
 			mSource2TargetIds,
 			mShape2PatchOffsets);
 
-		contactCountCpy.clear();
-		contactCount.clear();
-
 		// std::cout << "[NeighborTriMeshQuery] middlePhase found " << totalPairs << " patch pairs." << std::endl;
 		// printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
 		middleTimer.stop();
-		std::cout << "[NeighborTriMeshQuery] middle phase breakdown: BVH query="
-			<< bvhQueryMs
-			<< " ms, list resize="
-			<< listResizeMs
-			<< " ms, prefix-scan="
-			<< prefixScanMs
-			<< " ms" << std::endl;
 		std::cout << "[NeighborTriMeshQuery] compute middle phase time: " << middleTimer.elapsedMilliseconds() << " ms" << std::endl;
 		
 		return true;
@@ -2728,6 +2559,10 @@ namespace dyno
 	template<typename TDataType>
 	void NeighborTriMeshQuery<TDataType>::narrowPhase()
 	{
+		// For each candidate patch pair:
+		// 1) build candidate triangle lists
+		// 2) count contacts (warp kernel)
+		// 3) scan+scatter final ContactPair output
 		NewTimer narrowTimer;
 		narrowTimer.start();
 		// printf("[NeighborTriMeshQuery] NarrowPhase started.\n");
@@ -2774,8 +2609,9 @@ namespace dyno
 
 		int patchTriCount = (int)patch2TriIndices.size();
 
-		DArray<int> triListSizes;
-		triListSizes.resize(patchPairs.size());
+		if (mNarrowTriListSizes.size() != patchPairs.size())
+			mNarrowTriListSizes.resize((uint)patchPairs.size());
+		auto& triListSizes = mNarrowTriListSizes;
 		triListSizes.reset();
 
 		Real dHat = this->varDHead()->getValue();
@@ -2788,33 +2624,25 @@ namespace dyno
 			patch2TriOffsets,
 			patchCount,
 			patchTriCount);
-		cuSynchronize();
-
 		int totalTriLists = mReduce.accumulate(triListSizes.begin(), triListSizes.size());
 		if (totalTriLists <= 0)
 		{
 			this->outContacts()->resize(0);
-			triListSizes.clear();
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			return;
 		}
 
-		DArray<int> triListOffsets;
+		ensureNarrowWorkspace(totalTriLists);
+		auto& triListOffsets = mNarrowTriListOffsets;
+		auto& triContactList = mNarrowTriContactList;
+		auto& triListTriIds = mNarrowTriListTriIds;
+		auto& triListPairIds = mNarrowTriListPairIds;
+		auto& triListSide = mNarrowTriListSide;
+
 		triListOffsets.assign(triListSizes);
 		// Calculate offsets for each patch pair's triangle list using exclusive scan
 		mScan.exclusive(triListOffsets, true);
-
-		DArrayList<int> triContactList;
-		// Precondition: host-side validation guarantees each patch has <= 32 faces.
-		triContactList.resize((uint)totalTriLists, NMQ_MaxPatchFaces);
-
-		DArray<int> triListTriIds;
-		DArray<int> triListPairIds;
-		DArray<int> triListSide;
-		triListTriIds.resize(totalTriLists);
-		triListPairIds.resize(totalTriLists);
-		triListSide.resize(totalTriLists);
 
 		cuExecute(patchPairs.size(),
 			NLQ_Narrow_BuildTriContactLists,
@@ -2829,171 +2657,102 @@ namespace dyno
 			patchCount,
 			triCount,
 			patchTriCount);
-		cuSynchronize();
 
-		/* warp-level narrow phase version*/
-		DArray<int> triContactCounts;
-		triContactCounts.resize(totalTriLists);
+		/* Warp-level narrow phase version (current path). */
+		auto& triContactCounts = mNarrowTriContactCounts;
 		triContactCounts.reset();
 
-			uint totalThreads = (uint)totalTriLists * 32;
-			cuExecute(totalThreads,
-				NLQ_Narrow_WarpCount,
-				triContactCounts,
-				triContactList,
-				triListTriIds,
-				triListPairIds,
-				triListSide,
-				patchPairs,
-				mPatch2Shape,
-				vertices,
-				triIndices,
-				mShapeRestR,
-				mShapeRestT,
-				dHat,
-				triCount,
-				this->varInputVerticesInRestWorld()->getValue());
-			cuSynchronize();
+		uint totalThreads = (uint)totalTriLists * 32;
+		cuExecute(totalThreads,
+			NLQ_Narrow_WarpCount,
+			triContactCounts,
+			triContactList,
+			triListTriIds,
+			triListPairIds,
+			triListSide,
+			patchPairs,
+			mPatch2Shape,
+			vertices,
+			triIndices,
+			mShapeRestR,
+			mShapeRestT,
+			dHat,
+			triCount,
+			this->varInputVerticesInRestWorld()->getValue());
 		// printf("[NeighborTriMeshQuery] NarrowPhase contact count computed.\n");
 
 		int total = mReduce.accumulate(triContactCounts.begin(), triContactCounts.size());
 		if (total <= 0)
 		{
 			this->outContacts()->resize(0);
-			triListSide.clear();
-			triListPairIds.clear();
-			triListTriIds.clear();
-			triContactCounts.clear();
-			triContactList.clear();
-			triListOffsets.clear();
-			triListSizes.clear();
 			this->triSet->clear();
 			this->outPotentialTriSet()->setDataPtr(this->triSet);
 			return;
 		}
 
-		DArray<int> triContactOffsets;
+		auto& triContactOffsets = mNarrowTriContactOffsets;
 		triContactOffsets.assign(triContactCounts);
 		mScan.exclusive(triContactOffsets, true);
 
 		this->outContacts()->resize(total);
 
-			cuExecute(totalThreads,
-				NLQ_Narrow_WarpSet,
-				this->outContacts()->getData(),
-				triContactList,
-				triListTriIds,
-				triListPairIds,
-				triListSide,
-				patchPairs,
-				mPatch2Shape,
-				vertices,
-				triIndices,
-				mShapeRestR,
-				mShapeRestT,
-				triContactOffsets,
-				triContactCounts,
-				mShape2RigidBodyIds,
-				dHat,
-				triCount,
-				this->varInputVerticesInRestWorld()->getValue());
-			cuSynchronize();
+		cuExecute(totalThreads,
+			NLQ_Narrow_WarpSet,
+			this->outContacts()->getData(),
+			triContactList,
+			triListTriIds,
+			triListPairIds,
+			triListSide,
+			patchPairs,
+			mPatch2Shape,
+			vertices,
+			triIndices,
+			mShapeRestR,
+			mShapeRestT,
+			triContactOffsets,
+			triContactCounts,
+			this->inShape2RigidBodyIds()->getData(),
+			dHat,
+			triCount,
+			this->varInputVerticesInRestWorld()->getValue());
 		// printf("[NeighborTriMeshQuery] NarrowPhase contacts generated: %d contacts found.\n", total);
 
-		// Debug: dump a few manifold normals/penetrations once
 		{
-			static bool sPrinted = false;
-			if (!sPrinted)
+			static uint64_t sNarrowFrame = 0;
+			const uint64_t frameId = sNarrowFrame++;
+
+			bool enabled = true;
+			if (enabled)
 			{
-				sPrinted = true;
+				int maxPrint = 16;
+
 				CArray<ContactPair> hContacts;
 				hContacts.assign(this->outContacts()->getData());
-				CArray<Coord> hVertices;
-				hVertices.assign(vertices);
-				CArray<Triangle> hTriangles;
-				hTriangles.assign(triIndices);
-				CArray<Coord> hCenters;
-				hCenters.assign(this->inCenter()->getData());
-				CArray<Coord> hRestCenters;
-				hRestCenters.assign(this->inRestShapeCenter()->getData());
-				CArray<int> hShape2TriOffsets;
-				hShape2TriOffsets.assign(this->inShape2TriOffsets()->getData());
 
-				auto findShapeId = [&](int triId) -> int {
-					if (triId < 0 || hShape2TriOffsets.size() < 2) return -1;
-					int shapeCount = (int)hShape2TriOffsets.size() - 1;
-					for (int s = 0; s < shapeCount; ++s)
-					{
-						int a = hShape2TriOffsets[s];
-						int b = hShape2TriOffsets[s + 1];
-						if (triId >= a && triId < b)
-							return s;
-					}
-					return -1;
-				};
+				int printCount = (int)hContacts.size();
+				if (printCount > maxPrint)
+					printCount = maxPrint;
 
-				// const size_t sampleCount = std::min<size_t>(5, hContacts.size());
-				// printf("[NMQ DEBUG] contacts=%zu (sample=%zu)\n", (size_t)hContacts.size(), sampleCount);
-				// for (size_t i = 0; i < sampleCount; ++i)
-				// {
-				// 	const auto& cp = hContacts[(uint)i];
-				// 	printf("[NMQ DEBUG] c[%zu] body=(%d,%d) tri=(%d,%d) pen=%.6f\n",
-				// 		i, (int)cp.bodyId1, (int)cp.bodyId2, (int)cp.localId1, (int)cp.localId2,
-				// 		(double)cp.interpenetration);
-				// 	printf("  n1=(%.6f %.6f %.6f) n2=(%.6f %.6f %.6f)\n",
-				// 		(double)cp.normal1[0], (double)cp.normal1[1], (double)cp.normal1[2],
-				// 		(double)cp.normal2[0], (double)cp.normal2[1], (double)cp.normal2[2]);
-				// 	printf("  p1=(%.6f %.6f %.6f) p2=(%.6f %.6f %.6f)\n",
-				// 		(double)cp.pos1[0], (double)cp.pos1[1], (double)cp.pos1[2],
-				// 		(double)cp.pos2[0], (double)cp.pos2[1], (double)cp.pos2[2]);
-				// 	if (cp.bodyId1 >= 0 && cp.bodyId1 < (int)hCenters.size())
-				// 	{
-				// 		Coord d1 = cp.pos1 - hCenters[(uint)cp.bodyId1];
-				// 		printf("  d1=(%.6f %.6f %.6f)\n", (double)d1[0], (double)d1[1], (double)d1[2]);
-				// 	}
-				// 	if (cp.bodyId2 >= 0 && cp.bodyId2 < (int)hCenters.size())
-				// 	{
-				// 		Coord d2 = cp.pos2 - hCenters[(uint)cp.bodyId2];
-				// 		printf("  d2=(%.6f %.6f %.6f)\n", (double)d2[0], (double)d2[1], (double)d2[2]);
-				// 	}
+				printf("[NMQ_CP] frame=%llu total=%u print=%d\n",
+					(unsigned long long)frameId,
+					(unsigned int)hContacts.size(),
+					printCount);
 
-				// 	int triId0 = cp.localId1;
-				// 	int triId1 = cp.localId2;
-				// 	int shape0 = findShapeId(triId0);
-				// 	int shape1 = findShapeId(triId1);
-				// 	if (shape0 >= 0 && shape0 < (int)hRestCenters.size())
-				// 	{
-				// 		auto rc0 = hRestCenters[(uint)shape0];
-				// 		printf("  shape0=%d rest0=(%.6f %.6f %.6f)\n",
-				// 			shape0, (double)rc0[0], (double)rc0[1], (double)rc0[2]);
-				// 	}
-				// 	if (shape1 >= 0 && shape1 < (int)hRestCenters.size())
-				// 	{
-				// 		auto rc1 = hRestCenters[(uint)shape1];
-				// 		printf("  shape1=%d rest1=(%.6f %.6f %.6f)\n",
-				// 			shape1, (double)rc1[0], (double)rc1[1], (double)rc1[2]);
-				// 	}
-				// 	if (triId0 >= 0 && triId0 < (int)hTriangles.size() &&
-				// 		triId1 >= 0 && triId1 < (int)hTriangles.size())
-				// 	{
-				// 		Triangle t0 = hTriangles[(uint)triId0];
-				// 		Triangle t1 = hTriangles[(uint)triId1];
-				// 		Coord a0 = hVertices[(uint)t0[0]];
-				// 		Coord b0 = hVertices[(uint)t0[1]];
-				// 		Coord c0 = hVertices[(uint)t0[2]];
-				// 		Coord a1 = hVertices[(uint)t1[0]];
-				// 		Coord b1 = hVertices[(uint)t1[1]];
-				// 		Coord c1 = hVertices[(uint)t1[2]];
-				// 		Coord n0 = (b0 - a0).cross(c0 - a0);
-				// 		Coord n1 = (b1 - a1).cross(c1 - a1);
-				// 		if (n0.norm() > Real(0)) n0.normalize();
-				// 		if (n1.norm() > Real(0)) n1.normalize();
-				// 		printf("  triN0=(%.6f %.6f %.6f) triN1=(%.6f %.6f %.6f) dot=(%.3f %.3f)\n",
-				// 			(double)n0[0], (double)n0[1], (double)n0[2],
-				// 			(double)n1[0], (double)n1[1], (double)n1[2],
-				// 			(double)cp.normal1.dot(n0), (double)cp.normal2.dot(n1));
-				// 	}
-				// }
+				for (int i = 0; i < printCount; ++i)
+				{
+					const ContactPair& cp = hContacts[(uint)i];
+					printf("  cp[%d] body=(%d,%d) tri=(%d,%d) pen=%.9f\n",
+						i,
+						(int)cp.bodyId1, (int)cp.bodyId2,
+						(int)cp.localId1, (int)cp.localId2,
+						(double)cp.interpenetration);
+					printf("         pos1=(%.9f %.9f %.9f) pos2=(%.9f %.9f %.9f)\n",
+						(double)cp.pos1[0], (double)cp.pos1[1], (double)cp.pos1[2],
+						(double)cp.pos2[0], (double)cp.pos2[1], (double)cp.pos2[2]);
+					printf("         n1=(%.9f %.9f %.9f) n2=(%.9f %.9f %.9f)\n",
+						(double)cp.normal1[0], (double)cp.normal1[1], (double)cp.normal1[2],
+						(double)cp.normal2[0], (double)cp.normal2[1], (double)cp.normal2[2]);
+				}
 			}
 		}
 		
@@ -3137,7 +2896,7 @@ namespace dyno
 			CArray<Matrix> hRestRotations;
 			hRestRotations.assign(this->inRestShapeRotation()->getData());
 			CArray<int> hShape2Rigid;
-			hShape2Rigid.assign(mShape2RigidBodyIds);
+			hShape2Rigid.assign(this->inShape2RigidBodyIds()->getData());
 
 			std::vector<int> triIdToShape(triCount, -1);
 			for (int patchId = 0; patchId < patchCount; ++patchId)
@@ -3229,10 +2988,6 @@ namespace dyno
 			triListPairIds.clear();
 			triListTriIds.clear();
 			*/
-			/* warp-level narrow phase version */
-			triContactList.clear();
-			triListOffsets.clear();
-			triListSizes.clear();
 		}
 		narrowTimer.stop();
 		std::cout << "[NeighborTriMeshQuery] compute narrow phase time: " << narrowTimer.elapsedMilliseconds() << " ms" << std::endl;
@@ -3241,56 +2996,3 @@ namespace dyno
 
 	DEFINE_CLASS(NeighborTriMeshQuery);
 }
-
-// #ifdef UNIT_TEST
-// #include "Topology/TriangleSet.h"
-
-// void NeighborTriMeshQuery_UnitTest()
-// {
-// 	using namespace dyno;
-
-// 	NeighborTriMeshQuery<DataType3f> query;
-// 	CArray<NeighborTriMeshQuery<DataType3f>::AABB> shapeAabbs;
-// 	shapeAabbs.pushBack(NeighborTriMeshQuery<DataType3f>::AABB(Vec3f(0.0f), Vec3f(1.0f)));
-// 	shapeAabbs.pushBack(NeighborTriMeshQuery<DataType3f>::AABB(Vec3f(0.5f), Vec3f(1.5f)));
-// 	query.inShapeAABBs()->assign(shapeAabbs);
-
-// 	CArray<NeighborTriMeshQuery<DataType3f>::AABB> patchAabbs;
-// 	patchAabbs.pushBack(NeighborTriMeshQuery<DataType3f>::AABB(Vec3f(0.0f), Vec3f(1.0f)));
-// 	patchAabbs.pushBack(NeighborTriMeshQuery<DataType3f>::AABB(Vec3f(0.5f), Vec3f(1.5f)));
-// 	query.inPatchAABBs()->assign(patchAabbs);
-
-// 	CArray<int> shape2PatchOffsets;
-// 	shape2PatchOffsets.pushBack(0);
-// 	shape2PatchOffsets.pushBack(1);
-// 	shape2PatchOffsets.pushBack(2);
-// 	query.inShape2PatchOffsets()->assign(shape2PatchOffsets);
-
-// 	CArray<int> patch2TriOffsets;
-// 	patch2TriOffsets.pushBack(0);
-// 	patch2TriOffsets.pushBack(1);
-// 	patch2TriOffsets.pushBack(2);
-// 	query.inPatch2TriOffsets()->assign(patch2TriOffsets);
-
-// 	CArray<int> patch2TriIndices;
-// 	patch2TriIndices.pushBack(0);
-// 	patch2TriIndices.pushBack(1);
-// 	query.inPatch2TriIndices()->assign(patch2TriIndices);
-
-// 	auto triSet = std::make_shared<TriangleSet<DataType3f>>();
-// 	CArray<Vec3f> vertices;
-// 	vertices.pushBack(Vec3f(0.0f, 0.0f, 0.0f));
-// 	vertices.pushBack(Vec3f(1.0f, 0.0f, 0.0f));
-// 	vertices.pushBack(Vec3f(0.0f, 1.0f, 0.0f));
-// 	vertices.pushBack(Vec3f(1.0f, 1.0f, 0.0f));
-// 	triSet->getPoints().assign(vertices);
-
-// 	CArray<TopologyModule::Triangle> triangles;
-// 	triangles.pushBack(TopologyModule::Triangle(0, 1, 2));
-// 	triangles.pushBack(TopologyModule::Triangle(1, 3, 2));
-// 	triSet->triangleIndices().assign(triangles);
-// 	query.inTriangleSet()->setDataPtr(triSet);
-
-// 	query.update();
-// }
-// #endif

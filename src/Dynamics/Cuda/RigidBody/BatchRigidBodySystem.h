@@ -184,7 +184,7 @@ public:
     
     DEF_VAR(CollisionDetectionType, CollisionDetectionType, TriMesh, "CollisionDetectionType");
 
-    DEF_VAR(Bool, EnableVisualizeCollisionTriSet, false, "Enable visualize collision triSet mesh");
+    DEF_VAR(Bool, EnableVisualizeCollisionTriSet, true, "Enable visualize collision triSet mesh");
     
 protected:
     void resetStates() override;

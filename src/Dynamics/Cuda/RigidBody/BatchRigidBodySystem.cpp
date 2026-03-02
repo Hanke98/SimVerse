@@ -157,7 +157,7 @@ namespace dyno
         merge->outContacts()->connect(iterSolver->inContacts());
         this->animationPipeline()->pushModule(iterSolver);
 
-        this->setDt(0.016f);
+        this->setDt(0.005f);
     }
 
     template<typename TDataType>
@@ -640,6 +640,73 @@ namespace dyno
         // mNeighborTriMeshQuery->inShape2ElementIdsDense()->assign(mTextureMeshShape2ElementIdsDense);
         // mNeighborTriMeshQuery->inShape2RigidBodyIds()->assign(mTextureMeshShape2RigidBodyIds);
         // mNeighborTriMeshQuery->inShape2TriOffsets()->assign(baseShape2TriOffsets);
+
+        if (!mNeighborTriMeshQuery->setStaticShape2PatchOffsets(shape2PatchOffsets))
+        {
+            printf("[BatchRigidBodySystem] Failed to initialize static Shape2PatchOffsets for NeighborTriMeshQuery.\n");
+            return;
+        }
+
+        if (shape2PatchOffsets.size() != (totalShapeCount + 1)
+            || shape2PatchOffsets[totalShapeCount] != static_cast<int>(totalPatchCount))
+        {
+            printf("[BatchRigidBodySystem] Invalid Shape2PatchOffsets for Patch2Shape build (shapeCount=%zu, offsets=%zu, last=%d, patchCount=%zu).\n",
+                totalShapeCount,
+                shape2PatchOffsets.size(),
+                shape2PatchOffsets.empty() ? -1 : shape2PatchOffsets.back(),
+                totalPatchCount);
+            return;
+        }
+
+        std::vector<uint> patch2Shape(totalPatchCount, 0u);
+        bool patch2ShapeBuildOk = true;
+        for (size_t globalShapeId = 0; globalShapeId < totalShapeCount; ++globalShapeId)
+        {
+            const int begin = shape2PatchOffsets[globalShapeId];
+            const int end = shape2PatchOffsets[globalShapeId + 1];
+            if (begin < 0
+                || end < begin
+                || end > static_cast<int>(totalPatchCount))
+            {
+                printf("[BatchRigidBodySystem] Invalid Shape2PatchOffsets range for shape %zu: [%d, %d), patchCount=%zu.\n",
+                    globalShapeId,
+                    begin,
+                    end,
+                    totalPatchCount);
+                patch2ShapeBuildOk = false;
+                break;
+            }
+
+            for (int patchId = begin; patchId < end; ++patchId)
+            {
+                patch2Shape[patchId] = static_cast<uint>(globalShapeId);
+            }
+        }
+        if (!patch2ShapeBuildOk)
+        {
+            printf("[BatchRigidBodySystem] Failed to build static Patch2Shape for NeighborTriMeshQuery.\n");
+            return;
+        }
+        if (!mNeighborTriMeshQuery->setStaticPatch2Shape(patch2Shape))
+        {
+            printf("[BatchRigidBodySystem] Failed to initialize static Patch2Shape for NeighborTriMeshQuery.\n");
+            return;
+        }
+        if (!mNeighborTriMeshQuery->setStaticTargetBVHCache(shapeBVHs))
+        {
+            printf("[BatchRigidBodySystem] Failed to initialize static TargetBVH cache for NeighborTriMeshQuery.\n");
+            return;
+        }
+
+        const bool denseMappingSizeOk = (mTextureMeshShape2ElementIdsDense.size() == totalShapeCount);
+        const bool rigidMappingSizeOk = (mTextureMeshShape2RigidBodyIds.size() == totalShapeCount);
+        if (!denseMappingSizeOk || !rigidMappingSizeOk)
+        {
+            printf("[BatchRigidBodySystem] Shape mapping size mismatch (shapeCount=%zu, dense=%zu, rigid=%zu). NeighborTriMeshQuery will fail-fast.\n",
+                totalShapeCount,
+                mTextureMeshShape2ElementIdsDense.size(),
+                mTextureMeshShape2RigidBodyIds.size());
+        }
 
         mNeighborTriMeshQuery->inPatchAABBs()->assign(patchAabbsRestWorld);
         mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);

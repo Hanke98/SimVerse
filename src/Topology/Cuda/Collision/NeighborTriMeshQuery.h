@@ -11,6 +11,7 @@
 
 #include "Algorithm/Reduction.h"
 #include "Algorithm/Scan.h"
+#include "Array/ArrayList.h"
 
 #include "Topology/DiscreteElements.h"
 #include "Topology/LinearBVH.h"
@@ -54,7 +55,7 @@ namespace dyno
 
 		DEF_ENUM(Spatial, Spatial, Spatial::BVH, "");
 
-		DEF_VAR(bool, EnableAdjacentFilter, true, "");
+		DEF_VAR(bool, EnableAdjacentFilter, false, "");
 		DEF_VAR(bool, EnableBroadPhasePatchPairs, false, "");
 		// If true, TriangleSet::points are provided in rest-world space (static), and the query will transform
 		// them to current world space using per-shape relative transforms.
@@ -120,6 +121,13 @@ namespace dyno
 			return (*shapeBVHs)[shapeId];
 		}
 
+		// Initialize static shape->patch CSR once from external setup code (e.g. BatchRigidBodySystem).
+		bool setStaticShape2PatchOffsets(const std::vector<int>& offsets);
+		// Initialize static patch->shape lookup once from external setup code (e.g. BatchRigidBodySystem).
+		bool setStaticPatch2Shape(const std::vector<uint>& patch2Shape);
+		// Initialize static target BVH cache once from external setup code (e.g. BatchRigidBodySystem).
+		bool setStaticTargetBVHCache(const ShapeBVHList& shapeBVHs);
+
 	protected:
 		void compute() override;
 		std::shared_ptr<TriangleSet<DataType3f>> triSet = std::make_shared<TriangleSet<DataType3f>>();
@@ -130,18 +138,17 @@ namespace dyno
 		void narrowPhase();
 		bool updatePatchFaceLimitState(int patchCount);
 		bool updateShape2RigidBodyIds(int shapeCount);
-		bool updateShape2ElementIds(int shapeCount);
-		bool updateTargetBVHCache(int shapeCount);
 		bool buildPatchPairsFromContactList(int shapeCount, int patchCount);
+		void ensureMiddleWorkspace(int totalSource);
+		void ensureNarrowWorkspace(int totalTriLists);
+		void clearWorkspace();
 
 	private:
 		Scan<int> mScan;
 		Reduction<int> mReduce;
 
 		DArray<int> mShape2PatchOffsets;
-		DArray<int> mShape2ElementIds;
 		DArray<uint> mPatch2Shape;
-		DArray<int> mShape2RigidBodyIds;
 		DArray<AABB> mShapeAabbsWorld;
 		DArray<AABB> mPatchAabbsWorld;
 		DArray<AABB> mSourcePatchAabbs;
@@ -166,10 +173,19 @@ namespace dyno
 		DArray<int> mSource2TargetIds;
 		DArray<LinearBVH<TDataType>> mTargetBVHs;
 		DArray<int> mTargetBVHValid;
+		DArray<uint> mMiddleLocalBroadPhaseCounter;
+		DArrayList<int> mMiddleContactList;
+		DArray<int> mMiddleContactCount;
+		DArray<int> mMiddleContactCountCpy;
+		DArray<int> mNarrowTriListSizes;
+		DArray<int> mNarrowTriListOffsets;
+		DArrayList<int> mNarrowTriContactList;
+		DArray<int> mNarrowTriListTriIds;
+		DArray<int> mNarrowTriListPairIds;
+		DArray<int> mNarrowTriListSide;
+		DArray<int> mNarrowTriContactCounts;
+		DArray<int> mNarrowTriContactOffsets;
 		std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> mPatchBroadPhaseCD;
-		std::shared_ptr<ShapeBVHList> mCachedShapeBVHs = nullptr;
-		int mCachedShapeBVHCount = -1;
-		bool mTargetBVHCacheReady = false;
 
 		bool mMappingReady = false;
 		bool mWarnedEmptyMapping = false;
@@ -179,6 +195,9 @@ namespace dyno
 		bool mPatchFaceLimitReady = false;
 		bool mPatchFaceLimitValid = false;
 		bool mWarnedPatchFaceLimit = false;
+		bool mStaticShape2PatchOffsetsReady = false;
+		bool mStaticPatch2ShapeReady = false;
+		bool mStaticTargetBVHCacheReady = false;
 		int mCachedPatchCount = -1;
 		uint mCachedPatch2TriOffsetsSize = 0;
 		uint mCachedPatch2TriIndicesSize = 0;

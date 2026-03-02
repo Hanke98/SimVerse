@@ -41,16 +41,29 @@ std::shared_ptr<SceneGraph> creatScene()
 	std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
 
 	auto multiRobotArm = scn->addNode(std::make_shared<BatchRigidBodySystem<DataType3f>>());
-	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_complex.urdf");
+	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_cube_sphere.urdf");
 
 	std::vector<Transform3f> vehiclesTransform;
 	Transform3f Transform0(Vec3f(0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
-	Transform3f Transform1(Vec3f(0.0f, 0.0f, 1.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+	Transform3f Transform1(Vec3f(0.0f, 0.0f, 4.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
 	// Transform3f Transform2(Vec3f(6.0f, 0.0f, 0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
 	// Transform3f Transform3(Vec3f(6.0f, 0.0f, 6.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
 
-	vehiclesTransform.push_back(Transform1);
-	// vehiclesTransform.push_back(Transform1);
+	int transformMode = 0;
+	if (const char* v = std::getenv("NMQ_SCENE_TRANSFORM"))
+		transformMode = std::atoi(v);
+
+	if (transformMode == 0)
+		vehiclesTransform.push_back(Transform0);
+	else
+		vehiclesTransform.push_back(Transform1);
+
+	const Vec3f& tScene = (transformMode == 0) ? Transform0.translation() : Transform1.translation();
+	printf("[NMQ_test] scene_transform=%d translation=(%.6f, %.6f, %.6f)\n",
+		transformMode,
+		(double)tScene.x,
+		(double)tScene.y,
+		(double)tScene.z);
 	// vehiclesTransform.push_back(Transform2);
 	// vehiclesTransform.push_back(Transform3);
 
@@ -163,14 +176,47 @@ std::shared_ptr<SceneGraph> creatScene()
 
 int main()
 {
+	auto scene = creatScene();
+	bool headless = false;
+	if (const char* v = std::getenv("NMQ_HEADLESS"))
+		headless = std::atoi(v) != 0;
+
+	if (headless)
+	{
+		int frames = 240;
+		if (const char* v = std::getenv("NMQ_HEADLESS_FRAMES"))
+		{
+			int n = std::atoi(v);
+			if (n > 0)
+				frames = n;
+		}
+
+		float dt = 1.0f / 60.0f;
+		if (const char* v = std::getenv("NMQ_HEADLESS_DT"))
+		{
+			float parsed = (float)std::atof(v);
+			if (parsed > 0.0f)
+				dt = parsed;
+		}
+
+		printf("[NMQ_test] headless=1 frames=%d dt=%.6f\n", frames, (double)dt);
+		scene->reset();
+		scene->setFrameRate(1.0f / dt);
+		for (int i = 0; i < frames; ++i)
+			scene->takeOneFrame();
+		return 0;
+	}
+
 	GlfwApp app;
-	app.setSceneGraph(creatScene());
+	app.setSceneGraph(scene);
 	app.initialize(1280, 768);
 
 	//Set the distance unit for the camera, the fault unit is meter
-	app.renderWindow()->getCamera()->setUnitScale(7.0f);
-	app.renderWindow()->getCamera()->setEyePos(Vec3f(1.36, 1.6, 2.44));
-	app.renderWindow()->getCamera()->setTargetPos(Vec3f(0, 1.1, 0));
+	// app.renderWindow()->getCamera()->setUnitScale(7.0f);
+	// app.renderWindow()->getCamera()->setEyePos(Vec3f(1.36, 1.6, 2.44));
+	// app.renderWindow()->getCamera()->setTargetPos(Vec3f(0, 1.1, 0));
+
+	app.renderWindow()->getCamera()->setUnitScale(5.0f);
 
 	app.mainLoop();
 

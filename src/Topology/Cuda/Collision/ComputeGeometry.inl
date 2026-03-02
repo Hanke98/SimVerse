@@ -1219,26 +1219,26 @@ namespace dyno
                     tA = DotPerp(dB, oA - oB) / d;
                     // if (REAL_EQUAL(tA, 1.f)) continue;
                     tB = DotPerp(dA, oA - oB) / d;
-                    printf("tA tB :%f %f\n", tA, tB);
+                    // printf("tA tB :%f %f\n", tA, tB);
                     if (REAL_LESS(tB, 0.f) || REAL_GREAT(tB, 1.f)) continue;
                     if (REAL_EQUAL(tB, 1.f))
                     {
                         int nni = (ni == n - 1) ? 0 : ni + 1;
                         Vec2f ndB = p[nni] - p[ni];
                         float d2 = DotPerp(dA, ndB);
-                        printf("dd %f %f\n", d, d2);
+                        // printf("dd %f %f\n", d, d2);
                         if (REAL_GREAT(d * d2, 0.f)) continue; // up endpoint
                     }
                 }
                 for (int i = 0; i < res; ++i)
                 {
                     Vec2f b = a0 + t[i] * (a1 - a0);
-                    printf(" t %f p: %f %f\n", t[i], b[0], b[1]);
+                    // printf(" t %f p: %f %f\n", t[i], b[0], b[1]);
                 }
-                for (int i = 0; i < n; ++i)
-					printf("p: %f %f\n", p[i][0], p[i][1]);
-				printf("a0 %f %f\n", a0[0], a0[1]);
-                printf("a1 %f %f\n", a1[0], a1[1]);
+                // for (int i = 0; i < n; ++i)
+				// 	printf("p: %f %f\n", p[i][0], p[i][1]);
+				// printf("a0 %f %f\n", a0[0], a0[1]);
+                // printf("a1 %f %f\n", a1[0], a1[1]);
             }
             assert(res <= 2);
             return res;

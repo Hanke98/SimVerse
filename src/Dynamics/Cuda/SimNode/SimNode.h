@@ -16,6 +16,8 @@
 #pragma once
 
 #include "Node.h"
+#include "Vector.h"
+#include "PhysicalField/RigidBody/RigidBody.h"
 
 #include <vector>
 #include <iostream>
@@ -23,6 +25,16 @@
 
 namespace dyno
 {
+    template<typename TDataType>
+    struct EnvironmentInfos
+    {
+        using Real = typename TDataType::Real;
+        int num_env = 0;
+        std::vector<Vec3f> gravities;
+        std::vector<Real> timesteps;
+    };
+
+
     /*!
     *	\class	SimNode
     *	\brief	An integrated multi-physics field Node for simulaiton,
@@ -31,15 +43,33 @@ namespace dyno
     *
     */
     template<typename TDataType>
-    class SimNode : virtual public Node
+    class SimNode : public Node
     {
     public:
         typedef typename TDataType::Real Real;
+        typedef typename TDataType::Coord Coord;
+        typedef typename TDataType::Matrix Matrix;
+        using EnvInfosType = EnvironmentInfos<TDataType>;
 
-
-        SimNode() {};
+        SimNode();
         SimNode(std::string name);
         ~SimNode() override;
+
+    protected:
+        // void init();
+
+    
+    public:
+        DEF_VAR(EnvInfosType, EnvInfos, EnvInfosType{}, "A struct containing the infos of parallel environments.");
+
+    protected:
+        ;
+    
+
+
+
+
+
 
     };
 

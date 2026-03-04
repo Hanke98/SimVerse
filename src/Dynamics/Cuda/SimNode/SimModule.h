@@ -17,8 +17,10 @@
 
 #pragma once
 #include "Module/ComputeModule.h"
+#include "SimNode.h"
 
 namespace dyno {
+
     template<typename TDataType>
     class SimModule : public ComputeModule
     {
@@ -30,11 +32,11 @@ namespace dyno {
         typedef typename TDataType::Matrix Matrix;
 
 
-        SimModule() { std::cout << "SimModule constructor called." << std::endl; };
-        ~SimModule()=default;
+        SimModule();
+        ~SimModule() override;
 
     public:
-        ;
+        DEF_VAR_IN(typename SimNode<TDataType>::EnvInfosType, EnvInfos, "A struct containing the infos of parallel environments.");
 
     protected:
         void compute() override;

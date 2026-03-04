@@ -19,18 +19,11 @@ std::shared_ptr<dyno::SceneGraph> CreateScene()
 
 	// Create SimModule and connect it to the SimNode
 	auto sim_module = std::make_shared<dyno::SimModule<dyno::DataType3f>>();
+	sim_module->varForceUpdate()->setValue(true);
+
+	sim_node->varEnvInfos()->connect(sim_module->inEnvInfos());
 	sim_node->animationPipeline()->pushModule(sim_module);
 
-	// Rendering module for visualization
-	// auto mapper = std::make_shared<dyno::DiscreteElementsToTriangleSet<dyno::DataType3f>>();
-	// sim_node->stateTopology()->connect(mapper->inDiscreteElements());
-	// sim_node->graphicsPipeline()->pushModule(mapper);
-
-	// auto surface_render = std::make_shared<dyno::GLSurfaceVisualModule>();
-	// surface_render->setColor(dyno::Color::SteelBlue2());
-	// surface_render->setAlpha(1.0f);
-	// mapper->outTriangleSet()->connect(surface_render->inTriangleSet());
-	// sim_node->graphicsPipeline()->pushModule(surface_render);
 	return scn;
 }
 

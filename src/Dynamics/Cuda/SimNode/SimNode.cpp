@@ -4,6 +4,12 @@
 namespace dyno {
 
     template<typename TDataType>
+    SimNode<TDataType>::SimNode() : Node()
+    {
+        ;
+    }
+
+    template<typename TDataType>
     SimNode<TDataType>::SimNode(std::string name) : Node()
     {
         this->setName(name);

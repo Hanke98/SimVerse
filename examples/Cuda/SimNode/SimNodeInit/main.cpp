@@ -1,7 +1,6 @@
 #include <GlfwApp.h>
 #include <SceneGraph.h>
 
-
 #include <GLRenderEngine.h>
 #include <GLSurfaceVisualModule.h>
 #include <Mapping/DiscreteElementsToTriangleSet.h>
@@ -20,7 +19,6 @@ std::shared_ptr<dyno::SceneGraph> CreateScene()
 	// Create SimModule and connect it to the SimNode
 	auto sim_module = std::make_shared<dyno::SimModule<dyno::DataType3f>>();
 	sim_module->varForceUpdate()->setValue(true);
-
 	sim_node->varEnvInfos()->connect(sim_module->inEnvInfos());
 	sim_node->animationPipeline()->pushModule(sim_module);
 
@@ -30,7 +28,7 @@ std::shared_ptr<dyno::SceneGraph> CreateScene()
 
 int main()
 {
-	std::cout << "SimNode Init Example" << std::endl;
+	spdlog::info("SimNode Init Example");
 
 	dyno::GlfwApp app;
 	app.setSceneGraph(CreateScene());

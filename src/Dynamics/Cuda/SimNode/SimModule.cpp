@@ -7,7 +7,7 @@ namespace dyno
     template<typename TDataType>
     SimModule<TDataType>::SimModule() : ComputeModule()
     {
-        std::cout << "SimModule constructor called." << std::endl;
+        spdlog::info("SimModule constructor called.");
     }
 
     template<typename TDataType>
@@ -18,7 +18,7 @@ namespace dyno
     template<typename TDataType>
     void SimModule<TDataType>::compute()
     {
-        std::cout << "SimModule compute function called." << std::endl << std::flush;
+        spdlog::info("SimModule compute function called.");
     }
 
 

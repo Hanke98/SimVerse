@@ -57,4 +57,10 @@ endif()
 if(PERIDYNO_LIBRARY_SIMNODE)
     set(LIB_DEPENDENCY Core IO Framework Topology Modeling GLRenderEngine)
     build_library(SimNode LIB_DEPENDENCY)
+    if(TARGET SimNode)
+        target_include_directories(SimNode PUBLIC
+            $<BUILD_INTERFACE:${PERIDYNO_ROOT}/external/spdlog/include>
+            $<INSTALL_INTERFACE:${PERIDYNO_INC_INSTALL_DIR}/external/spdlog/include>)
+        target_link_libraries(SimNode PRIVATE spdlog::spdlog_header_only)
+    endif()
 endif()

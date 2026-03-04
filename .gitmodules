@@ -28,3 +28,6 @@
 [submodule "external/qscintilla"]
 	path = external/qscintilla
 	url = https://gitee.com/unibeam/qscintilla.git
+[submodule "external/spdlog"]
+	path = external/spdlog
+	url = https://github.com/gabime/spdlog.git

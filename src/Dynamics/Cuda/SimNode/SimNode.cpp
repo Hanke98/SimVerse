@@ -13,7 +13,7 @@ namespace dyno {
     SimNode<TDataType>::SimNode(std::string name) : Node()
     {
         this->setName(name);
-        std::cout << "SimNode constructor called for node: " << name << std::endl;
+        spdlog::info("SimNode constructor called for node: {}", name);
     }
 
     template<typename TDataType>

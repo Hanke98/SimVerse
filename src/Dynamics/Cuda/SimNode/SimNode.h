@@ -21,7 +21,7 @@
 
 #include <vector>
 #include <iostream>
-
+#include <spdlog/spdlog.h>
 
 namespace dyno
 {

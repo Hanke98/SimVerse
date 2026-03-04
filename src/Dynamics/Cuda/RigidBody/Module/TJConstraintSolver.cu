@@ -156,7 +156,7 @@ namespace dyno
 				this->inRotationMatrix()->getData(),
 				this->inQuaternion()->getData(),
 				begin_index
-			);;
+			);
 		}
 
 		if (pointJoint_size != 0)
@@ -273,44 +273,44 @@ namespace dyno
 				this->inCenter()->getData(),
 				this->inRotationMatrix()->getData()
 			);
-			
-			if (this->inContacts()->size() > 4)
-			{
-				static unsigned long long sLocalContactFrame = 0ull;
-				const unsigned long long frameId = sLocalContactFrame++;
-				const bool enabled = true;
-				if (enabled)
-				{
-					const int maxPrint = 32;
-					CArray<ContactPair> hLocalContacts;
-					hLocalContacts.assign(mContactsInLocalFrame);
+				
+				// if (mContactsInLocalFrame.size() > 4)
+				// {
+				// 	static unsigned long long sLocalContactFrame = 0ull;
+				// 	const unsigned long long frameId = sLocalContactFrame++;
+				// 	const bool enabled = true;
+				// 	if (enabled)
+				// 	{
+				// 		const int maxPrint = 32;
+				// 		CArray<ContactPair> hLocalContacts;
+				// 		hLocalContacts.assign(mContactsInLocalFrame);
 
-					int printCount = (int)hLocalContacts.size();
-					if (printCount > maxPrint)
-						printCount = maxPrint;
+				// 		int printCount = (int)hLocalContacts.size();
+				// 		if (printCount > maxPrint)
+				// 			printCount = maxPrint;
 
-					printf("[TJ_LOCAL_CP] frame=%llu total=%u print=%d\n",
-						frameId,
-						(unsigned int)hLocalContacts.size(),
-						printCount);
+				// 		printf("[TJ_LOCAL_CP] frame=%llu total=%u print=%d\n",
+				// 			frameId,
+				// 			(unsigned int)hLocalContacts.size(),
+				// 			printCount);
 
-					for (int k = 0; k < printCount; ++k)
-					{
-						const ContactPair& cp = hLocalContacts[(uint)k];
-						printf("  cp[%d] body=(%d,%d) tri=(%d,%d) pen=%.9f\n",
-							k,
-							(int)cp.bodyId1, (int)cp.bodyId2,
-							(int)cp.localId1, (int)cp.localId2,
-							(double)cp.interpenetration);
-						printf("         pos1=(%.9f %.9f %.9f) pos2=(%.9f %.9f %.9f)\n",
-							(double)cp.pos1[0], (double)cp.pos1[1], (double)cp.pos1[2],
-							(double)cp.pos2[0], (double)cp.pos2[1], (double)cp.pos2[2]);
-						printf("         n1=(%.9f %.9f %.9f) n2=(%.9f %.9f %.9f)\n",
-							(double)cp.normal1[0], (double)cp.normal1[1], (double)cp.normal1[2],
-							(double)cp.normal2[0], (double)cp.normal2[1], (double)cp.normal2[2]);
-					}
-				}
-			}
+				// 		for (int k = 0; k < printCount; ++k)
+				// 		{
+				// 			const ContactPair& cp = hLocalContacts[(uint)k];
+				// 			printf("  cp[%d] body=(%d,%d) tri=(%d,%d) pen=%.9f\n",
+				// 				k,
+				// 				(int)cp.bodyId1, (int)cp.bodyId2,
+				// 				(int)cp.localId1, (int)cp.localId2,
+				// 				(double)cp.interpenetration);
+				// 			printf("         pos1=(%.9f %.9f %.9f) pos2=(%.9f %.9f %.9f)\n",
+				// 				(double)cp.pos1[0], (double)cp.pos1[1], (double)cp.pos1[2],
+				// 				(double)cp.pos2[0], (double)cp.pos2[1], (double)cp.pos2[2]);
+				// 			printf("         n1=(%.9f %.9f %.9f) n2=(%.9f %.9f %.9f)\n",
+				// 				(double)cp.normal1[0], (double)cp.normal1[1], (double)cp.normal1[2],
+				// 				(double)cp.normal2[0], (double)cp.normal2[1], (double)cp.normal2[2]);
+				// 		}
+				// 	}
+				// }
 
 			Real dh = dt / this->varSubStepping()->getValue();
 

@@ -37,6 +37,223 @@ namespace dyno
 	// Hard cap for triangles per patch in narrow/middle phase temporary buffers.
 	// This matches one warp (32 lanes), so one lane can process one triangle candidate.
 	static constexpr int NMQ_MaxPatchFaces = 32;
+	// Host-side geometric aggregation tolerance for nearly identical contacts.
+	static constexpr Real NMQ_ContactMergePosEps = Real(2e-3);
+	static constexpr Real NMQ_ContactMergePosEps2 = NMQ_ContactMergePosEps * NMQ_ContactMergePosEps;
+	static constexpr Real NMQ_ContactMergeNormalCos = Real(0.999);
+
+	template<typename ContactPairT>
+	static inline bool NMQContactPairLess(const ContactPairT& a, const ContactPairT& b)
+	{
+		if (a.bodyId1 != b.bodyId1) return a.bodyId1 < b.bodyId1;
+		if (a.bodyId2 != b.bodyId2) return a.bodyId2 < b.bodyId2;
+		if (a.contactType != b.contactType) return static_cast<int>(a.contactType) < static_cast<int>(b.contactType);
+
+		if (a.pos1[0] != b.pos1[0]) return a.pos1[0] < b.pos1[0];
+		if (a.pos1[1] != b.pos1[1]) return a.pos1[1] < b.pos1[1];
+		if (a.pos1[2] != b.pos1[2]) return a.pos1[2] < b.pos1[2];
+		if (a.pos2[0] != b.pos2[0]) return a.pos2[0] < b.pos2[0];
+		if (a.pos2[1] != b.pos2[1]) return a.pos2[1] < b.pos2[1];
+		if (a.pos2[2] != b.pos2[2]) return a.pos2[2] < b.pos2[2];
+
+		if (a.normal1[0] != b.normal1[0]) return a.normal1[0] < b.normal1[0];
+		if (a.normal1[1] != b.normal1[1]) return a.normal1[1] < b.normal1[1];
+		if (a.normal1[2] != b.normal1[2]) return a.normal1[2] < b.normal1[2];
+		if (a.normal2[0] != b.normal2[0]) return a.normal2[0] < b.normal2[0];
+		if (a.normal2[1] != b.normal2[1]) return a.normal2[1] < b.normal2[1];
+		if (a.normal2[2] != b.normal2[2]) return a.normal2[2] < b.normal2[2];
+		if (a.interpenetration != b.interpenetration) return a.interpenetration < b.interpenetration;
+		if (a.localId1 != b.localId1) return a.localId1 < b.localId1;
+		if (a.localId2 != b.localId2) return a.localId2 < b.localId2;
+
+		return false;
+	}
+
+	static inline Real NMQVectorLen2(const Vector<Real, 3>& v)
+	{
+		return v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+	}
+
+	static inline Vector<Real, 3> NMQNormalizeOrFallback(const Vector<Real, 3>& n, const Vector<Real, 3>& fallback)
+	{
+		Real n2 = NMQVectorLen2(n);
+		if (n2 > EPSILON * EPSILON)
+			return n / glm::sqrt(n2);
+		return fallback;
+	}
+
+	template<typename ContactPairT>
+	static inline bool NMQContactPairGeomClose(const ContactPairT& a, const ContactPairT& b)
+	{
+		if (a.bodyId1 != b.bodyId1 || a.bodyId2 != b.bodyId2 || a.contactType != b.contactType)
+			return false;
+
+		Vector<Real, 3> dPos1 = a.pos1 - b.pos1;
+		Vector<Real, 3> dPos2 = a.pos2 - b.pos2;
+		if (NMQVectorLen2(dPos1) > NMQ_ContactMergePosEps2) return false;
+		if (NMQVectorLen2(dPos2) > NMQ_ContactMergePosEps2) return false;
+
+		Real n1aLen2 = NMQVectorLen2(a.normal1);
+		Real n1bLen2 = NMQVectorLen2(b.normal1);
+		Real n2aLen2 = NMQVectorLen2(a.normal2);
+		Real n2bLen2 = NMQVectorLen2(b.normal2);
+		if (n1aLen2 > EPSILON * EPSILON && n1bLen2 > EPSILON * EPSILON)
+		{
+			Real cosN1 = a.normal1.dot(b.normal1) / glm::sqrt(n1aLen2 * n1bLen2);
+			if (cosN1 < NMQ_ContactMergeNormalCos) return false;
+		}
+		if (n2aLen2 > EPSILON * EPSILON && n2bLen2 > EPSILON * EPSILON)
+		{
+			Real cosN2 = a.normal2.dot(b.normal2) / glm::sqrt(n2aLen2 * n2bLen2);
+			if (cosN2 < NMQ_ContactMergeNormalCos) return false;
+		}
+		return true;
+	}
+
+	template<typename ContactPairT>
+	static inline void NMQStableSortAndAggregateContacts(CArray<ContactPairT>& contacts)
+	{
+		if (contacts.size() <= 1) return;
+
+		std::stable_sort(contacts.begin(), contacts.begin() + contacts.size(), NMQContactPairLess<ContactPairT>);
+
+		CArray<ContactPairT> aggregatedContacts;
+		aggregatedContacts.resize(0);
+
+		ContactPairT clusterRef = contacts[0];
+		Real sumPos1[3] = { clusterRef.pos1[0], clusterRef.pos1[1], clusterRef.pos1[2] };
+		Real sumPos2[3] = { clusterRef.pos2[0], clusterRef.pos2[1], clusterRef.pos2[2] };
+		Real sumN1[3] = { clusterRef.normal1[0], clusterRef.normal1[1], clusterRef.normal1[2] };
+		Real sumN2[3] = { clusterRef.normal2[0], clusterRef.normal2[1], clusterRef.normal2[2] };
+		Real sumPen = clusterRef.interpenetration;
+		uint clusterCount = 1;
+
+		auto flushCluster = [&]()
+		{
+			const Real invCount = Real(1) / Real(clusterCount);
+			clusterRef.pos1 = Vector<Real, 3>(sumPos1[0] * invCount, sumPos1[1] * invCount, sumPos1[2] * invCount);
+			clusterRef.pos2 = Vector<Real, 3>(sumPos2[0] * invCount, sumPos2[1] * invCount, sumPos2[2] * invCount);
+			clusterRef.normal1 = NMQNormalizeOrFallback(
+				Vector<Real, 3>(sumN1[0] * invCount, sumN1[1] * invCount, sumN1[2] * invCount),
+				clusterRef.normal1);
+			clusterRef.normal2 = NMQNormalizeOrFallback(
+				Vector<Real, 3>(sumN2[0] * invCount, sumN2[1] * invCount, sumN2[2] * invCount),
+				clusterRef.normal2);
+			clusterRef.interpenetration = sumPen * invCount;
+			aggregatedContacts.pushBack(clusterRef);
+		};
+
+		for (uint i = 1; i < contacts.size(); ++i)
+		{
+			const ContactPairT& c = contacts[i];
+			if (!NMQContactPairGeomClose(clusterRef, c))
+			{
+				flushCluster();
+				clusterRef = c;
+				sumPos1[0] = c.pos1[0]; sumPos1[1] = c.pos1[1]; sumPos1[2] = c.pos1[2];
+				sumPos2[0] = c.pos2[0]; sumPos2[1] = c.pos2[1]; sumPos2[2] = c.pos2[2];
+				sumN1[0] = c.normal1[0]; sumN1[1] = c.normal1[1]; sumN1[2] = c.normal1[2];
+				sumN2[0] = c.normal2[0]; sumN2[1] = c.normal2[1]; sumN2[2] = c.normal2[2];
+				sumPen = c.interpenetration;
+				clusterCount = 1;
+				continue;
+			}
+
+			sumPos1[0] += c.pos1[0]; sumPos1[1] += c.pos1[1]; sumPos1[2] += c.pos1[2];
+			sumPos2[0] += c.pos2[0]; sumPos2[1] += c.pos2[1]; sumPos2[2] += c.pos2[2];
+			sumN1[0] += c.normal1[0]; sumN1[1] += c.normal1[1]; sumN1[2] += c.normal1[2];
+			sumN2[0] += c.normal2[0]; sumN2[1] += c.normal2[1]; sumN2[2] += c.normal2[2];
+			sumPen += c.interpenetration;
+			++clusterCount;
+		}
+		flushCluster();
+
+		contacts.assign(aggregatedContacts);
+	}
+
+	static inline Real NMQCosOrOne(const Vector<Real, 3>& a, const Vector<Real, 3>& b)
+	{
+		const Real a2 = NMQVectorLen2(a);
+		const Real b2 = NMQVectorLen2(b);
+		if (a2 <= EPSILON * EPSILON || b2 <= EPSILON * EPSILON)
+			return Real(1);
+
+		const Real denom = glm::sqrt(a2 * b2);
+		if (denom <= EPSILON)
+			return Real(1);
+
+		Real c = a.dot(b) / denom;
+		if (c < Real(-1)) c = Real(-1);
+		if (c > Real(1)) c = Real(1);
+		return c;
+	}
+
+	template<typename ContactPairT>
+	static inline void NMQPrintNearCoincidentContactsEvidence(const CArray<ContactPairT>& contacts, uint64_t frameId)
+	{
+		const int total = (int)contacts.size();
+		if (total < 2)
+		{
+			printf("[NMQ_CP_NEAR] frame=%llu total=%d scanned=%d near_pairs=0\n",
+				(unsigned long long)frameId, total, total);
+			return;
+		}
+
+		const int scanLimit = total > 256 ? 256 : total;
+		const int maxPrintPairs = 24;
+		int nearPairs = 0;
+		int printed = 0;
+
+		for (int i = 0; i < scanLimit; ++i)
+		{
+			for (int j = i + 1; j < scanLimit; ++j)
+			{
+				const ContactPairT& a = contacts[(uint)i];
+				const ContactPairT& b = contacts[(uint)j];
+
+				if (!NMQContactPairGeomClose(a, b))
+					continue;
+
+				nearPairs++;
+
+				if (printed >= maxPrintPairs)
+					continue;
+
+				const Vector<Real, 3> dPos1 = a.pos1 - b.pos1;
+				const Vector<Real, 3> dPos2 = a.pos2 - b.pos2;
+				const Real dPos1Len = glm::sqrt(NMQVectorLen2(dPos1));
+				const Real dPos2Len = glm::sqrt(NMQVectorLen2(dPos2));
+				const Real cosN1 = NMQCosOrOne(a.normal1, b.normal1);
+				const Real cosN2 = NMQCosOrOne(a.normal2, b.normal2);
+				const Real dPen = abs(a.interpenetration - b.interpenetration);
+
+				printf("[NMQ_CP_NEAR] frame=%llu i=%d j=%d body=(%d,%d) triA=(%d,%d) triB=(%d,%d) "
+					"|dPos1|=%.9g |dPos2|=%.9g cosN1=%.9g cosN2=%.9g dPen=%.9g\n",
+					(unsigned long long)frameId,
+					i, j,
+					(int)a.bodyId1, (int)a.bodyId2,
+					(int)a.localId1, (int)a.localId2,
+					(int)b.localId1, (int)b.localId2,
+					(double)dPos1Len, (double)dPos2Len,
+					(double)cosN1, (double)cosN2, (double)dPen);
+				printed++;
+			}
+		}
+
+		printf("[NMQ_CP_NEAR_SUM] frame=%llu total=%d scanned=%d near_pairs=%d printed=%d pos_eps=%.9g normal_cos=%.9g\n",
+			(unsigned long long)frameId,
+			total,
+			scanLimit,
+			nearPairs,
+			printed,
+			(double)NMQ_ContactMergePosEps,
+			(double)NMQ_ContactMergeNormalCos);
+		if (scanLimit < total)
+		{
+			printf("[NMQ_CP_NEAR_SUM] frame=%llu note=scanned_first_%d_contacts_only\n",
+				(unsigned long long)frameId, scanLimit);
+		}
+	}
 
 	IMPLEMENT_TCLASS(NeighborTriMeshQuery, TDataType)
 
@@ -1237,6 +1454,7 @@ namespace dyno
 
 					TManifold<Real> manifold;
 					CollisionDetection<Real>::request(manifold, t0, t1, dHat, dHat);
+					// CollisionDetection<Real>::request(manifold, t0, t1, 0.0f, 0.0f);
 				laneCount = manifold.contactCount;
 			}
 		}
@@ -1398,7 +1616,7 @@ namespace dyno
 		this->inShapeBVHs()->tagOptional(true);
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
-		this->varDHead()->setValue(Real(0.0));
+		this->varDHead()->setValue(Real(0.001));
 	}
 
 	template<typename TDataType>
@@ -2139,7 +2357,7 @@ namespace dyno
 			shapeCount);
 
 		broadTimer2.stop();
-		std::cout << "[NeighborTriMeshQuery] compute broad phase time 1: " << broadTimer2.elapsedMilliseconds() << " ms" << std::endl;
+		// std::cout << "[NeighborTriMeshQuery] compute broad phase time 1: " << broadTimer2.elapsedMilliseconds() << " ms" << std::endl;
 
 		int total = mReduce.accumulate(pairCount.begin(), pairCount.size());
 		if (total <= 0)
@@ -2166,7 +2384,7 @@ namespace dyno
 			shapeCount);
 
 		broadTimer3.stop();
-		std::cout << "[NeighborTriMeshQuery] compute broad phase time 2: " << broadTimer3.elapsedMilliseconds() << " ms" << std::endl;
+		// std::cout << "[NeighborTriMeshQuery] compute broad phase time 2: " << broadTimer3.elapsedMilliseconds() << " ms" << std::endl;
 
 		pairCountCpy.clear();
 		pairCount.clear();
@@ -2717,11 +2935,37 @@ namespace dyno
 			this->varInputVerticesInRestWorld()->getValue());
 		// printf("[NeighborTriMeshQuery] NarrowPhase contacts generated: %d contacts found.\n", total);
 
-		{
-			static uint64_t sNarrowFrame = 0;
-			const uint64_t frameId = sNarrowFrame++;
+		static uint64_t sNarrowFrame = 0;
+		const uint64_t frameId = sNarrowFrame++;
 
-			bool enabled = true;
+		if (this->outContacts()->size() > 1)
+		{
+			CArray<ContactPair> hContacts;
+			hContacts.assign(this->outContacts()->getData());
+
+			// NMQPrintNearCoincidentContactsEvidence<ContactPair>(hContacts, frameId);
+
+			// const uint preAggCount = hContacts.size();
+
+			// Keep deterministic order and geometrically aggregate near-identical contacts before solver.
+			NMQStableSortAndAggregateContacts<ContactPair>(hContacts);
+
+			// const uint postAggCount = hContacts.size();
+
+			// printf("[NMQ_CP_AGG] frame=%llu pre=%u post=%u removed=%d\n",
+			// 	(unsigned long long)frameId,
+			// 	(unsigned int)preAggCount,
+			// 	(unsigned int)postAggCount,
+			// 	(int)preAggCount - (int)postAggCount);
+
+			this->outContacts()->resize(hContacts.size());
+			if (hContacts.size() > 0)
+				this->outContacts()->getData().assign(hContacts);
+		}
+
+		{
+
+			bool enabled = false;
 			if (enabled)
 			{
 				int maxPrint = 16;

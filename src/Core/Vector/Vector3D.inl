@@ -150,7 +150,8 @@ namespace dyno {
 	}
 
 	template <typename T>
-	Vector<T, 3>& Vector<T, 3>::operator*= (T scale)
+	// Vector<T, 3>& Vector<T, 3>::operator*= (T scale) // missed DYN_FUNC
+	DYN_FUNC Vector<T, 3>& Vector<T, 3>::operator*= (T scale)
 	{
 		data_ *= scale;
 		return *this;

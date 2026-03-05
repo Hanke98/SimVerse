@@ -60,3 +60,5 @@ save_picture
 save_picture_256envs
 save_picture_ctlFreq1
 save_picture_torque
+
+.clangd

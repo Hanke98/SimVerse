@@ -18,7 +18,12 @@ namespace dyno
     template<typename TDataType>
     void SimModule<TDataType>::compute()
     {
+        spdlog::info("===================   Frame {} Started   ===================", frame);
         spdlog::info("SimModule compute function called.");
+        AdvanceOneStep();
+
+        
+        spdlog::info("===================   Frame {} Ended     ===================\n", frame++);
     }
 
 

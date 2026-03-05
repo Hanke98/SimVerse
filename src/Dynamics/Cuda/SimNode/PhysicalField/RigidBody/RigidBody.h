@@ -2,10 +2,11 @@
 
 #include "../PhysicalNode.h"
 
-
-
-struct RigidBody : public PhysicalNode
+template<typename TDataType>
+struct RigidBody : public PhysicalNode<TDataType>
 {
-    // DEF_ARRAY_STATE(int, batch_nv, DeviceType::GPU, "Num of ")
-    ;
+    using Real = typename TDataType::Real;
+
+    dyno::DArray<int>      batch_nv;      // [env_id] num of generalized DoFs
+    dyno::DArray2D<Real>   batch_qacc;    // [dof_id, env_id] generalized acceleration
 };

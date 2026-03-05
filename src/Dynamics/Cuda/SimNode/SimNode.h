@@ -17,6 +17,8 @@
 
 #include "Node.h"
 #include "Vector.h"
+#include "Array/Array.h"
+#include "Field.h"
 #include "PhysicalField/RigidBody/RigidBody.h"
 
 #include <vector>
@@ -30,8 +32,8 @@ namespace dyno
     {
         using Real = typename TDataType::Real;
         int num_env = 0;
-        std::vector<Vec3f> gravities;
-        std::vector<Real> timesteps;
+        FArray<Vec3f, DeviceType::GPU> gravities;
+        FArray<Real, DeviceType::GPU> timesteps;
     };
 
 
@@ -56,19 +58,18 @@ namespace dyno
         ~SimNode() override;
 
     protected:
-        // void init();
+        void Init();
+
+        void InitRigidBody(int num_env, int num_bodies);    // TEST;
 
     
     public:
-        DEF_VAR(EnvInfosType, EnvInfos, EnvInfosType{}, "A struct containing the infos of parallel environments.");
-
+        DEF_VAR(EnvInfosType, env_infos, EnvInfosType{}, "A struct containing the infos of parallel environments.");
+        
+        // Rigid Body
+        DEF_VAR(RigidBody<TDataType>, rigid_body, RigidBody<TDataType>{}, "A struct containing infos about the rigid body in all environments.");
     protected:
         ;
-    
-
-
-
-
 
 
     };

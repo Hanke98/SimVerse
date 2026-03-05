@@ -19,7 +19,8 @@ std::shared_ptr<dyno::SceneGraph> CreateScene()
 	// Create SimModule and connect it to the SimNode
 	auto sim_module = std::make_shared<dyno::SimModule<dyno::DataType3f>>();
 	sim_module->varForceUpdate()->setValue(true);
-	sim_node->varEnvInfos()->connect(sim_module->inEnvInfos());
+	sim_node->varenv_infos()->connect(sim_module->inenv_infos());
+	sim_node->varrigid_body()->connect(sim_module->inrigid_body());
 	sim_node->animationPipeline()->pushModule(sim_module);
 
 	return scn;

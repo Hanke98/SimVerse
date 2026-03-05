@@ -195,6 +195,11 @@ namespace dyno
         const size_t baseShapeCount = urdfShapes.size();
         const size_t instanceCount = this->ctrl_mb_chains.size();
         const size_t totalShapeCount = baseShapeCount * instanceCount;
+        const uint invalidElementId = static_cast<uint>(-1);
+
+        // Keep member mapping as shape -> local box id. Build shape -> global element id per setup.
+        std::vector<Pair<uint, uint>> shape2ElementIdsGlobal = mTextureMeshShape2ElementIds;
+        std::vector<int> shape2ElementIdsDenseGlobal(shape2ElementIdsGlobal.size(), -1);
 
         using Real = typename TDataType::Real;
         using Coord = typename TDataType::Coord;
@@ -451,41 +456,53 @@ namespace dyno
             }
         }
 
-        // Validate element ids if topology is available.
+        // Remap shape->local box ids to shape->global element ids using current element offsets.
         {
             auto topo = this->stateTopology()->getDataPtr();
-            if (topo != nullptr && !mTextureMeshShape2ElementIdsDense.empty())
+            if (topo != nullptr && !shape2ElementIdsGlobal.empty())
             {
                 auto elementOffset = topo->calculateElementOffset();
                 uint boxStart = (uint)elementOffset.boxIndex();
                 uint boxCount = (uint)topo->boxesInGlobal().size();
-                uint boxEnd = boxStart + boxCount;
-
-                size_t corrected = 0;
+                size_t remapped = 0;
                 size_t invalid = 0;
-                for (auto& id : mTextureMeshShape2ElementIdsDense)
+
+                for (auto& entry : shape2ElementIdsGlobal)
                 {
-                    if (id < 0) continue;
-                    uint uid = (uint)id;
-                    if (boxCount > 0 && uid < boxStart && uid < boxCount)
+                    uint shapeId = entry.first;
+                    if (shapeId >= shape2ElementIdsDenseGlobal.size())
                     {
-                        id = (int)(uid + boxStart);
-                        ++corrected;
+                        ++invalid;
                         continue;
                     }
-                    if (boxCount > 0 && uid >= boxEnd)
+
+                    shape2ElementIdsDenseGlobal[shapeId] = -1;
+                    if (entry.second == invalidElementId)
                     {
-                        id = -1;
-                        ++invalid;
+                        continue;
                     }
+
+                    uint localBoxId = entry.second;
+                    if (localBoxId >= boxCount)
+                    {
+                        entry.second = invalidElementId;
+                        ++invalid;
+                        continue;
+                    }
+
+                    uint globalElementId = boxStart + localBoxId;
+                    entry.second = globalElementId;
+                    shape2ElementIdsDenseGlobal[shapeId] = (int)globalElementId;
+                    ++remapped;
                 }
-                if (corrected > 0 || invalid > 0)
+
+                if (remapped > 0 || invalid > 0)
                 {
-                    printf("[NMQ DEBUG] elementId fixup: corrected=%zu invalid=%zu boxStart=%u boxEnd=%u\n",
-                        corrected,
+                    printf("[NMQ DEBUG] elementId remap(local->global): remapped=%zu invalid=%zu boxStart=%u boxCount=%u\n",
+                        remapped,
                         invalid,
                         boxStart,
-                        boxEnd);
+                        boxCount);
                 }
             }
         }
@@ -571,8 +588,8 @@ namespace dyno
         printf("[NMQ DEBUG] shapeCount(rest)=%zu,  urdfShapes=%zu, elemPairs=%zu, elemDense=%zu, rigidIds=%zu\n",
                restShapeCenters.size(),
                urdfShapes.size(),
-               mTextureMeshShape2ElementIds.size(),
-               mTextureMeshShape2ElementIdsDense.size(),
+               shape2ElementIdsGlobal.size(),
+               shape2ElementIdsDenseGlobal.size(),
                mTextureMeshShape2RigidBodyIds.size());
         printf("[NMQ DEBUG] stateInstanceTransform empty=%d size=%u\n",
                this->stateInstanceTransform()->isEmpty() ? 1 : 0,
@@ -698,13 +715,13 @@ namespace dyno
             return;
         }
 
-        const bool denseMappingSizeOk = (mTextureMeshShape2ElementIdsDense.size() == totalShapeCount);
+        const bool denseMappingSizeOk = (shape2ElementIdsDenseGlobal.size() == totalShapeCount);
         const bool rigidMappingSizeOk = (mTextureMeshShape2RigidBodyIds.size() == totalShapeCount);
         if (!denseMappingSizeOk || !rigidMappingSizeOk)
         {
             printf("[BatchRigidBodySystem] Shape mapping size mismatch (shapeCount=%zu, dense=%zu, rigid=%zu). NeighborTriMeshQuery will fail-fast.\n",
                 totalShapeCount,
-                mTextureMeshShape2ElementIdsDense.size(),
+                shape2ElementIdsDenseGlobal.size(),
                 mTextureMeshShape2RigidBodyIds.size());
         }
 
@@ -714,8 +731,8 @@ namespace dyno
         mNeighborTriMeshQuery->inPatch2TriIndices()->assign(patch2TriIndices);
         mNeighborTriMeshQuery->inRestShapeCenter()->assign(restShapeCenters);
         mNeighborTriMeshQuery->inRestShapeRotation()->assign(restShapeRotations);
-        mNeighborTriMeshQuery->inShape2ElementIds()->assign(mTextureMeshShape2ElementIds);
-        mNeighborTriMeshQuery->inShape2ElementIdsDense()->assign(mTextureMeshShape2ElementIdsDense);
+        mNeighborTriMeshQuery->inShape2ElementIds()->assign(shape2ElementIdsGlobal);
+        mNeighborTriMeshQuery->inShape2ElementIdsDense()->assign(shape2ElementIdsDenseGlobal);
         mNeighborTriMeshQuery->inShape2RigidBodyIds()->assign(mTextureMeshShape2RigidBodyIds);
         mNeighborTriMeshQuery->inShape2TriOffsets()->assign(shape2TriOffsets);
         
@@ -983,9 +1000,11 @@ namespace dyno
             std::cout << "[BatchRigidBodySystem] textureShapeCount: " << textureShapeCount << std::endl;
             mTextureMeshShape2RigidBodyIds.clear();
             mTextureMeshShape2ElementIds.clear();
+            mTextureMeshShape2ElementIdsDense.clear();
             if (textureShapeCount > 0)
             {
                 mTextureMeshShape2ElementIds.reserve(textureShapeCount);
+                mTextureMeshShape2ElementIdsDense.assign(textureShapeCount, -1);
                 for (uint i = 0; i < textureShapeCount; ++i)
                 {
                     mTextureMeshShape2ElementIds.push_back(Pair<uint, uint>(i, invalidElementId));
@@ -1080,10 +1099,16 @@ namespace dyno
                     if (it < mTextureMeshShape2ElementIds.size())
                     {
                         mTextureMeshShape2ElementIds[it] = entry;
+                        mTextureMeshShape2ElementIdsDense[it] = (entry.second == invalidElementId)
+                            ? -1
+                            : static_cast<int>(entry.second);
                     }
                     else
                     {
                         mTextureMeshShape2ElementIds.push_back(entry);
+                        mTextureMeshShape2ElementIdsDense.push_back((entry.second == invalidElementId)
+                            ? -1
+                            : static_cast<int>(entry.second));
                     }
                     
                     this->bindShape(actor, Pair<uint, uint>(it, robotarmIndex));
@@ -1223,43 +1248,6 @@ namespace dyno
                 ctrl_mb_chains.push_back(mb);
                 non_ctrl_mb_chains.push_back(non_ctrl_mb);
                 robotarmIndex++;
-            }
-            {
-                auto topo = this->stateTopology()->getDataPtr();
-                if (topo == nullptr)
-                {
-                    printf("[BatchRigidBodySystem] TextureMesh shape to element mapping not ready yet (topology unavailable).\n");
-                }
-                else
-                {
-                    auto elementOffset = topo->calculateElementOffset();
-                    uint boxStart = (uint)elementOffset.boxIndex();
-                    uint validCount = 0;
-                    uint invalidCount = 0;
-                    uint minId = static_cast<uint>(-1);
-                    uint maxId = 0;
-                    for (auto& entry : mTextureMeshShape2ElementIds)
-                    {
-                        if (entry.second == invalidElementId)
-                        {
-                            invalidCount++;
-                            continue;
-                        }
-
-                        entry.second = boxStart + entry.second;
-                        pushBackShape2ElementIdsDense(entry.second);
-                        validCount++;
-                        if (entry.second < minId) minId = entry.second;
-                        if (entry.second > maxId) maxId = entry.second;
-                    }
-                    printf("[BatchRigidBodySystem] TextureMesh shape to element mapping ready (shapeCount=%zu, valid=%u, invalid=%u, boxStart=%u, min=%u, max=%u).\n",
-                        textureShapeCount,
-                        validCount,
-                        invalidCount,
-                        boxStart,
-                        validCount > 0 ? minId : 0,
-                        validCount > 0 ? maxId : 0);
-                }
             }
             attachRender();
     }

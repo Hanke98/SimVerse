@@ -1,6 +1,7 @@
 #include "DataTypes.h"
 #include "RobotArm.h"
 #include <GLFW/glfw3.h>
+#include <cstdlib>
 #include <iostream>
 
 using namespace dyno;
@@ -33,13 +34,14 @@ int main() {
     simulator.createScene();
     std::cout << "场景创建完成" << std::endl;
 
-    float dt = 0.02;
+    float dt = 0.005;
     float density = 2000.0f;
     float damping = 10.0f; //250.0f;
     bool enableGravity = false;
     bool enableFriction = false;
+    // bool enableRendering = std::getenv("DISPLAY") != nullptr;
     bool enableRendering = true;
-    bool enableSaveScreen = false;
+    bool enableSaveScreen = true;
     bool render_collision = false;
     std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Collision/screenSave/";
     Vec3f base{ -0.0f, 0.5f, -0.0f };
@@ -143,7 +145,9 @@ int main() {
     simulator.setHingeVelocities(param);
 
 
-    while (!glfwWindowShouldClose(glfwGetCurrentContext())) {
+    const int maxStepsNoRender = 500;
+    while ((enableRendering && !glfwWindowShouldClose(glfwGetCurrentContext()))
+           || (!enableRendering && i < maxStepsNoRender)) {
 
         // if (i == 500) {
         //     RobotArmSimulator<DataType3f>::ResetParam param;

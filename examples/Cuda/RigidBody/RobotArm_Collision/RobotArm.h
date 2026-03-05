@@ -89,5 +89,7 @@ namespace dyno
         std::shared_ptr<SceneGraph> scn;
         UbiApp app;
         bool isInitialized = false;
+        bool mSimulationRunning = true;
+        bool mSpacePressedLastFrame = false;
     };
 } // namespace dyno

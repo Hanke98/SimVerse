@@ -136,6 +136,8 @@ namespace dyno
         app.setSceneGraph(scn);
         std::cout << "Initializing..." << std::endl;
         isInitialized = true;
+        mSimulationRunning = true;
+        mSpacePressedLastFrame = false;
         activeScene = SceneGraphFactory::instance()->active();
         std::cout << "resetting scene..." << std::endl;
         activeScene->reset();
@@ -146,22 +148,38 @@ namespace dyno
     void RobotArmSimulator<TDataType>::initialize(int width, int height, Real scale) {
         app.initialize(width, height);
         app.renderWindow()->getCamera()->setUnitScale(scale);
+        // app.renderWindow()->getCamera()->setEyePos(Vec3f(0.73, 1.21, 2.65));
     }
 
     template<typename TDataType>
     void RobotArmSimulator<TDataType>::stepSimulation(bool enableRendering, bool enableSaveScreen, std::string savePath) {
         if (!isInitialized) return;
 
-        if (activeScene) {
+        GlfwRenderWindow* renderWindow = nullptr;
+        GLFWwindow* window = nullptr;
+
+        if (enableRendering) {
+            renderWindow = dynamic_cast<GlfwRenderWindow*>(app.renderWindow());
+            if (!renderWindow) return;
+
+            window = renderWindow->getGLFWWindow();
+            if (!window) return;
+
+            // Process keyboard input first so space toggles pause/resume this step.
+            glfwPollEvents();
+
+            const bool spacePressed = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+            if (spacePressed && !mSpacePressedLastFrame) {
+                mSimulationRunning = !mSimulationRunning;
+            }
+            mSpacePressedLastFrame = spacePressed;
+        }
+
+        if (activeScene && mSimulationRunning) {
             activeScene->takeOneFrame();
         }
         
         if (enableRendering) {
-
-            // 获取渲染窗口
-            GlfwRenderWindow* renderWindow = dynamic_cast<GlfwRenderWindow*>(app.renderWindow());
-            if (!renderWindow) return;
-
             if (enableSaveScreen) {
                 renderWindow->setScreenRecordingPath(savePath);
                 renderWindow->saveScreen(activeScene->getFrameNumber());
@@ -170,9 +188,6 @@ namespace dyno
             if (activeScene) {
                 activeScene->updateGraphicsContext();
             }
-
-            // 处理事件
-            glfwPollEvents();
 
             // 获取相机
             auto camera = renderWindow->getCamera();
@@ -213,10 +228,7 @@ namespace dyno
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             
             // 交换缓冲区
-            GLFWwindow* window = renderWindow->getGLFWWindow();
-            if (window) {
-                glfwSwapBuffers(window);
-            }
+            glfwSwapBuffers(window);
         }
     }
 

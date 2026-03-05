@@ -1616,7 +1616,7 @@ namespace dyno
 		this->inShapeBVHs()->tagOptional(true);
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
-		this->varDHead()->setValue(Real(0.001));
+		this->varDHead()->setValue(Real(0.0));
 	}
 
 	template<typename TDataType>

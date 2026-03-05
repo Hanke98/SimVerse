@@ -57,5 +57,6 @@ tmp
 
 /examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/*.bmp
 /examples/Cuda/RigidBody/NMQ_test/screenSave/
+/examples/Cuda/RigidBody/RobotArm_Collision/screenSave/
 
 /.github/*

@@ -41,31 +41,34 @@ std::shared_ptr<SceneGraph> creatScene()
 	std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
 
 	auto multiRobotArm = scn->addNode(std::make_shared<BatchRigidBodySystem<DataType3f>>());
-	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_complex.urdf");
+	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_cube_sphere_cube.urdf");
 
 	std::vector<Transform3f> vehiclesTransform;
 	Transform3f Transform0(Vec3f(0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
-	Transform3f Transform1(Vec3f(0.0f, 0.0f, 8.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
-	// Transform3f Transform2(Vec3f(6.0f, 0.0f, 0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
-	// Transform3f Transform3(Vec3f(6.0f, 0.0f, 6.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+	Transform3f Transform1(Vec3f(0.0f, 0.0f, 6.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+	Transform3f Transform2(Vec3f(6.0f, 0.0f, 0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
+	Transform3f Transform3(Vec3f(6.0f, 0.0f, 6.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
 
-	int transformMode = 1;
-	if (const char* v = std::getenv("NMQ_SCENE_TRANSFORM"))
-		transformMode = std::atoi(v);
+	// int transformMode = 1;
+	// if (const char* v = std::getenv("NMQ_SCENE_TRANSFORM"))
+	// 	transformMode = std::atoi(v);
 
-	if (transformMode == 0)
-		vehiclesTransform.push_back(Transform0);
-	else
-		vehiclesTransform.push_back(Transform1);
+	// if (transformMode == 0)
+	// 	vehiclesTransform.push_back(Transform0);
+	// else
+	// 	vehiclesTransform.push_back(Transform1);
 
-	const Vec3f& tScene = (transformMode == 0) ? Transform0.translation() : Transform1.translation();
-	printf("[NMQ_test] scene_transform=%d translation=(%.6f, %.6f, %.6f)\n",
-		transformMode,
-		(double)tScene.x,
-		(double)tScene.y,
-		(double)tScene.z);
-	// vehiclesTransform.push_back(Transform2);
-	// vehiclesTransform.push_back(Transform3);
+	// const Vec3f& tScene = (transformMode == 0) ? Transform0.translation() : Transform1.translation();
+	// printf("[NMQ_test] scene_transform=%d translation=(%.6f, %.6f, %.6f)\n",
+	// 	transformMode,
+	// 	(double)tScene.x,
+	// 	(double)tScene.y,
+	// 	(double)tScene.z);
+
+	vehiclesTransform.push_back(Transform0);
+	vehiclesTransform.push_back(Transform1);
+	vehiclesTransform.push_back(Transform2);
+	vehiclesTransform.push_back(Transform3);
 
 	multiRobotArm->varVehiclesTransform()->setValue(vehiclesTransform);
 	auto instances = multiRobotArm->varVehiclesTransform()->getValue();
@@ -216,7 +219,7 @@ int main()
 	// app.renderWindow()->getCamera()->setEyePos(Vec3f(1.36, 1.6, 2.44));
 	// app.renderWindow()->getCamera()->setTargetPos(Vec3f(0, 1.1, 0));
 
-	app.renderWindow()->getCamera()->setUnitScale(5.0f);
+	app.renderWindow()->getCamera()->setUnitScale(10.0f);
 
 	app.mainLoop();
 

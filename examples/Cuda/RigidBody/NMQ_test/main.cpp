@@ -41,7 +41,7 @@ std::shared_ptr<SceneGraph> creatScene()
 	std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
 
 	auto multiRobotArm = scn->addNode(std::make_shared<BatchRigidBodySystem<DataType3f>>());
-	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_cube_sphere_cube.urdf");
+	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_cube_cube_cube.urdf");
 
 	std::vector<Transform3f> vehiclesTransform;
 	Transform3f Transform0(Vec3f(0.0f), Quat1f(0.0f, 0.0f, 0.0f, 1.0f).toMatrix3x3(), Vec3f(1.0f));
@@ -73,6 +73,8 @@ std::shared_ptr<SceneGraph> creatScene()
 	multiRobotArm->varVehiclesTransform()->setValue(vehiclesTransform);
 	auto instances = multiRobotArm->varVehiclesTransform()->getValue();
 	auto texMesh = multiRobotArm->stateTextureMesh()->constDataPtr();
+	const auto& urdfLinks = multiRobotArm->urdfInfo.links;
+	const int baseShapeCount = static_cast<int>(urdfLinks.size());
 
 	std::map<int, std::shared_ptr<PdActor>> actors;
 
@@ -83,20 +85,27 @@ std::shared_ptr<SceneGraph> creatScene()
 
 	for (int i = 0; i < instances.size(); i++) {
 		BatchRigidBodySystem<DataType3f>::MulitBodyChainIndices mb;
-		for (int it = 0; it < texMesh->shapes().size(); it++) {
+		for (int localShapeId = 0; localShapeId < baseShapeCount; localShapeId++) {
+			const auto& link = urdfLinks[localShapeId];
+			const uint renderShapeId = multiRobotArm->varVisualOrCollision()->getValue()
+				? link.collisionShapeId
+				: link.visualShapeId;
+			if (renderShapeId >= texMesh->shapes().size())
+				continue;
+
 			RigidBodyInfo rigidbody;
 
-			auto up = texMesh->shapes()[it]->boundingBox.v1;
-			auto down = texMesh->shapes()[it]->boundingBox.v0;
+			auto up = texMesh->shapes()[renderShapeId]->boundingBox.v1;
+			auto down = texMesh->shapes()[renderShapeId]->boundingBox.v0;
 
-			rigidbody.position = Quat1f(instances[i].rotation()).rotate(texMesh->shapes()[it]->boundingTransform.translation())
+			rigidbody.position = Quat1f(instances[i].rotation()).rotate(texMesh->shapes()[renderShapeId]->boundingTransform.translation())
 								+ instances[i].translation();
 
 			rigidbody.angle = Quat1f(instances[i].rotation());
 			rigidbody.motionType = BodyType::Dynamic;
 
 			auto actor = multiRobotArm->createRigidBody(rigidbody);
-			actors[it] = actor;
+			actors[renderShapeId] = actor;
 
 			BoxInfo box;
 
@@ -105,7 +114,7 @@ std::shared_ptr<SceneGraph> creatScene()
             int oldBoxCount = multiRobotArm->getHostBoxesSize();
 
 			multiRobotArm->bindBox(actor, box, 1000000);
-			multiRobotArm->bindShape(actor, Pair<uint, uint>(it, i));
+			multiRobotArm->bindShape(actor, Pair<uint, uint>(renderShapeId, i));
 			mb.body_indices.push_back(actor->idx);
 
             int newBoxCount = multiRobotArm->getHostBoxesSize();
@@ -117,15 +126,15 @@ std::shared_ptr<SceneGraph> creatScene()
             else
             {
                 printf("[BatchRigidBodySystem] TextureMesh shape to box mapping mismatch (shapeId=%u, oldBoxCount=%d, newBoxCount=%d).\n",
-                    it,
+                    renderShapeId,
                     oldBoxCount,
                     newBoxCount);
             }
 
-            // Store the mapping from texture mesh shape to element id
-            // auto& entry = mTextureMeshShape2ElementIds[it];
+			// NeighborTriMeshQuery expects one contiguous global shape id per instance/link pair.
+			const uint globalShapeId = static_cast<uint>(i * baseShapeCount + localShapeId);
             Pair<uint, uint> entry;
-            entry.first = it;
+            entry.first = globalShapeId;
             entry.second = boxLocalId;
 			multiRobotArm->pushBackShape2ElementIds(entry);
 		}

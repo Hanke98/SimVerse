@@ -12,7 +12,6 @@
 #include <cmath>
 #include <cassert>
 #include <cstdint>
-#include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -41,6 +40,7 @@ namespace dyno
 	static constexpr Real NMQ_ContactMergePosEps = Real(2e-3);
 	static constexpr Real NMQ_ContactMergePosEps2 = NMQ_ContactMergePosEps * NMQ_ContactMergePosEps;
 	static constexpr Real NMQ_ContactMergeNormalCos = Real(0.999);
+	static constexpr int NMQ_MaxContactsPerBodyPair = 4;
 
 	template<typename ContactPairT>
 	static inline bool NMQContactPairLess(const ContactPairT& a, const ContactPairT& b)
@@ -171,88 +171,146 @@ namespace dyno
 		contacts.assign(aggregatedContacts);
 	}
 
-	static inline Real NMQCosOrOne(const Vector<Real, 3>& a, const Vector<Real, 3>& b)
+	template<typename ContactPairT>
+	static inline bool NMQSameBodyPair(const ContactPairT& a, const ContactPairT& b)
 	{
-		const Real a2 = NMQVectorLen2(a);
-		const Real b2 = NMQVectorLen2(b);
-		if (a2 <= EPSILON * EPSILON || b2 <= EPSILON * EPSILON)
-			return Real(1);
-
-		const Real denom = glm::sqrt(a2 * b2);
-		if (denom <= EPSILON)
-			return Real(1);
-
-		Real c = a.dot(b) / denom;
-		if (c < Real(-1)) c = Real(-1);
-		if (c > Real(1)) c = Real(1);
-		return c;
+		return a.bodyId1 == b.bodyId1
+			&& a.bodyId2 == b.bodyId2
+			&& a.contactType == b.contactType;
 	}
 
 	template<typename ContactPairT>
-	static inline void NMQPrintNearCoincidentContactsEvidence(const CArray<ContactPairT>& contacts, uint64_t frameId)
+	static inline void NMQReduceContactsPerBodyPair(CArray<ContactPairT>& contacts)
 	{
-		const int total = (int)contacts.size();
-		if (total < 2)
-		{
-			printf("[NMQ_CP_NEAR] frame=%llu total=%d scanned=%d near_pairs=0\n",
-				(unsigned long long)frameId, total, total);
+		if (contacts.size() <= (uint)NMQ_MaxContactsPerBodyPair)
 			return;
-		}
 
-		const int scanLimit = total > 256 ? 256 : total;
-		const int maxPrintPairs = 24;
-		int nearPairs = 0;
-		int printed = 0;
+		CArray<ContactPairT> reducedContacts;
+		reducedContacts.resize(0);
 
-		for (int i = 0; i < scanLimit; ++i)
+		auto appendReducedGroup = [&](uint begin, uint end)
 		{
-			for (int j = i + 1; j < scanLimit; ++j)
+			const uint count = end - begin;
+			if (count <= (uint)NMQ_MaxContactsPerBodyPair)
 			{
-				const ContactPairT& a = contacts[(uint)i];
-				const ContactPairT& b = contacts[(uint)j];
-
-				if (!NMQContactPairGeomClose(a, b))
-					continue;
-
-				nearPairs++;
-
-				if (printed >= maxPrintPairs)
-					continue;
-
-				const Vector<Real, 3> dPos1 = a.pos1 - b.pos1;
-				const Vector<Real, 3> dPos2 = a.pos2 - b.pos2;
-				const Real dPos1Len = glm::sqrt(NMQVectorLen2(dPos1));
-				const Real dPos2Len = glm::sqrt(NMQVectorLen2(dPos2));
-				const Real cosN1 = NMQCosOrOne(a.normal1, b.normal1);
-				const Real cosN2 = NMQCosOrOne(a.normal2, b.normal2);
-				const Real dPen = abs(a.interpenetration - b.interpenetration);
-
-				printf("[NMQ_CP_NEAR] frame=%llu i=%d j=%d body=(%d,%d) triA=(%d,%d) triB=(%d,%d) "
-					"|dPos1|=%.9g |dPos2|=%.9g cosN1=%.9g cosN2=%.9g dPen=%.9g\n",
-					(unsigned long long)frameId,
-					i, j,
-					(int)a.bodyId1, (int)a.bodyId2,
-					(int)a.localId1, (int)a.localId2,
-					(int)b.localId1, (int)b.localId2,
-					(double)dPos1Len, (double)dPos2Len,
-					(double)cosN1, (double)cosN2, (double)dPen);
-				printed++;
+				for (uint i = begin; i < end; ++i)
+					reducedContacts.pushBack(contacts[i]);
+				return;
 			}
+
+			int selected[NMQ_MaxContactsPerBodyPair] = { -1, -1, -1, -1 };
+			int selectedCount = 0;
+
+			auto selectIndex = [&](int idx)
+			{
+				if (idx < 0)
+					return;
+				for (int i = 0; i < selectedCount; ++i)
+				{
+					if (selected[i] == idx)
+						return;
+				}
+				if (selectedCount < NMQ_MaxContactsPerBodyPair)
+					selected[selectedCount++] = idx;
+			};
+
+			int deepestIdx = (int)begin;
+			for (uint i = begin + 1; i < end; ++i)
+			{
+				if (contacts[i].interpenetration > contacts[(uint)deepestIdx].interpenetration)
+					deepestIdx = (int)i;
+			}
+			selectIndex(deepestIdx);
+
+			Vector<Real, 3> avgNormal(Real(0));
+			Vector<Real, 3> centroid(Real(0));
+			for (uint i = begin; i < end; ++i)
+			{
+				avgNormal += contacts[i].normal1;
+				centroid += contacts[i].pos1;
+			}
+
+			const Real invCount = Real(1) / Real(count);
+			avgNormal = NMQNormalizeOrFallback(avgNormal * invCount, contacts[begin].normal1);
+			centroid *= invCount;
+
+			Vector<Real, 3> tangentU;
+			if (abs(avgNormal[0]) < Real(0.9))
+				tangentU = Vector<Real, 3>(Real(1), Real(0), Real(0)).cross(avgNormal);
+			else
+				tangentU = Vector<Real, 3>(Real(0), Real(1), Real(0)).cross(avgNormal);
+			tangentU = NMQNormalizeOrFallback(tangentU, Vector<Real, 3>(Real(0), Real(0), Real(1)));
+			Vector<Real, 3> tangentV = NMQNormalizeOrFallback(avgNormal.cross(tangentU), Vector<Real, 3>(Real(0), Real(1), Real(0)));
+
+			int minUIdx = -1, maxUIdx = -1, minVIdx = -1, maxVIdx = -1;
+			Real minU = REAL_INF, maxU = -REAL_INF, minV = REAL_INF, maxV = -REAL_INF;
+			for (uint i = begin; i < end; ++i)
+			{
+				const Vector<Real, 3> d = contacts[i].pos1 - centroid;
+				const Real u = d.dot(tangentU);
+				const Real v = d.dot(tangentV);
+				if (u < minU) { minU = u; minUIdx = (int)i; }
+				if (u > maxU) { maxU = u; maxUIdx = (int)i; }
+				if (v < minV) { minV = v; minVIdx = (int)i; }
+				if (v > maxV) { maxV = v; maxVIdx = (int)i; }
+			}
+
+			selectIndex(minUIdx);
+			selectIndex(maxUIdx);
+			selectIndex(minVIdx);
+			selectIndex(maxVIdx);
+
+			if (selectedCount < NMQ_MaxContactsPerBodyPair)
+			{
+				while (selectedCount < NMQ_MaxContactsPerBodyPair)
+				{
+					int farthestIdx = -1;
+					Real farthestDist2 = Real(-1);
+					for (uint i = begin; i < end; ++i)
+					{
+						bool alreadySelected = false;
+						for (int k = 0; k < selectedCount; ++k)
+						{
+							if (selected[k] == (int)i)
+							{
+								alreadySelected = true;
+								break;
+							}
+						}
+						if (alreadySelected)
+							continue;
+
+						const Vector<Real, 3> d = contacts[i].pos1 - centroid;
+						const Real dist2 = NMQVectorLen2(d);
+						if (dist2 > farthestDist2)
+						{
+							farthestDist2 = dist2;
+							farthestIdx = (int)i;
+						}
+					}
+
+					if (farthestIdx < 0)
+						break;
+					selectIndex(farthestIdx);
+				}
+			}
+
+			for (int i = 0; i < selectedCount; ++i)
+				reducedContacts.pushBack(contacts[(uint)selected[i]]);
+		};
+
+		uint begin = 0;
+		while (begin < contacts.size())
+		{
+			uint end = begin + 1;
+			while (end < contacts.size() && NMQSameBodyPair(contacts[begin], contacts[end]))
+				++end;
+
+			appendReducedGroup(begin, end);
+			begin = end;
 		}
 
-		printf("[NMQ_CP_NEAR_SUM] frame=%llu total=%d scanned=%d near_pairs=%d printed=%d pos_eps=%.9g normal_cos=%.9g\n",
-			(unsigned long long)frameId,
-			total,
-			scanLimit,
-			nearPairs,
-			printed,
-			(double)NMQ_ContactMergePosEps,
-			(double)NMQ_ContactMergeNormalCos);
-		if (scanLimit < total)
-		{
-			printf("[NMQ_CP_NEAR_SUM] frame=%llu note=scanned_first_%d_contacts_only\n",
-				(unsigned long long)frameId, scanLimit);
-		}
+		contacts.assign(reducedContacts);
 	}
 
 	IMPLEMENT_TCLASS(NeighborTriMeshQuery, TDataType)
@@ -1584,20 +1642,26 @@ namespace dyno
 				if (outIdx >= writeLimit || outIdx >= contacts.size())
 					break;
 
+				// request(..., dHat, dHat) returns contacts on the inflated shell of body B and
+				// a penetration value that already includes both shell radii. Move the contact
+				// point back to the original surface and store shell-corrected penetration so
+				// the solver does not treat "within dHat" as true interpenetration.
+				Vec3f contactPoint = manifold.contacts[n].position + dHat * manifold.normal;
+				// Vec3f contactPoint = manifold.contacts[n].position;
+				Real shellCorrectedPenetration = -manifold.contacts[n].penetration - Real(2) * dHat;
+				// Real shellCorrectedPenetration = -manifold.contacts[n].penetration;
+
 				ContactPair cp;
 				cp.bodyId1 = bodyId0;
 				cp.bodyId2 = bodyId1;
 				cp.localId1 = triId0;
 				cp.localId2 = triId1;
-				cp.pos1 = manifold.contacts[n].position;
-				cp.pos2 = manifold.contacts[n].position;
-				// cp.pos1 = manifold.contacts[n].position + dHat * manifold.normal;
-				// cp.pos2 = manifold.contacts[n].position + dHat * manifold.normal;
+				cp.pos1 = contactPoint;
+				cp.pos2 = contactPoint;
 				cp.normal1 = -manifold.normal;
 				cp.normal2 = manifold.normal;
 				cp.contactType = ContactType::CT_NONPENETRATION;
-				cp.interpenetration = -manifold.contacts[n].penetration;
-				// cp.interpenetration = -manifold.contacts[n].penetration - 2 * dHat;
+				cp.interpenetration = maximum(shellCorrectedPenetration, Real(0));
 
 
 				contacts[outIdx] = cp;
@@ -1616,7 +1680,7 @@ namespace dyno
 		this->inShapeBVHs()->tagOptional(true);
 
 		this->varGridSizeLimit()->setValue(Real(0.01));
-		this->varDHead()->setValue(Real(0.0));
+		this->varDHead()->setValue(Real(0.000));
 	}
 
 	template<typename TDataType>
@@ -2935,72 +2999,21 @@ namespace dyno
 			this->varInputVerticesInRestWorld()->getValue());
 		// printf("[NeighborTriMeshQuery] NarrowPhase contacts generated: %d contacts found.\n", total);
 
-		static uint64_t sNarrowFrame = 0;
-		const uint64_t frameId = sNarrowFrame++;
-
-		if (this->outContacts()->size() > 1)
-		{
-			CArray<ContactPair> hContacts;
-			hContacts.assign(this->outContacts()->getData());
-
-			// NMQPrintNearCoincidentContactsEvidence<ContactPair>(hContacts, frameId);
-
-			// const uint preAggCount = hContacts.size();
-
-			// Keep deterministic order and geometrically aggregate near-identical contacts before solver.
-			NMQStableSortAndAggregateContacts<ContactPair>(hContacts);
-
-			// const uint postAggCount = hContacts.size();
-
-			// printf("[NMQ_CP_AGG] frame=%llu pre=%u post=%u removed=%d\n",
-			// 	(unsigned long long)frameId,
-			// 	(unsigned int)preAggCount,
-			// 	(unsigned int)postAggCount,
-			// 	(int)preAggCount - (int)postAggCount);
-
-			this->outContacts()->resize(hContacts.size());
-			if (hContacts.size() > 0)
-				this->outContacts()->getData().assign(hContacts);
-		}
-
-		{
-
-			bool enabled = false;
-			if (enabled)
+			if (this->outContacts()->size() > 1)
 			{
-				int maxPrint = 16;
-
 				CArray<ContactPair> hContacts;
 				hContacts.assign(this->outContacts()->getData());
 
-				int printCount = (int)hContacts.size();
-				if (printCount > maxPrint)
-					printCount = maxPrint;
+				// Keep deterministic order and geometrically aggregate near-identical contacts before solver.
+				NMQStableSortAndAggregateContacts<ContactPair>(hContacts);
+				NMQReduceContactsPerBodyPair<ContactPair>(hContacts);
 
-				printf("[NMQ_CP] frame=%llu total=%u print=%d\n",
-					(unsigned long long)frameId,
-					(unsigned int)hContacts.size(),
-					printCount);
-
-				for (int i = 0; i < printCount; ++i)
-				{
-					const ContactPair& cp = hContacts[(uint)i];
-					printf("  cp[%d] body=(%d,%d) tri=(%d,%d) pen=%.9f\n",
-						i,
-						(int)cp.bodyId1, (int)cp.bodyId2,
-						(int)cp.localId1, (int)cp.localId2,
-						(double)cp.interpenetration);
-					printf("         pos1=(%.9f %.9f %.9f) pos2=(%.9f %.9f %.9f)\n",
-						(double)cp.pos1[0], (double)cp.pos1[1], (double)cp.pos1[2],
-						(double)cp.pos2[0], (double)cp.pos2[1], (double)cp.pos2[2]);
-					printf("         n1=(%.9f %.9f %.9f) n2=(%.9f %.9f %.9f)\n",
-						(double)cp.normal1[0], (double)cp.normal1[1], (double)cp.normal1[2],
-						(double)cp.normal2[0], (double)cp.normal2[1], (double)cp.normal2[2]);
-				}
+				this->outContacts()->resize(hContacts.size());
+				if (hContacts.size() > 0)
+					this->outContacts()->getData().assign(hContacts);
 			}
-		}
-		
-		/* thread-level narrow phase version
+			
+			/* thread-level narrow phase version
 		DArray<int> triPairSizes;
 		triPairSizes.resize(totalTriLists);
 		triPairSizes.reset();
@@ -3184,10 +3197,7 @@ namespace dyno
 				if (shape0 < 0 || shape1 < 0)
 					continue;
 
-				int bodyId0 = shape0;
-				int bodyId1 = shape1;
-
-				Triangle tri0 = hTriangles[triId0];
+					Triangle tri0 = hTriangles[triId0];
 				Coord p00 = hVertices[tri0[0]];
 				Coord p01 = hVertices[tri0[1]];
 				Coord p02 = hVertices[tri0[2]];

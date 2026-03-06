@@ -22,7 +22,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <cstdlib>
 #include <iostream>
 
 namespace dyno
@@ -157,7 +156,7 @@ namespace dyno
         merge->outContacts()->connect(iterSolver->inContacts());
         this->animationPipeline()->pushModule(iterSolver);
 
-        this->setDt(0.006f);
+        this->setDt(0.016f);
     }
 
     template<typename TDataType>
@@ -283,6 +282,40 @@ namespace dyno
 		// TriangleSet is generated per-frame by TextureMeshToTriangleSet (world-space).
 
         std::vector<std::vector<int>> baseAdjacentShapes(baseShapeCount);
+        std::vector<int> fixedJointRoots(baseShapeCount, -1);
+        for (size_t i = 0; i < baseShapeCount; ++i)
+        {
+            fixedJointRoots[i] = static_cast<int>(i);
+        }
+
+        auto findFixedRoot = [&](int node)
+        {
+            int root = node;
+            while (fixedJointRoots[root] != root)
+            {
+                root = fixedJointRoots[root];
+            }
+
+            while (fixedJointRoots[node] != node)
+            {
+                int parent = fixedJointRoots[node];
+                fixedJointRoots[node] = root;
+                node = parent;
+            }
+
+            return root;
+        };
+
+        auto unionFixedRoot = [&](int a, int b)
+        {
+            int rootA = findFixedRoot(a);
+            int rootB = findFixedRoot(b);
+            if (rootA != rootB)
+            {
+                fixedJointRoots[rootB] = rootA;
+            }
+        };
+
         for (const auto& joint : this->urdfInfo.joints)
         {
             int parent = joint.parentLinkId;
@@ -293,7 +326,41 @@ namespace dyno
             {
                 baseAdjacentShapes[parent].push_back(child);
                 baseAdjacentShapes[child].push_back(parent);
+
+                if (joint.type == FIXED)
+                {
+                    unionFixedRoot(parent, child);
+                }
             }
+        }
+
+        // Links welded together by fixed joints form one rigid cluster and should not collide internally.
+        std::vector<std::vector<int>> fixedJointGroups(baseShapeCount);
+        for (size_t shapeId = 0; shapeId < baseShapeCount; ++shapeId)
+        {
+            fixedJointGroups[findFixedRoot(static_cast<int>(shapeId))].push_back(static_cast<int>(shapeId));
+        }
+
+        for (const auto& group : fixedJointGroups)
+        {
+            if (group.size() <= 1)
+                continue;
+
+            for (size_t i = 0; i < group.size(); ++i)
+            {
+                for (size_t j = 0; j < group.size(); ++j)
+                {
+                    if (i == j)
+                        continue;
+                    baseAdjacentShapes[group[i]].push_back(group[j]);
+                }
+            }
+        }
+
+        for (auto& adj : baseAdjacentShapes)
+        {
+            std::sort(adj.begin(), adj.end());
+            adj.erase(std::unique(adj.begin(), adj.end()), adj.end());
         }
         
         std::vector<int> baseShape2PatchOffsets(baseShapeCount + 1, 0);
@@ -464,15 +531,12 @@ namespace dyno
                 auto elementOffset = topo->calculateElementOffset();
                 uint boxStart = (uint)elementOffset.boxIndex();
                 uint boxCount = (uint)topo->boxesInGlobal().size();
-                size_t remapped = 0;
-                size_t invalid = 0;
 
                 for (auto& entry : shape2ElementIdsGlobal)
                 {
                     uint shapeId = entry.first;
                     if (shapeId >= shape2ElementIdsDenseGlobal.size())
                     {
-                        ++invalid;
                         continue;
                     }
 
@@ -486,23 +550,12 @@ namespace dyno
                     if (localBoxId >= boxCount)
                     {
                         entry.second = invalidElementId;
-                        ++invalid;
                         continue;
                     }
 
                     uint globalElementId = boxStart + localBoxId;
                     entry.second = globalElementId;
                     shape2ElementIdsDenseGlobal[shapeId] = (int)globalElementId;
-                    ++remapped;
-                }
-
-                if (remapped > 0 || invalid > 0)
-                {
-                    printf("[NMQ DEBUG] elementId remap(local->global): remapped=%zu invalid=%zu boxStart=%u boxCount=%u\n",
-                        remapped,
-                        invalid,
-                        boxStart,
-                        boxCount);
                 }
             }
         }
@@ -536,8 +589,6 @@ namespace dyno
 
         shapeBVHs.resize(totalShapeCount);
 
-        size_t builtShapeBvhCount = 0;
-        size_t singlePatchShapeCount = 0;
         for (size_t gloabalShapeId = 0; gloabalShapeId < totalShapeCount; ++gloabalShapeId)
         {
             int begin = shape2PatchOffsets[gloabalShapeId];
@@ -548,7 +599,6 @@ namespace dyno
             // A single patch does not need a BVH; middle phase handles this path directly.
             if (count == 1)
             {
-                ++singlePatchShapeCount;
                 continue;
             }
 
@@ -564,88 +614,9 @@ namespace dyno
             basePatchAabbsDevice.clear();
 
             shapeBVHs[gloabalShapeId] = bvh;
-            ++builtShapeBvhCount;
-        }
-
-        if (singlePatchShapeCount > 0)
-        {
-            printf("[NMQ DEBUG] skipped BVH build for %zu single-patch shapes\n",
-                singlePatchShapeCount);
-        }
-
-        // ===== Debug: mapping/size sanity =====
-        printf("[NMQ DEBUG] baseShape=%zu baseTri=%zu basePatch=%zu basePatchTri=%zu totalTri=%zu totalPatch=%zu\n",
-               baseShapeCount,
-               baseTriCount,
-               basePatchCount,
-               basePatchTriCount,
-               totalTriCount,
-               totalPatchCount);
-        printf("[NMQ DEBUG] patch2TriOffsets.back=%d patch2TriIndices.size=%zu shape2TriOffsets.back=%d\n",
-               patch2TriOffsets.empty() ? -1 : patch2TriOffsets.back(),
-               patch2TriIndices.size(),
-               shape2TriOffsets.empty() ? -1 : shape2TriOffsets.back());
-        printf("[NMQ DEBUG] shapeCount(rest)=%zu,  urdfShapes=%zu, elemPairs=%zu, elemDense=%zu, rigidIds=%zu\n",
-               restShapeCenters.size(),
-               urdfShapes.size(),
-               shape2ElementIdsGlobal.size(),
-               shape2ElementIdsDenseGlobal.size(),
-               mTextureMeshShape2RigidBodyIds.size());
-        printf("[NMQ DEBUG] stateInstanceTransform empty=%d size=%u\n",
-               this->stateInstanceTransform()->isEmpty() ? 1 : 0,
-               (unsigned)this->stateInstanceTransform()->size());
-
-        // ===== Debug: sample shapeId->bodyId mapping and rest/current translation =====
-        {
-            using Coord = typename TDataType::Coord;
-            using Real = typename TDataType::Real;
-
-            const size_t sampleCount = std::min<size_t>(3, restShapeCenters.size());
-            auto centersPtr = this->stateCenter()->getDataPtr();
-            if (centersPtr == nullptr || centersPtr->size() == 0)
-            {
-                printf("[NMQ DEBUG] stateCenter empty, skip tCurr (only tRest)\n");
-                for (size_t s = 0; s < sampleCount; ++s)
-                {
-                    int bodyId = (s < mTextureMeshShape2RigidBodyIds.size())
-                               ? mTextureMeshShape2RigidBodyIds[s]
-                               : -1;
-                    Coord tRest = restShapeCenters[s];
-                    printf("[NMQ DEBUG] shape=%zu body=%d tRest=(%.3f %.3f %.3f)\n",
-                           s,
-                           bodyId,
-                           (double)tRest[0], (double)tRest[1], (double)tRest[2]);
-                }
-            }
-            else
-            {
-                Array<Coord, DeviceType::CPU> hCenters;
-                hCenters.assign(*centersPtr);
-                for (size_t s = 0; s < sampleCount; ++s)
-                {
-                    int bodyId = (s < mTextureMeshShape2RigidBodyIds.size())
-                               ? mTextureMeshShape2RigidBodyIds[s]
-                               : -1;
-                    bool bodyOk = (bodyId >= 0 && bodyId < (int)hCenters.size());
-                    Coord tRest = restShapeCenters[s];
-                    Coord tCurr = bodyOk ? hCenters[bodyId] : Coord(Real(0));
-                    Coord diff = tCurr - tRest;
-
-                    printf("[NMQ DEBUG] shape=%zu body=%d bodyOk=%d tRest=(%.3f %.3f %.3f) tCurr=(%.3f %.3f %.3f) diff=(%.3f %.3f %.3f)\n",
-                           s,
-                           bodyId,
-                           bodyOk ? 1 : 0,
-                           (double)tRest[0], (double)tRest[1], (double)tRest[2],
-                           (double)tCurr[0], (double)tCurr[1], (double)tCurr[2],
-                           (double)diff[0], (double)diff[1], (double)diff[2]);
-                }
-            }
         }
 
         mNeighborTriMeshQuery->inShapeBVHs()->setValue(shapeBVHs);
-        printf("[NeighborTriMeshQuery] Built %zu shape BVHs (shapeCount=%zu)\n",
-               builtShapeBvhCount,
-               totalShapeCount);
 
         // mNeighborTriMeshQuery->inPatchAABBs()->assign(basePatchAabbsRestWorld);
         // mNeighborTriMeshQuery->inShape2PatchOffsets()->assign(baseShape2PatchOffsets);

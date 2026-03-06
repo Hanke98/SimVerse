@@ -2292,7 +2292,7 @@ namespace dyno
 			Matrix rot2 = rotMat[idx2];
 			localC.pos1 = rot1.transpose() * (globalC.pos1 - c1);
 			localC.normal1 = -globalC.normal1;
-			localC.pos2 = rot2.transpose() * (globalC.pos1 - c2);
+			localC.pos2 = rot2.transpose() * (globalC.pos2 - c2);
 			localC.normal2 = globalC.normal1;
 		}
 		else

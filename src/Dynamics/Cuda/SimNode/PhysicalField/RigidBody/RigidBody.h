@@ -49,9 +49,17 @@ namespace dyno {
         // Shape information for rendering and collision handling
         DArray2D<int>           shape_type;    // [body_id] type
         DArray2D<int>           shape_idx;     // [body_id] index to the corresponding shape parameter array (e.g., box_params, sphere_params, etc.)
+        
+        DArray<int>             env_num_boxes;  // [env_id] number of boxes in each environment
         DArray2D<BoxInfo>       boxes;
+        
+        DArray<int>             env_num_spheres;  // [env_id] number of spheres in each environment
         DArray2D<SphereInfo>    spheres;
+
+        DArray<int>             env_num_capsules;  // [env_id] number of capsules in each environment
         DArray2D<CapsuleInfo>   capsules;
+
+        
 
         // DArray<int>      shape_offset;  // [body_id] offset in shape parameter array
         // DArray<Real>     shape_params;  // [param_idx ~ param_idx + params_padding] shape parameters (e.g., half extents for box, radius for sphere, etc.)

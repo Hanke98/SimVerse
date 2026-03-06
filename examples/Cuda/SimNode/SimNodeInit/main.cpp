@@ -23,6 +23,17 @@ std::shared_ptr<dyno::SceneGraph> CreateScene()
 	sim_node->varrigid_body()->connect(sim_module->inrigid_body());
 	sim_node->animationPipeline()->pushModule(sim_module);
 
+	// Rendering
+	auto mapper = std::make_shared<dyno::DiscreteElementsToTriangleSet<dyno::DataType3f>>();
+	sim_node->stateTopology()->connect(mapper->inDiscreteElements());
+	sim_node->graphicsPipeline()->pushModule(mapper);
+
+	auto surface_render = std::make_shared<dyno::GLSurfaceVisualModule>();
+	surface_render->setColor(dyno::Color(1.f, 1.f, 0.f));
+	surface_render->setAlpha(0.5f);
+	mapper->outTriangleSet()->connect(surface_render->inTriangleSet());
+	sim_node->graphicsPipeline()->pushModule(surface_render);
+
 	return scn;
 }
 

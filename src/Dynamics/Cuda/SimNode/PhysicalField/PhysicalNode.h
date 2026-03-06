@@ -1,8 +1,11 @@
 #pragma once
 #include <Field.h>
 
-template<typename TDataType>
-struct PhysicalNode
-{
-    ;
-};
+namespace dyno {
+    template<typename TDataType>
+    struct PhysicalNode
+    {
+        ;
+    };
+}
+

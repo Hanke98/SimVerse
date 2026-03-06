@@ -24,6 +24,7 @@ namespace dyno
         auto rigid_body = in_rigid_body.constDataPtr();
         AddOneToBatchQaccKernal<<<rigid_body->batch_qacc.nx(), rigid_body->batch_qacc.ny()>>>
         (rigid_body->batch_qacc);
+        cudaDeviceSynchronize();
     }
 
     DEFINE_CLASS(SimModule);

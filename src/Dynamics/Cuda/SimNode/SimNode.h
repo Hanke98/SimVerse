@@ -19,6 +19,8 @@
 #include "Vector.h"
 #include "Array/Array.h"
 #include "Field.h"
+#include "Topology/DiscreteElements.h"
+
 #include "PhysicalField/RigidBody/RigidBody.h"
 
 #include <vector>
@@ -68,6 +70,11 @@ namespace dyno
         
         // Rigid Body
         DEF_VAR(RigidBody<TDataType>, rigid_body, RigidBody<TDataType>{}, "A struct containing infos about the rigid body in all environments.");
+    
+        
+        // For DynoRendering
+        DEF_INSTANCE_STATE(DiscreteElements<TDataType>, Topology, "Topology");
+
     protected:
         ;
 

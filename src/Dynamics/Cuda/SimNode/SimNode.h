@@ -87,8 +87,7 @@ namespace dyno
         DEF_INSTANCE_STATE(DiscreteElements<TDataType>, Topology, "Topology");
 
     private:
-        ;    
-
+        ;
 
     };
 

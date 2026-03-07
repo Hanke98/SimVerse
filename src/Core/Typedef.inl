@@ -147,7 +147,7 @@ namespace dyno {
   */
 #define cuExecute(size, Func, ...){						\
 		uint pDims = cudaGridSize((uint)size, BLOCK_SIZE);	\
-		Func << <pDims, BLOCK_SIZE >> > (				\
+		Func <<<pDims, BLOCK_SIZE >>> (				\
 		__VA_ARGS__);									\
 		cuSynchronize();								\
 	}

@@ -18,6 +18,7 @@
 #pragma once
 #include "Module/ComputeModule.h"
 #include "SimNode.h"
+#include "PhysicalField/RigidBody/MujocoSolver.h"
 
 namespace dyno {
 
@@ -35,6 +36,8 @@ namespace dyno {
         SimModule();
         ~SimModule() override;
 
+        void Init();
+
     public:
         DEF_VAR_IN(typename SimNode<TDataType>::EnvInfosType, env_infos, "A struct containing the infos of parallel environments.");
 
@@ -48,6 +51,10 @@ namespace dyno {
         
     private:
         inline static uint frame = 0;
+
+
+        std::shared_ptr<MujocoSolver<TDataType>> solver;    // TODO: support multiple solvers and select them by config.
+
     };
 
 }// namespace dyno

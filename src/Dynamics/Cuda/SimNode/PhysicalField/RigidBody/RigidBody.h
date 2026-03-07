@@ -4,7 +4,6 @@
 
 #include "../PhysicalField.h"
 
-
 // TODO: consider using a more flexible data structure to support more complex shapes (e.g., triangle mesh) and their parameters. For example, we can have a separate array for each shape type, and store the shape type and offset for each body to access the corresponding shape parameters.
 // enum ShapeType
 // {
@@ -38,9 +37,13 @@ namespace dyno {
         using Real = typename TDataType::Real;
         
         DArray<int>         batch_bodies;  // [env_id] num of rigid bodies in each environment
+        DArray<int>         batch_body_offset; // [env_id] flattened rigid body offset in topo position/rotation arrays
         DArray<int>         batch_nv;      // [env_id] num of generalized DoFs
         DArray2D<Real>      batch_qacc;    // [env_id, dof_idx] generalized acceleration
         DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body
+        DArray2D<Mat3f>     batch_rot;     // [env_id, body_id] world rotation of rigid body (as rotation matrix)
+        DArray<Vec3f>       topo_pos_cache; // flattened body positions for topology update
+        DArray<Mat3f>       topo_rot_cache; // flattened body rotations for topology update
 
 
 

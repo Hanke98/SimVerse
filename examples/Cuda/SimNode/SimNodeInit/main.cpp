@@ -21,6 +21,7 @@ std::shared_ptr<dyno::SceneGraph> CreateScene()
 	sim_module->varForceUpdate()->setValue(true);
 	sim_node->varenv_infos()->connect(sim_module->inenv_infos());
 	sim_node->varrigid_body()->connect(sim_module->inrigid_body());
+	sim_module->Init();
 	sim_node->animationPipeline()->pushModule(sim_module);
 
 	// Rendering

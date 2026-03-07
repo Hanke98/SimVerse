@@ -1,4 +1,5 @@
 #include "SimNode.h"
+#include "Utils/utils.h"
 
 namespace dyno {
 
@@ -100,6 +101,38 @@ namespace dyno {
         }
     }
 
+    __global__ void InitShape2RigidBodyMappingKernel(DArray<Pair<uint, uint>> mapping)
+    {
+        int tid = threadIdx.x + blockIdx.x * blockDim.x;
+        if (tid >= mapping.size())
+            return;
+
+        mapping[tid] = Pair<uint, uint>((uint)tid, (uint)-1);
+    }
+
+    __global__ void BuildShape2RigidBodyMappingKernel(
+        DArray<Pair<uint, uint>> mapping,
+        DArray2D<int> rigid_body_2_rendering_idx_mapping,
+        DArray<int> batch_bodies,
+        DArray<int> batch_body_offset)
+    {
+        int env_id = blockIdx.x;
+        if (env_id >= rigid_body_2_rendering_idx_mapping.nx() || env_id >= batch_bodies.size())
+            return;
+
+        int num_bodies = batch_bodies[env_id];
+        int body_offset = batch_body_offset[env_id];
+        for (int body_id = threadIdx.x; body_id < num_bodies; body_id += blockDim.x)
+        {
+            int render_idx = rigid_body_2_rendering_idx_mapping(env_id, body_id);
+            if (render_idx < 0 || render_idx >= mapping.size())
+                continue;
+
+            uint global_body_id = (uint)(body_offset + body_id);
+            mapping[render_idx] = Pair<uint, uint>((uint)render_idx, global_body_id);
+        }
+    }
+
 
 
     template<typename TDataType>
@@ -122,7 +155,11 @@ namespace dyno {
             std::vector<int> env_num_capsules_host(num_env, 0);
             std::vector<int> env_capsule_offset_host(num_env, 0);
 
+            std::vector<int> batch_bodies_host(num_env, 0);
+            std::vector<int> batch_body_offset_host(num_env, 0);
+
             CArray2D<Vec3f>     body_pos_host(num_env, num_bodies);
+            CArray2D<Mat3f>     body_rot_host(num_env, num_bodies);
             std::vector<Vec3i>  rendering_idx_2_rigid_body_mapping_host; // [env_id, shape_type, shape_idx]
             CArray2D<int>       rigid_body_2_rendering_idx_mapping_host(num_env, num_bodies);
             
@@ -135,6 +172,9 @@ namespace dyno {
             rigid_bodies.env_num_capsules.resize(num_env);
             rigid_bodies.env_capsule_offset.resize(num_env);
 
+            rigid_bodies.batch_bodies.resize(num_env);
+            rigid_bodies.batch_body_offset.resize(num_env);
+
             // Initialize all shapes to -1 (indicating no shape)
             for (int eid = 0; eid < num_env; ++eid)
             {
@@ -145,7 +185,10 @@ namespace dyno {
                 }
 
                 for (int bid = 0; bid < num_bodies; ++bid)
+                {
                     rigid_body_2_rendering_idx_mapping_host(eid, bid) = -1;
+                    body_rot_host(eid, bid) = Mat3f::identityMatrix();
+                }
             }
 
             // Manually add shapes to environments for testing.
@@ -197,20 +240,32 @@ namespace dyno {
                     else if (st == 1) env_num_spheres_host[eid]++;
                     else if (st == 2) env_num_capsules_host[eid]++;
                 }
+
+                int active_bodies = 0;
+                int body_count = num_bodies < slots_per_env ? num_bodies : slots_per_env;
+                for (int bid = 0; bid < body_count; ++bid)
+                {
+                    if (shape_type_host(eid, bid) >= 0)
+                        active_bodies++;
+                }
+                batch_bodies_host[eid] = active_bodies;
             }
 
             // 2) Build per-shape-type global offsets by env.
             int total_boxes = 0;
             int total_spheres = 0;
             int total_capsules = 0;
+            int total_bodies = 0;
             for (int eid = 0; eid < num_env; ++eid)
             {
                 env_box_offset_host[eid] = total_boxes;
                 env_sphere_offset_host[eid] = total_spheres;
                 env_capsule_offset_host[eid] = total_capsules;
+                batch_body_offset_host[eid] = total_bodies;
                 total_boxes += env_num_boxes_host[eid];
                 total_spheres += env_num_spheres_host[eid];
                 total_capsules += env_num_capsules_host[eid];
+                total_bodies += batch_bodies_host[eid];
             }
 
             // 3) Build mapping between rendering index and rigid body index.
@@ -258,6 +313,7 @@ namespace dyno {
             rigid_bodies.boxes.assign(boxes_host);
             rigid_bodies.spheres.assign(spheres_host);
             rigid_bodies.batch_pos.assign(body_pos_host);
+            rigid_bodies.batch_rot.assign(body_rot_host);
 
             rigid_bodies.env_num_boxes.assign(env_num_boxes_host);
             rigid_bodies.env_box_offset.assign(env_box_offset_host);
@@ -265,6 +321,9 @@ namespace dyno {
             rigid_bodies.env_sphere_offset.assign(env_sphere_offset_host);
             rigid_bodies.env_num_capsules.assign(env_num_capsules_host);
             rigid_bodies.env_capsule_offset.assign(env_capsule_offset_host);
+
+            rigid_bodies.batch_bodies.assign(batch_bodies_host);
+            rigid_bodies.batch_body_offset.assign(batch_body_offset_host);
 
             rigid_bodies.rendering_idx_2_rigid_body_mapping.assign(rendering_idx_2_rigid_body_mapping_host);
             rigid_bodies.rigid_body_2_rendering_idx_mapping.assign(rigid_body_2_rendering_idx_mapping_host);
@@ -375,68 +434,28 @@ namespace dyno {
         uint totalSize = topo->totalSize();
         spdlog::info("Total size of renderable shapes: {}", totalSize);
 
-        CArray<Vec3i> rendering_idx_2_rigid_body_mapping_host;
-        rendering_idx_2_rigid_body_mapping_host.assign(rigid_body.rendering_idx_2_rigid_body_mapping);
-
-        CArray2D<int> shape_type_host;
-        CArray2D<int> shape_idx_host;
-        CArray2D<Vec3f> body_pos_host;
-        shape_type_host.assign(rigid_body.shape_type);
-        shape_idx_host.assign(rigid_body.shape_idx);
-        body_pos_host.assign(rigid_body.batch_pos);
-
-        std::vector<Pair<uint, uint>> shape2_rigid_body_mapping_host(totalSize, Pair<uint, uint>(0, (uint)-1));
-
-        // Build topo->shape2RigidBodyMapping(): [render_shape_idx] -> [render_shape_idx, global_rigid_body_idx]
-        for (uint rid = 0; rid < rendering_idx_2_rigid_body_mapping_host.size() && rid < totalSize; ++rid)
+        if (mapping.size() != totalSize)
         {
-            Vec3i item = rendering_idx_2_rigid_body_mapping_host[rid];
-            int env_id = item.x;
-            int shape_type = item.y;
-            int shape_idx = item.z;
+            mapping.resize(totalSize);
+            cuExecute(totalSize,
+                InitShape2RigidBodyMappingKernel,
+                mapping);
 
-            uint global_body_id = (uint)-1;
-            if (env_id >= 0 && env_id < (int)shape_type_host.nx())
-            {
-                for (uint body_id = 0; body_id < shape_type_host.ny(); ++body_id)
-                {
-                    if (shape_type_host(env_id, body_id) == shape_type &&
-                        shape_idx_host(env_id, body_id) == shape_idx)
-                    {
-                        global_body_id = (uint)(env_id * (int)body_pos_host.ny() + (int)body_id);
-                        break;
-                    }
-                }
-            }
-
-            shape2_rigid_body_mapping_host[rid] = Pair<uint, uint>(rid, global_body_id);
+            BuildShape2RigidBodyMappingKernel<<<rigid_body.rigid_body_2_rendering_idx_mapping.nx(), 128>>>(
+                mapping,
+                rigid_body.rigid_body_2_rendering_idx_mapping,
+                rigid_body.batch_bodies,
+                rigid_body.batch_body_offset);
         }
 
-        mapping.assign(shape2_rigid_body_mapping_host);
+        int total_rigid_bodies = reduce_int.accumulate(rigid_body.batch_bodies.begin(), rigid_body.batch_bodies.size());
+        FlattenArray2D(rigid_body.batch_pos, rigid_body.topo_pos_cache, total_rigid_bodies,
+            rigid_body.batch_bodies, rigid_body.batch_body_offset);
+        FlattenArray2D(rigid_body.batch_rot, rigid_body.topo_rot_cache, total_rigid_bodies,
+            rigid_body.batch_bodies, rigid_body.batch_body_offset);
 
-        using Coord = typename TDataType::Coord;
-        using Matrix = typename TDataType::Matrix;
-
-        uint total_rigid_bodies = body_pos_host.nx() * body_pos_host.ny();
-        std::vector<Coord> pos_host(total_rigid_bodies);
-        std::vector<Matrix> rot_host(total_rigid_bodies, Matrix::identityMatrix());
-
-        for (uint env_id = 0; env_id < body_pos_host.nx(); ++env_id)
-        {
-            for (uint body_id = 0; body_id < body_pos_host.ny(); ++body_id)
-            {
-                uint global_body_id = env_id * body_pos_host.ny() + body_id;
-                pos_host[global_body_id] = body_pos_host(env_id, body_id);
-            }
-        }
-
-        DArray<Coord> pos_dev;
-        DArray<Matrix> rot_dev;
-        pos_dev.assign(pos_host);
-        rot_dev.assign(rot_host);
-
-        topo->setPosition(pos_dev);
-        topo->setRotation(rot_dev);
+        topo->setPosition(rigid_body.topo_pos_cache);
+        topo->setRotation(rigid_body.topo_rot_cache);
         topo->update();
         
     }

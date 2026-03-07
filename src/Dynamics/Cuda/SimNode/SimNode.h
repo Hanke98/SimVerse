@@ -39,6 +39,10 @@ namespace dyno
     };
 
 
+    typedef typename ::dyno::TSphere3D<Real> Sphere3D;
+	typedef typename ::dyno::TOrientedBox3D<Real> Box3D;
+
+
     /*!
     *	\class	SimNode
     *	\brief	An integrated multi-physics field Node for simulaiton,
@@ -53,6 +57,9 @@ namespace dyno
         typedef typename TDataType::Real Real;
         typedef typename TDataType::Coord Coord;
         typedef typename TDataType::Matrix Matrix;
+
+
+
         using EnvInfosType = EnvironmentInfos<TDataType>;
 
         SimNode();
@@ -63,6 +70,10 @@ namespace dyno
         void Init();
 
         void InitRigidBody(int num_env, int num_bodies);    // TEST;
+
+
+        void BindRenderingSurface(int num_env);    // TODO: collect shape information for rendering.
+
 
     
     public:
@@ -75,8 +86,8 @@ namespace dyno
         // For DynoRendering
         DEF_INSTANCE_STATE(DiscreteElements<TDataType>, Topology, "Topology");
 
-    protected:
-        ;
+    private:
+        ;    
 
 
     };

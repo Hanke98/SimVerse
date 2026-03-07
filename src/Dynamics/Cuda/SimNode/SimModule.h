@@ -45,7 +45,7 @@ namespace dyno {
         void compute() override;
     
         void AdvanceOneStep();
-    
+        
     private:
         inline static uint frame = 0;
     };

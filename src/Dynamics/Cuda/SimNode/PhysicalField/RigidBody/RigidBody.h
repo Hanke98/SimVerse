@@ -2,7 +2,7 @@
 
 #include "Collision/CollisionData.h"
 
-#include "../PhysicalNode.h"
+#include "../PhysicalField.h"
 
 
 // TODO: consider using a more flexible data structure to support more complex shapes (e.g., triangle mesh) and their parameters. For example, we can have a separate array for each shape type, and store the shape type and offset for each body to access the corresponding shape parameters.
@@ -33,17 +33,15 @@
 
 namespace dyno {
     template<typename TDataType>
-    struct RigidBody : public PhysicalNode<TDataType>
+    struct RigidBody : public PhysicalFieldData<TDataType>
     {
-        // template<typename T>
-        // using DArray = dyno::DArray<T>;
-        // template<typename T>
-        // using DArray2D = dyno::DArray2D<T>;
         using Real = typename TDataType::Real;
         
+        DArray<int>         batch_bodies;  // [env_id] num of rigid bodies in each environment
+        DArray<int>         batch_nv;      // [env_id] num of generalized DoFs
+        DArray2D<Real>      batch_qacc;    // [env_id, dof_idx] generalized acceleration
+        DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body
 
-        DArray<int>      batch_nv;      // [env_id] num of generalized DoFs
-        DArray2D<Real>   batch_qacc;    // [dof_id, env_id] generalized acceleration
 
 
         // Shape information for rendering and collision handling
@@ -51,19 +49,20 @@ namespace dyno {
         DArray2D<int>           shape_idx;     // [body_id] index to the corresponding shape parameter array (e.g., box_params, sphere_params, etc.)
         
         DArray<int>             env_num_boxes;  // [env_id] number of boxes in each environment
+        DArray<int>             env_box_offset;  // [env_id] offset of boxes in the global box array
         DArray2D<BoxInfo>       boxes;
         
         DArray<int>             env_num_spheres;  // [env_id] number of spheres in each environment
+        DArray<int>             env_sphere_offset;  // [env_id] offset of spheres in the global sphere array
         DArray2D<SphereInfo>    spheres;
 
         DArray<int>             env_num_capsules;  // [env_id] number of capsules in each environment
+        DArray<int>             env_capsule_offset;  // [env_id] offset of capsules in the global capsule array
         DArray2D<CapsuleInfo>   capsules;
 
-        
 
-        // DArray<int>      shape_offset;  // [body_id] offset in shape parameter array
-        // DArray<Real>     shape_params;  // [param_idx ~ param_idx + params_padding] shape parameters (e.g., half extents for box, radius for sphere, etc.)
-
+        DArray<Vec3i>           rendering_idx_2_rigid_body_mapping; // [env_id, shape_type, shape_idx]
+        DArray2D<int>           rigid_body_2_rendering_idx_mapping; // [env_id, body_id] -> idx of its pos in topo state
     };
 }
 

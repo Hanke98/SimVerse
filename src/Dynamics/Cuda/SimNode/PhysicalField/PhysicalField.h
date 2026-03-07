@@ -3,7 +3,7 @@
 
 namespace dyno {
     template<typename TDataType>
-    struct PhysicalNode
+    struct PhysicalFieldData
     {
         ;
     };

@@ -17,6 +17,7 @@
 namespace dyno
 {
   template<typename TDataType> class NeighborTriMeshQuery;
+  template<typename TDataType> class TJConstraintSolver;
 
   template<typename TDataType>
   class BatchRigidBodySystem : virtual public ArticulatedBody<TDataType> {
@@ -162,6 +163,9 @@ public:
       this->varGravityEnabled()->setValue(enabled);
     }
 
+    void setVelocitySolverIterations(uint iterations);
+    void setDisableContactReduction(bool disable);
+
     Array<Vec3f, DeviceType::CPU> gethCenters();
     Array<TQuat, DeviceType::CPU> gethAngles();
     Array<Vec3f, DeviceType::CPU> gethVelocities();
@@ -215,6 +219,7 @@ protected:
     
 
     std::shared_ptr<NeighborTriMeshQuery<TDataType>> mNeighborTriMeshQuery;
+    std::shared_ptr<TJConstraintSolver<TDataType>> mConstraintSolver;
     // Collision TriangleSet used by NeighborTriMeshQuery (kept in rest-world space; do NOT call update()).
     std::shared_ptr<TriangleSet<TDataType>> mCollisionTriangleSet;
   };

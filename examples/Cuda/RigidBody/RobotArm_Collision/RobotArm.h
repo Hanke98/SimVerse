@@ -75,6 +75,8 @@ namespace dyno
         void setDt(Real dt);
         void enableGravity(bool flag);
         void enableFriction(bool flag);
+        void setVelocitySolverIterations(uint iterations);
+        void setDisableContactReduction(bool disable);
         void setHingeTorques(HingeTorqueParam& hingetorque_param);
         void setHingeVelocities(HingeVelocityParam& hingevelocity_param);
         void setMass(MassParam& mass_param);

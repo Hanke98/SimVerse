@@ -54,6 +54,20 @@ namespace dyno
     }
 
     template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setVelocitySolverIterations(uint iterations) {
+        if (batchSolver) {
+            batchSolver->setVelocitySolverIterations(iterations);
+        }
+    }
+
+    template<typename TDataType>
+    void RobotArmSimulator<TDataType>::setDisableContactReduction(bool disable) {
+        if (batchSolver) {
+            batchSolver->setDisableContactReduction(disable);
+        }
+    }
+
+    template<typename TDataType>
     void RobotArmSimulator<TDataType>::addRobotArmRigidBodies(std::string urdf_fn,
                                                               Real density,
                                                               const std::vector<Vec3f> &target_position,

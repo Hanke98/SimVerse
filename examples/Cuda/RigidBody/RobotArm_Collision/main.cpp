@@ -39,6 +39,8 @@ int main() {
     float damping = 0.0f; //250.0f;
     bool enableGravity = false;
     bool enableFriction = false;
+    uint velocitySolverIterations = 50;
+    bool disableContactReduction = true;
     const bool enableRendering = []() -> bool
     {
         const char* headlessEnv = std::getenv("SIMVERSE_HEADLESS");
@@ -73,6 +75,8 @@ int main() {
     simulator.setDt(dt);
     simulator.enableGravity(enableGravity);
     simulator.enableFriction(enableFriction);
+    simulator.setVelocitySolverIterations(velocitySolverIterations);
+    simulator.setDisableContactReduction(disableContactReduction);
     simulator.setTransform(base, offset, num_copies_x, num_copies_y, num_copies_z);
     simulator.setAngularDamping(damping);
     simulator.isObjYUp(!render_collision);
@@ -316,6 +320,24 @@ int main() {
         if (i == 0) {
             simulator.setInitGesture(hinge_param);
         }
+
+        if (i == 500) {
+            RobotArmSimulator<DataType3f>::HingeVelocityParam param_vel;
+            moterVelocities1 = {
+                0.5,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            };
+            param_vel.num_bodies = 1;
+            param_vel.ids.push_back(0);
+            param_vel.motorVel.push_back(moterVelocities1);
+            simulator.setHingeVelocities(param_vel);
+        }
+        
 
         i++;
     }

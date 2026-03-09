@@ -40,6 +40,24 @@ namespace dyno
     }
 
     template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::setVelocitySolverIterations(uint iterations)
+    {
+        if (mConstraintSolver)
+        {
+            mConstraintSolver->varIterationNumberForVelocitySolver()->setValue(iterations);
+        }
+    }
+
+    template<typename TDataType>
+    void BatchRigidBodySystem<TDataType>::setDisableContactReduction(bool disable)
+    {
+        if (mNeighborTriMeshQuery)
+        {
+            mNeighborTriMeshQuery->varDisableContactReduction()->setValue(disable);
+        }
+    }
+
+    template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::initCollisionPipeline()
     {
         auto defaultTopo = std::make_shared<DiscreteElements<TDataType>>();
@@ -129,7 +147,8 @@ namespace dyno
             this->animationPipeline()->pushModule(merge);
         }
 
-        auto iterSolver = std::make_shared<TJConstraintSolver<TDataType>>();
+        mConstraintSolver = std::make_shared<TJConstraintSolver<TDataType>>();
+        auto iterSolver = mConstraintSolver;
         // auto iterSolver = std::make_shared<TJSoftConstraintSolver<TDataType>>();
         this->stateTimeStep()->connect(iterSolver->inTimeStep());
         this->varFrictionEnabled()->connect(iterSolver->varFrictionEnabled());

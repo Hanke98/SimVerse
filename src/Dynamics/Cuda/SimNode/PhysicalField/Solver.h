@@ -1,4 +1,6 @@
 #pragma once
+#include "Object.h"
+#include "DataTypes.h"
 
 namespace dyno
 {
@@ -9,5 +11,6 @@ namespace dyno
         SolverBase() {};
         ~SolverBase() {};
 
+        virtual void TimeIntegration() = 0;
     };
 }

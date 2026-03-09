@@ -22,6 +22,7 @@
 #include "Topology/DiscreteElements.h"
 
 #include "PhysicalField/RigidBody/RigidBody.h"
+#include "Utils/tepy.h"
 
 #include <vector>
 #include <iostream>
@@ -29,16 +30,6 @@
 
 namespace dyno
 {
-    template<typename TDataType>
-    struct EnvironmentInfos
-    {
-        using Real = typename TDataType::Real;
-        int num_env = 0;
-        FArray<Vec3f, DeviceType::GPU> gravities;
-        FArray<Real, DeviceType::GPU> timesteps;
-    };
-
-
     typedef typename ::dyno::TSphere3D<Real> Sphere3D;
 	typedef typename ::dyno::TOrientedBox3D<Real> Box3D;
 

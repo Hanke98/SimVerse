@@ -10,13 +10,17 @@ namespace dyno
     {
     public:
         using Base = RigidSolver<TDataType>;
+        using EnvInfosType = typename Base::EnvInfosType;
         using RigidBodyType = typename Base::RigidBodyType;
 
-        explicit MujocoSolver(const std::shared_ptr<RigidBodyType>& rigidBody = nullptr)
-            : Base(rigidBody) {};
+        MujocoSolver(
+            const std::shared_ptr<EnvInfosType>& envInfos = nullptr,
+            const std::shared_ptr<RigidBodyType>& rigidBody = nullptr)
+            : Base(envInfos, rigidBody) {};
         ~MujocoSolver() {};
 
         void Init();
+        void TimeIntegration() override;
     };
 }
 

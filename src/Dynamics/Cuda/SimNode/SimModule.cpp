@@ -31,14 +31,15 @@ namespace dyno
     template<typename TDataType>
     void SimModule<TDataType>::Init()
     {
+        auto env_infos = in_env_infos.constDataPtr();
         auto rigid_body = in_rigid_body.constDataPtr();
-        if (rigid_body == nullptr)
+        if (env_infos == nullptr || rigid_body == nullptr)
         {
-            spdlog::warn("SimModule::Init called before in_rigid_body is connected.");
+            spdlog::warn("SimModule::Init called before env_infos/rigid_body are connected.");
             return;
         }
 
-        solver = std::make_shared<MujocoSolver<TDataType>>(rigid_body);
+        solver = std::make_shared<MujocoSolver<TDataType>>(env_infos, rigid_body);
     }
 
     DEFINE_CLASS(SimModule);

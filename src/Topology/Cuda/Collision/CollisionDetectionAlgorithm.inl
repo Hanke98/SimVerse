@@ -2399,9 +2399,16 @@ namespace dyno
 
         if (REAL_LESS(depth, 0) && REAL_GREAT(depth, -REAL_infinity))
         {
-            m.normal = sat.normal(); // contact normal on triB
+            Vec3f n = sat.normal();
+            Vec3f nB = triB.normal();
+            if (nB.norm() > EPSILON)
+            {
+                nB /= nB.norm();
+                if (n.dot(nB) < 0)
+                    n = -n;
+            }
+            m.normal = n; 
             setupContactOnTri(m, sat, triA, triB, radiusA, radiusB);
-
         }
         else m.contactCount = 0;
     }

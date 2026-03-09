@@ -55,7 +55,7 @@ namespace dyno
 
 		DEF_ENUM(Spatial, Spatial, Spatial::BVH, "");
 
-		DEF_VAR(bool, EnableAdjacentFilter, true, "");
+		DEF_VAR(bool, EnableAdjacentFilter, false, "");
 		DEF_VAR(bool, EnableBroadPhasePatchPairs, false, "");
 		DEF_VAR(bool, DisableContactReduction, false, "");
 		// If true, TriangleSet::points are provided in rest-world space (static), and the query will transform

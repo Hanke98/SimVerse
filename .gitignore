@@ -62,5 +62,3 @@ tmp
 /.github/*
 
 .clangd
-
-/tmp

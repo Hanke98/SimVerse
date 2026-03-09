@@ -22,7 +22,7 @@
 #include "Topology/DiscreteElements.h"
 
 #include "PhysicalField/RigidBody/RigidBody.h"
-#include "Utils/tepy.h"
+#include "Utils/type.h"
 
 #include <vector>
 #include <iostream>
@@ -75,7 +75,7 @@ namespace dyno
     
         
         // For DynoRendering
-        DEF_INSTANCE_STATE(DiscreteElements<TDataType>, Topology, "Topology");
+        DEF_INSTANCE_STATE(DiscreteElements<TDataType>, topology, "Topology");
 
     private:
         ;

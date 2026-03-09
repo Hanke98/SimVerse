@@ -39,7 +39,9 @@ namespace dyno {
         void Init();
 
     public:
-        DEF_VAR_IN(typename SimNode<TDataType>::EnvInfosType, env_infos, "A struct containing the infos of parallel environments.");
+        DEF_VAR_IN(EnvironmentInfos<TDataType>, env_infos, "A struct containing the infos of parallel environments.");
+        
+        DEF_INSTANCE_IN(DiscreteElements<TDataType>, topology, "A struct containing the infos of discrete elements in all environments.");
 
         DEF_VAR_IN(RigidBody<TDataType>, rigid_body, "A struct containing infos about the rigid body in all environments.");
 
@@ -48,6 +50,8 @@ namespace dyno {
         void compute() override;
     
         void AdvanceOneStep();
+
+        void UpdateRenderingData();
         
     private:
         inline static uint frame = 0;

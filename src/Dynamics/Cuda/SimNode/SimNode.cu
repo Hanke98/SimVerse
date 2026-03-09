@@ -1,9 +1,9 @@
 #include "SimNode.h"
 #include "Utils/utils.h"
 
-namespace dyno {
-
-    __global__ void PrintBatchNvKernel(dyno::DArray<int> batch_nv)
+namespace dyno
+{
+        __global__ void PrintBatchNvKernel(DArray<int> batch_nv)
     {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (idx < batch_nv.size())
@@ -13,7 +13,7 @@ namespace dyno {
     }
 
     template<typename Real>
-    __global__ void PrintBatchQaccKernel(dyno::DArray2D<Real> batch_qacc)
+    __global__ void PrintBatchQaccKernel(DArray2D<Real> batch_qacc)
     {
         uint env_id = blockIdx.x;
         uint dof_idx = threadIdx.x;
@@ -134,7 +134,11 @@ namespace dyno {
     }
 
 
+}// for cuda kernels
 
+
+namespace dyno
+{
     template<typename TDataType>
     void SimNode<TDataType>::InitRigidBody(int num_env, int num_bodies)
     {
@@ -401,7 +405,7 @@ namespace dyno {
     template<typename TDataType>
     void SimNode<TDataType>::BindRenderingSurface(int num_env)
     {
-        auto topo = TypeInfo::cast<DiscreteElements<DataType3f>>(this->stateTopology()->getDataPtr());
+        auto topo = TypeInfo::cast<DiscreteElements<DataType3f>>(this->statetopology()->getDataPtr());
         auto& topo_boxes = topo->boxesInLocal();
 		auto& topo_spheres = topo->spheresInLocal();
 		auto& topo_capsules = topo->capsulesInLocal();
@@ -428,8 +432,7 @@ namespace dyno {
 
         cudaDeviceSynchronize();
 
-        // // topo->update();
-        // // setup shape to renderable mapping
+        // setup shape to renderable mapping
         auto& mapping = topo->shape2RigidBodyMapping();
         uint totalSize = topo->totalSize();
         spdlog::info("Total size of renderable shapes: {}", totalSize);
@@ -457,6 +460,9 @@ namespace dyno {
         topo->setPosition(rigid_body.topo_pos_cache);
         topo->setRotation(rigid_body.topo_rot_cache);
         topo->update();
+
+        // Persist flattened caches for downstream modules (e.g., SimModule::UpdateRenderingData).
+        var_rigid_body.setValue(rigid_body);
         
     }
 

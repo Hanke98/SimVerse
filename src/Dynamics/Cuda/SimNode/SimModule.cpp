@@ -23,7 +23,7 @@ namespace dyno
         spdlog::info("===================   Frame {} Started   ===================", frame);
         spdlog::info("SimModule compute function called.");
         AdvanceOneStep();
-        
+        UpdateRenderingData();
         
         spdlog::info("===================   Frame {} Ended     ===================\n", frame++);
     }

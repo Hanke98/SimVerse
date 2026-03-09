@@ -26,15 +26,15 @@ namespace dyno {
     template<typename TDataType>
     void SimNode<TDataType>::Init()
     {
-        this->stateTopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
+        this->statetopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
 
         auto env_infos = var_env_infos.getValue();
-        env_infos.num_env = 2;
+        env_infos.num_envs = 2;
         var_env_infos.setValue(env_infos);
 
-        InitRigidBody(env_infos.num_env, 3);    // TEST;
+        InitRigidBody(env_infos.num_envs, 3);    // TEST;
 
-        BindRenderingSurface(env_infos.num_env);
+        BindRenderingSurface(env_infos.num_envs);
         
     }
 

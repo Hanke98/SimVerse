@@ -21,12 +21,13 @@ std::shared_ptr<dyno::SceneGraph> CreateScene()
 	sim_module->varForceUpdate()->setValue(true);
 	sim_node->varenv_infos()->connect(sim_module->inenv_infos());
 	sim_node->varrigid_body()->connect(sim_module->inrigid_body());
+	sim_node->statetopology()->connect(sim_module->intopology());
 	sim_module->Init();
 	sim_node->animationPipeline()->pushModule(sim_module);
 
 	// Rendering
 	auto mapper = std::make_shared<dyno::DiscreteElementsToTriangleSet<dyno::DataType3f>>();
-	sim_node->stateTopology()->connect(mapper->inDiscreteElements());
+	sim_node->statetopology()->connect(mapper->inDiscreteElements());
 	sim_node->graphicsPipeline()->pushModule(mapper);
 
 	auto surface_render = std::make_shared<dyno::GLSurfaceVisualModule>();

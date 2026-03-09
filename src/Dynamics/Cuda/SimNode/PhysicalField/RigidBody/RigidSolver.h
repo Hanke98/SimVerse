@@ -2,7 +2,7 @@
 
 #include "../Solver.h"
 #include "RigidBody.h"
-#include "../../Utils/tepy.h"
+#include "../../Utils/type.h"
 
 #include <memory>
 
@@ -18,12 +18,12 @@ namespace dyno {
         RigidSolver(
             const std::shared_ptr<EnvInfosType>& envInfos = nullptr,
             const std::shared_ptr<RigidBodyType>& rigidBody = nullptr)
-            : SolverBase<TDataType>(), m_envInfos(envInfos), m_rigidBody(rigidBody) {};
+            : SolverBase<TDataType>(), env_infos(envInfos), rigid_body(rigidBody) {};
         ~RigidSolver() {};
 
     protected:
-        std::shared_ptr<EnvInfosType> m_envInfos = nullptr;
-        std::shared_ptr<RigidBodyType> m_rigidBody = nullptr;
+        std::shared_ptr<EnvInfosType> env_infos = nullptr;
+        std::shared_ptr<RigidBodyType> rigid_body = nullptr;
 
     };
 }

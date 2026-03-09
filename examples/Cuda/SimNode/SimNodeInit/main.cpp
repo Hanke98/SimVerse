@@ -3,10 +3,12 @@
 
 #include <GLRenderEngine.h>
 #include <GLSurfaceVisualModule.h>
+#include <GLWireframeVisualModule.h>
 #include <Mapping/DiscreteElementsToTriangleSet.h>
 
 #include <SimNode/SimNode.h>
 #include <SimNode/SimModule.h>
+
 
 std::shared_ptr<dyno::SceneGraph> CreateScene()
 {

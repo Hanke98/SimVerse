@@ -20,6 +20,7 @@
 #include "Array/Array.h"
 #include "Field.h"
 #include "Topology/DiscreteElements.h"
+#include "Topology/EdgeSet.h"
 
 #include "PhysicalField/RigidBody/RigidBody.h"
 #include "Utils/type.h"
@@ -64,6 +65,7 @@ namespace dyno
 
 
         void BindRenderingSurface(int num_env);    // TODO: collect shape information for rendering.
+        void PlotWorldAxes();   
 
 
     
@@ -77,8 +79,11 @@ namespace dyno
         // For DynoRendering
         DEF_INSTANCE_STATE(DiscreteElements<TDataType>, topology, "Topology");
 
+        
     private:
-        ;
+        DEF_INSTANCE_STATE(EdgeSet<TDataType>, axis_x, "Edge set for rendering x-axis");
+        DEF_INSTANCE_STATE(EdgeSet<TDataType>, axis_y, "Edge set for rendering y-axis");
+        DEF_INSTANCE_STATE(EdgeSet<TDataType>, axis_z, "Edge set for rendering z-axis");
 
     };
 

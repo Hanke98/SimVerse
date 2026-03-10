@@ -11,6 +11,7 @@ namespace dyno
         SolverBase() {};
         ~SolverBase() {};
 
+        virtual void Init() = 0;
         virtual void TimeIntegration() = 0;
     };
 }

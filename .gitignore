@@ -62,3 +62,4 @@ save_picture_ctlFreq1
 save_picture_torque
 
 .clangd
+/screenshots/*

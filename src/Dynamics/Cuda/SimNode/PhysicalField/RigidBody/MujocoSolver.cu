@@ -38,13 +38,37 @@ namespace dyno
 
         printf("Env %d, Body %d, Position: (%f, %f, %f)\n", env_id, body_idx, pos.x, pos.y, pos.z);
     }
+}
 
+
+namespace dyno
+{
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::Init()
+    {
+        spdlog::info("[MujocoSolver Solver] Starting initialization.");
+
+        const auto& env_infos = this->env_infos;
+        const auto& rigid_body_system = this->rigid_body;
+
+        for(int eid = 0; eid < env_infos->num_envs; eid++)
+        {
+            spdlog::info("Environment {}: ", eid);
+            
+        }
+
+        spdlog::info("[MujocoSolver Solver] Initialization complete. Number of environments: {}", env_infos->num_envs);
+
+
+
+        spdlog::info("[MujocoSolver Solver] Finished initialization.");
+    }
 
 
     template<typename TDataType>
     void MujocoSolver<TDataType>::TimeIntegration()
     {
-        spdlog::info("MujocoSolver TimeIntegration called.");
+        spdlog::info("[MujocoSolver Solver] TimeIntegration called.");
 
         const auto& env_infos = this->env_infos;
         const auto& rigid_body_system = this->rigid_body;

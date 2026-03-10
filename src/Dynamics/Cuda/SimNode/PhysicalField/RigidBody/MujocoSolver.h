@@ -19,7 +19,7 @@ namespace dyno
             : Base(envInfos, rigidBody) {};
         ~MujocoSolver() {};
 
-        void Init();
+        void Init() override;
         void TimeIntegration() override;
     };
 }

@@ -45,7 +45,7 @@ namespace dyno {
 
         DEF_VAR_IN(RigidBody<TDataType>, rigid_body, "A struct containing infos about the rigid body in all environments.");
 
-
+        inline static uint frame = 0;
     protected:
         void compute() override;
     
@@ -54,9 +54,6 @@ namespace dyno {
         void UpdateRenderingData();
         
     private:
-        inline static uint frame = 0;
-
-
         std::shared_ptr<MujocoSolver<TDataType>> solver;    // TODO: support multiple solvers and select them by config.
 
     };

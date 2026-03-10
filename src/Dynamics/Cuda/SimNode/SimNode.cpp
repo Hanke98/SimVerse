@@ -54,17 +54,6 @@ namespace dyno {
         std::vector<dyno::TopologyModule::Edge> edge_x = { {0, 1} };
         std::vector<dyno::TopologyModule::Edge> edge_y = { {0, 2} };
         std::vector<dyno::TopologyModule::Edge> edge_z = { {0, 3} };
-        
-        // auto edge_set_x = std::make_shared<dyno::EdgeSet<TDataType>>();
-        // edge_set_x->setPoints(points);
-        // edge_set_x->setEdges(edge_x);
-        // this->stateaxis_x()->setDataPtr(edge_set_x);
-        // auto x_render = std::make_shared<dyno::GLWireframeVisualModule>();
-        // x_render->setColor(dyno::Color(1.f, 0.f, 0.f));
-        // x_render->varLineWidth()->setValue(10.f);
-        // this->stateaxis_x()->connect(x_render->inEdgeSet());
-        // this->graphicsPipeline()->pushModule(x_render);
-        // x_render->varForceUpdate()->setValue(true);
 
         #define SET_AXIS_RENDER(axis, color) \
         auto edge_set_##axis = std::make_shared<dyno::EdgeSet<TDataType>>(); \

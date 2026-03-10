@@ -40,6 +40,8 @@ namespace dyno
         }
 
         solver = std::make_shared<MujocoSolver<TDataType>>(env_infos, rigid_body);
+        solver->Init();
+
     }
 
     DEFINE_CLASS(SimModule);

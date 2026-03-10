@@ -21,6 +21,8 @@ namespace dyno {
             : SolverBase<TDataType>(), env_infos(envInfos), rigid_body(rigidBody) {};
         ~RigidSolver() {};
 
+        
+
     protected:
         std::shared_ptr<EnvInfosType> env_infos = nullptr;
         std::shared_ptr<RigidBodyType> rigid_body = nullptr;

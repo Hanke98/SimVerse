@@ -42,10 +42,10 @@ namespace dyno
 
 
         // TODO: write a kernal to add 1.0 to each element in batch_qacc, and print the updated values in the kernel.
-        auto rigid_body = in_rigid_body.constDataPtr();
-        AddOneToBatchQaccKernal<<<rigid_body->batch_qacc.nx(), rigid_body->batch_qacc.ny()>>>
-        (rigid_body->batch_qacc);
-        cudaDeviceSynchronize();
+        // auto rigid_body = in_rigid_body.constDataPtr();
+        // AddOneToBatchQaccKernal<<<rigid_body->batch_qacc.nx(), rigid_body->batch_qacc.ny()>>>
+        // (rigid_body->batch_qacc);
+        // cudaDeviceSynchronize();
 
         solver->TimeIntegration();
     }

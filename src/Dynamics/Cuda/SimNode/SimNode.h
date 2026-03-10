@@ -53,6 +53,7 @@ namespace dyno
 
 
         using EnvInfosType = EnvironmentInfos<TDataType>;
+        using RigidBodyType = RigidBody<TDataType>;
 
         SimNode();
         SimNode(std::string name);
@@ -73,7 +74,7 @@ namespace dyno
         DEF_VAR(EnvInfosType, env_infos, EnvInfosType{}, "A struct containing the infos of parallel environments.");
         
         // Rigid Body
-        DEF_VAR(RigidBody<TDataType>, rigid_body, RigidBody<TDataType>{}, "A struct containing infos about the rigid body in all environments.");
+        DEF_VAR(RigidBodyType, rigid_body, RigidBodyType{}, "A struct containing infos about the rigid body in all environments.");
     
         
         // For DynoRendering

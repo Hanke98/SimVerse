@@ -2400,11 +2400,25 @@ namespace dyno
         if (REAL_LESS(depth, 0) && REAL_GREAT(depth, -REAL_infinity))
         {
             Vec3f n = sat.normal();
-            Vec3f nB = triB.normal();
-            if (nB.norm() > EPSILON)
+            Vec3f ref(0);
+
+            if (sat.type() == CT_POINT || sat.type() == CT_EDGE)
             {
-                nB /= nB.norm();
-                if (n.dot(nB) < 0)
+                ref = sat.pointA() - sat.pointB();
+            }
+            else if (sat.face() == CT_TRIA)
+            {
+                ref = -triA.normal();
+            }
+            else if (sat.face() == CT_TRIB)
+            {
+                ref = triB.normal();
+            }
+
+            if (ref.norm() > EPSILON)
+            {
+                ref /= ref.norm();
+                if (n.dot(ref) > 0)
                     n = -n;
             }
             m.normal = n; 

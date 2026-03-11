@@ -2,6 +2,8 @@
 
 #include "Array/Array.h"
 #include "Array/Array2D.h"
+#include <thrust/device_ptr.h>
+#include <thrust/extrema.h>
 
 namespace dyno
 {
@@ -71,4 +73,13 @@ namespace dyno
         }
     }
 
+    template<typename T>
+    inline T GetMaxValue(const DArray<T>& arr, int count)
+    {
+        if(count <= 0)
+            return T(0);
+        thrust::device_ptr<const T> d_ptr(arr.begin());
+
+        return *thrust::max_element(d_ptr, d_ptr + count);
+    }
 }

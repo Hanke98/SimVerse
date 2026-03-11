@@ -20,7 +20,12 @@ namespace dyno
         ~MujocoSolver() {};
 
         void Init() override;
+        void Step() override;
         void TimeIntegration() override;
+    
+    private:
+        void ForwardKinematics();
+
     };
 }
 

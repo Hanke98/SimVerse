@@ -35,17 +35,54 @@ namespace dyno {
     struct RigidBody : public PhysicalFieldData<TDataType>
     {
         using Real = typename TDataType::Real;
-        
+
+        int                 max_bodies;
+        DArray2D<int>       is_static;      // [env_id, body_id] whether the rigid body is static or dynamic
+
         DArray<int>         batch_bodies;  // [env_id] num of rigid bodies in each environment
         DArray<int>         batch_body_offset; // [env_id] flattened rigid body offset in topo position/rotation arrays
+        
         DArray<int>         batch_nv;      // [env_id] num of generalized DoFs
+
+        DArray2D<int>       nv_offset;     // [env_id, body_idx] 
+        
+        
+        DArray2D<int>       q_lengths;      // [env_id, body_id] num of generalized DoFs
+        DArray2D<int>       q_offset;       // [env_id, body_id] offset of generalized DoFs;
         DArray2D<Real>      batch_qacc;    // [env_id, dof_idx] generalized acceleration
+        DArray2D<Real>      batch_qvel;    // [env_id, dof_idx] generalized velocity
+
+
+        DArray2D<int>       qpos_lengths;       // [env_id, body_id] num of generalized position
+        DArray2D<int>       qpos_offset;
+        DArray2D<Real>      batch_qpos;     // [env_id, dof_idx] generalized position
+        
+        DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix
+        DArray2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
+        DArray2D<Real>      batch_cdofdot; // [env_id, dof_idx] projection basis time derivative
+
+        DArray2D<Real>      dof_frictionloss;
+
+
         DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body
         DArray2D<Mat3f>     batch_rot;     // [env_id, body_id] world rotation of rigid body (as rotation matrix)
+        DArray2D<Quat<Real>> batch_quat;    // [env_id, body_id] world rotation of rigid body (as quaternion)
+        DArray2D<Real>      batch_mass;    // [env_id, body_id] mass of rigid body
+        
         DArray<Vec3f>       topo_pos_cache; // flattened body positions for topology update
         DArray<Mat3f>       topo_rot_cache; // flattened body rotations for topology update
 
+        // For articulated bodies
+        DArray2D<int>       parent_idx;   // [env_id, body_id] parent body index (-1 for root)
+        DArray2D<int>       root_idx;     // [env_id, body_id] root body index
+        DArray2D<Real>      subtree_mass;   // [env_id, body_id] mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
+        DArray2D<Vec3f>     subtree_com;    // [env_id, body_id] center of mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
 
+
+        // solving cache
+        DArray2D<Real>      batch_q_inner_force;
+        DArray2D<Real>      batch_q_ex_force;
+        DArray2D<Real>      batch_ex_acc;
 
         // Shape information for rendering and collision handling
         DArray2D<int>           shape_type;    // [body_id] type

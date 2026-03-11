@@ -46,6 +46,7 @@ namespace dyno
         // AddOneToBatchQaccKernal<<<rigid_body->batch_qacc.nx(), rigid_body->batch_qacc.ny()>>>
         // (rigid_body->batch_qacc);
         // cudaDeviceSynchronize();
+        solver->Step();
 
         solver->TimeIntegration();
     }

@@ -2402,11 +2402,11 @@ namespace dyno
             Vec3f n = sat.normal();
             Vec3f ref(0);
 
-            if (sat.type() == CT_POINT || sat.type() == CT_EDGE)
-            {
-                ref = sat.pointA() - sat.pointB();
-            }
-            else if (sat.face() == CT_TRIA)
+            // if (sat.type() == CT_POINT || sat.type() == CT_EDGE)
+            // {
+            //     ref = sat.pointA() - sat.pointB();
+            // }
+            if (sat.face() == CT_TRIA)
             {
                 ref = -triA.normal();
             }

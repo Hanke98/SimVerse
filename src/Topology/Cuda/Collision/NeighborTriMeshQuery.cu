@@ -2907,10 +2907,10 @@ namespace dyno
 
 				// Keep deterministic order and geometrically aggregate near-identical contacts before solver.
 				NMQStableSortAndAggregateContacts<ContactPair>(hContacts);
-				if (!this->varDisableContactReduction()->getValue())
-				{
-					NMQReduceContactsPerBodyPair<ContactPair>(hContacts);
-				}
+				// if (!this->varDisableContactReduction()->getValue())
+				// {
+				// 	NMQReduceContactsPerBodyPair<ContactPair>(hContacts);
+				// }
 
 				this->outContacts()->resize(hContacts.size());
 				if (hContacts.size() > 0)

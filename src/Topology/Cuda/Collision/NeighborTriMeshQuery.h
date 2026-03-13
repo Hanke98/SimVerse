@@ -132,11 +132,14 @@ namespace dyno
 	protected:
 		void compute() override;
 		std::shared_ptr<TriangleSet<DataType3f>> triSet = std::make_shared<TriangleSet<DataType3f>>();
+		virtual void narrowPhase();
+		const DArray<uint>& patch2ShapeData() const { return mPatch2Shape; }
+		const DArray<Vec3f>& shapeRestTranslationsData() const { return mShapeRestT; }
+		const DArray<Mat3f>& shapeRestRotationsData() const { return mShapeRestR; }
 
 	private:
 		bool broadPhase();
 		bool middlePhase();
-		void narrowPhase();
 		bool updatePatchFaceLimitState(int patchCount);
 		bool updateShape2RigidBodyIds(int shapeCount);
 		bool buildPatchPairsFromContactList(int shapeCount, int patchCount);

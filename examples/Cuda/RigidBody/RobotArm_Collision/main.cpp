@@ -178,143 +178,143 @@ int main() {
         // }
 
         // ======== PD controller ========
-        // if (i > 0) {
-        //     RobotArmSimulator<DataType3f>::LocalIndexParam local_param;
-        //     local_param.num_bodies = 1;
-        //     local_param.ids.push_back(0);
-        //     // local_param.ids.push_back(1);
-        //     for (int i = 0; i <= 7; ++i) {
-        //         local_param.localRigidBodyid.push_back(i);
-        //     }
-        //     auto quat = simulator.getAnglesByLocalIndex(local_param);
-        //     auto angularVelocity = simulator.getAngularVelocitiesByLocalIndex(local_param);
+        if (i > 0) {
+            RobotArmSimulator<DataType3f>::LocalIndexParam local_param;
+            local_param.num_bodies = 1;
+            local_param.ids.push_back(0);
+            // local_param.ids.push_back(1);
+            for (int i = 0; i <= 7; ++i) {
+                local_param.localRigidBodyid.push_back(i);
+            }
+            auto quat = simulator.getAnglesByLocalIndex(local_param);
+            auto angularVelocity = simulator.getAngularVelocitiesByLocalIndex(local_param);
 
-        //     auto unwrapAngle = [](Real angle, Real prevAngle) -> Real
-        //     {
-        //         const Real twoPi = Real(2.0 * M_PI);
+            auto unwrapAngle = [](Real angle, Real prevAngle) -> Real
+            {
+                const Real twoPi = Real(2.0 * M_PI);
 
-        //         // six candidates：±angle, ±(angle + 2π), ±(angle - 2π)
-        //         Real cand[6] = {
-        //             angle,
-        //             -angle,
-        //             angle + twoPi,
-        //             -(angle + twoPi),
-        //             angle - twoPi,
-        //             -(angle - twoPi)
-        //         };
+                // six candidates：±angle, ±(angle + 2π), ±(angle - 2π)
+                Real cand[6] = {
+                    angle,
+                    -angle,
+                    angle + twoPi,
+                    -(angle + twoPi),
+                    angle - twoPi,
+                    -(angle - twoPi)
+                };
 
-        //         Real best = cand[0];
-        //         Real bestDiff = fabs(cand[0] - prevAngle);
+                Real best = cand[0];
+                Real bestDiff = fabs(cand[0] - prevAngle);
 
-        //         for (int i = 1; i < 6; ++i)
-        //         {
-        //             Real d = fabs(cand[i] - prevAngle);
-        //             if (d < bestDiff)
-        //             {
-        //                 best = cand[i];
-        //                 bestDiff = d;
-        //             }
-        //         }
+                for (int i = 1; i < 6; ++i)
+                {
+                    Real d = fabs(cand[i] - prevAngle);
+                    if (d < bestDiff)
+                    {
+                        best = cand[i];
+                        bestDiff = d;
+                    }
+                }
 
-        //         return best;
-        //     };
+                return best;
+            };
 
-        //     // ------------- loop calculating 7 joint ----------------
-        //     for (int j = 0; j < 7; ++j)
-        //     {
-        //         int parentId = j;       // 父连杆：j
-        //         int childId  = j + 1;   // 子连杆：j+1
+            // ------------- loop calculating 7 joint ----------------
+            for (int j = 0; j < 7; ++j)
+            {
+                int parentId = j;       // 父连杆：j
+                int childId  = j + 1;   // 子连杆：j+1
 
-        //         auto quatParent = quat[parentId];
-        //         auto quatChild  = quat[childId];
+                auto quatParent = quat[parentId];
+                auto quatChild  = quat[childId];
 
-        //         // 相对旋转：child 相对于 parent
-        //         auto qRel = quatParent.inverse() * quatChild;
-        //         qRel.normalize();
+                // 相对旋转：child 相对于 parent
+                auto qRel = quatParent.inverse() * quatChild;
+                qRel.normalize();
 
-        //         // 铰链轴在 world 坐标系下的方向
-        //         auto axisWorld = quatParent.rotate(jointAxisLocal[j]);
-        //         axisWorld.normalize();
+                // 铰链轴在 world 坐标系下的方向
+                auto axisWorld = quatParent.rotate(jointAxisLocal[j]);
+                axisWorld.normalize();
 
-        //         // 相对旋转 → 轴角
-        //         Real rot;
-        //         Vec3f axisRel;
-        //         qRel.toRotationAxis(rot, axisRel);
+                // 相对旋转 → 轴角
+                Real rot;
+                Vec3f axisRel;
+                qRel.toRotationAxis(rot, axisRel);
 
-        //         // 通过和铰链轴的点积确定“正方向”
-        //         Real sign      = axisRel.dot(axisWorld) > 0 ? Real(1) : Real(-1);
-        //         Real rawAngle  = sign * rot;
+                // 通过和铰链轴的点积确定“正方向”
+                Real sign      = axisRel.dot(axisWorld) > 0 ? Real(1) : Real(-1);
+                Real rawAngle  = sign * rot;
 
-        //         // 用上一帧角度解包，得到连续的关节角
-        //         Real hingeAngle = unwrapAngle(rawAngle, hingeAngle_old[j]);
+                // 用上一帧角度解包，得到连续的关节角
+                Real hingeAngle = unwrapAngle(rawAngle, hingeAngle_old[j]);
 
-        //         auto angularVelocityParent = angularVelocity[parentId];
-        //         auto angularVelocityChild = angularVelocity[childId];
-        //         auto angularVelocityRel = angularVelocityChild - angularVelocityParent;
-        //         float hingeVelocity = angularVelocityRel.dot(axisWorld);
+                auto angularVelocityParent = angularVelocity[parentId];
+                auto angularVelocityChild = angularVelocity[childId];
+                auto angularVelocityRel = angularVelocityChild - angularVelocityParent;
+                float hingeVelocity = angularVelocityRel.dot(axisWorld);
 
-        //         // PD 控制
-        //         Real e  = targetAngle[j] - hingeAngle;
-        //         torque[j] = kp[j] * e - kd[j] * hingeVelocity ;
-        //         torque[j] = std::max(-effortLimit[j]/1, std::min(effortLimit[j]/1, torque[j]));
-        //         torque[j] -= dampings[j] * hingeVelocity * (1 - damping * dt);
-        //         // torque[j] -= dampings[j] * hingeVelocity;
+                // PD 控制
+                Real e  = targetAngle[j] - hingeAngle;
+                torque[j] = kp[j] * e - kd[j] * hingeVelocity ;
+                torque[j] = std::max(-effortLimit[j]/1, std::min(effortLimit[j]/1, torque[j]));
+                torque[j] -= dampings[j] * hingeVelocity * (1 - damping * dt);
+                // torque[j] -= dampings[j] * hingeVelocity;
 
-        //         // 更新上一帧角度
-        //         hingeAngle_old[j] = hingeAngle;
+                // 更新上一帧角度
+                hingeAngle_old[j] = hingeAngle;
 
-        //         if (std::abs(e) > std::abs(error[j])) {
-        //             error[j] = e;
-        //         }
+                if (std::abs(e) > std::abs(error[j])) {
+                    error[j] = e;
+                }
 
-        //         if (i % checkFrequancy == 0 && j == 6) {
-        //             float best_val = error[0];
-        //             best_idx = 0;
-        //             for (int idx = 1; idx < error.size(); ++idx) {
-        //                 if (std::abs(error[idx]) > std::abs(best_val)) {
-        //                     best_val = error[idx];
-        //                     best_idx = idx;
-        //                 }
-        //             }
+                if (i % checkFrequancy == 0 && j == 6) {
+                    float best_val = error[0];
+                    best_idx = 0;
+                    for (int idx = 1; idx < error.size(); ++idx) {
+                        if (std::abs(error[idx]) > std::abs(best_val)) {
+                            best_val = error[idx];
+                            best_idx = idx;
+                        }
+                    }
 
-        //             std::cout << "From " << std::max(0, (i / checkFrequancy) * checkFrequancy - checkFrequancy)
-        //                     << " to " << (i / checkFrequancy) * checkFrequancy << " steps: " << "\n"
-        //                     << "The largest error is " << best_val << "\n"
-        //                     << "The joint of largest error is : " << best_idx << "\n"<< std::endl;
+                    std::cout << "From " << std::max(0, (i / checkFrequancy) * checkFrequancy - checkFrequancy)
+                            << " to " << (i / checkFrequancy) * checkFrequancy << " steps: " << "\n"
+                            << "The largest error is " << best_val << "\n"
+                            << "The joint of largest error is : " << best_idx << "\n"<< std::endl;
 
-        //             std::fill(error.begin(), error.end(), 0.0f);
-        //         }
+                    std::fill(error.begin(), error.end(), 0.0f);
+                }
 
-        //         if (j == best_idx && i % 10 == 0) {
-        //             bool sat = std::abs(torque[j]) >= effortLimit[j]/2 - 1e-6;
-        //             std::cout << "step " << i
-        //                     << ", joint " << j
-        //                     << ", err = " << e
-        //                     << ", errV = " << -hingeVelocity
-        //                     << ", torque = " << torque[j]
-        //                     << (sat ? " (SATURATED)" : "")
-        //                     << std::endl;
-        //         }
-        //     }
+                if (j == best_idx && i % 10 == 0) {
+                    bool sat = std::abs(torque[j]) >= effortLimit[j]/2 - 1e-6;
+                    std::cout << "step " << i
+                            << ", joint " << j
+                            << ", err = " << e
+                            << ", errV = " << -hingeVelocity
+                            << ", torque = " << torque[j]
+                            << (sat ? " (SATURATED)" : "")
+                            << std::endl;
+                }
+            }
 
-        //     moterVelocities1 = {
-        //         (float)torque[0],
-        //         (float)torque[1],
-        //         (float)torque[2],
-        //         (float)torque[3],
-        //         (float)torque[4],
-        //         (float)torque[5],
-        //         (float)torque[6]
-        //     };
+            moterVelocities1 = {
+                (float)torque[0],
+                (float)torque[1],
+                (float)torque[2],
+                (float)torque[3],
+                (float)torque[4],
+                (float)torque[5],
+                (float)torque[6]
+            };
 
-        //     RobotArmSimulator<DataType3f>::HingeTorqueParam param;
-        //     param.num_bodies = 1;
-        //     param.ids.push_back(0);
-        //     // param.ids.push_back(1);
-        //     param.torques.push_back(moterVelocities1);
-        //     // param.torques.push_back(moterVelocities1);
-        //     simulator.setHingeTorques(param);
-        // }
+            RobotArmSimulator<DataType3f>::HingeTorqueParam param;
+            param.num_bodies = 1;
+            param.ids.push_back(0);
+            // param.ids.push_back(1);
+            param.torques.push_back(moterVelocities1);
+            // param.torques.push_back(moterVelocities1);
+            simulator.setHingeTorques(param);
+        }
 
         simulator.stepSimulation(enableRendering, enableSaveScreen, savePath);
         if (i == 0) {

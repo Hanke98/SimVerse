@@ -10,6 +10,7 @@
 #include "Mapping/TextureMeshToTriangleSet.h"
 
 #include "Collision/CollistionDetectionBoundingBox.h"
+#include "Collision/NeighborMeshLevelQuery.h"
 #include "Collision/NeighborTriMeshQuery.h"
 #include "Collision/NeighborMeshQuery.h"
 #include "Topology/LinearBVH.h"
@@ -30,8 +31,6 @@ namespace dyno
     BatchRigidBodySystem<TDataType>::BatchRigidBodySystem()
       : ArticulatedBody<TDataType>()
     {
-        // RigidBodySystem<TDataType>::init(); // Replaced by NeighborShapeQuery.
-        initCollisionPipeline();
     }
 
     template<typename TDataType>
@@ -60,39 +59,45 @@ namespace dyno
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::initCollisionPipeline()
     {
-        auto defaultTopo = std::make_shared<DiscreteElements<TDataType>>();
-        this->stateTopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
-
         auto merge = std::make_shared<ContactsUnion<TDataType>>();
 
         auto cdBV = std::make_shared<CollistionDetectionBoundingBox<TDataType>>();
         this->stateTopology()->connect(cdBV->inDiscreteElements());
         this->animationPipeline()->pushModule(cdBV);
 
-		if (this->varCollisionDetectionType()->getValue() == TriMesh)
-		{
-			mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
-			mNeighborTriMeshQuery->varInputVerticesInRestWorld()->setValue(false);
+        if (this->varCollisionDetectionType()->getValue() == TriMesh)
+        {
+            mNeighborTriMeshQuery = std::make_shared<NeighborTriMeshQuery<TDataType>>();
+        }
+        else if (this->varCollisionDetectionType()->getValue() == MeshLevel)
+        {
+            mNeighborTriMeshQuery = std::make_shared<NeighborMeshLevelQuery<TDataType>>();
+            printf("[BatchRigidBodySystem] Use NeighborMeshLevelQuery.\n");
+        }
 
-			// Use TM2TS to generate per-frame world-space TriangleSet (multi-instance aware).
-			auto transformer = std::make_shared<InstanceTransform<DataType3f>>();
-			this->stateCenter()->connect(transformer->inCenter());
-			this->stateRotationMatrix()->connect(transformer->inRotationMatrix());
-			this->stateBindingPair()->connect(transformer->inBindingPair());
-			this->stateBindingTag()->connect(transformer->inBindingTag());
-			this->stateInstanceTransform()->connect(transformer->inInstanceTransform());
-			this->animationPipeline()->pushModule(transformer);
+        if (mNeighborTriMeshQuery)
+        {
+            mNeighborTriMeshQuery->varInputVerticesInRestWorld()->setValue(false);
 
-			auto tm2ts = std::make_shared<TextureMeshToTriangleSet<DataType3f>>();
-			this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
-			transformer->outInstanceTransform()->connect(tm2ts->inTransform());
-			this->animationPipeline()->pushModule(tm2ts);
+            // Use TM2TS to generate per-frame world-space TriangleSet (multi-instance aware).
+            auto transformer = std::make_shared<InstanceTransform<DataType3f>>();
+            this->stateCenter()->connect(transformer->inCenter());
+            this->stateRotationMatrix()->connect(transformer->inRotationMatrix());
+            this->stateBindingPair()->connect(transformer->inBindingPair());
+            this->stateBindingTag()->connect(transformer->inBindingTag());
+            this->stateInstanceTransform()->connect(transformer->inInstanceTransform());
+            this->animationPipeline()->pushModule(transformer);
 
-			tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
+            auto tm2ts = std::make_shared<TextureMeshToTriangleSet<DataType3f>>();
+            this->stateTextureMesh()->connect(tm2ts->inTextureMesh());
+            transformer->outInstanceTransform()->connect(tm2ts->inTransform());
+            this->animationPipeline()->pushModule(tm2ts);
 
-			this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
-			this->stateRotationMatrix()->connect(mNeighborTriMeshQuery->inRotationMatrix());
-			this->stateTopology()->connect(mNeighborTriMeshQuery->inDiscreteElements());
+            tm2ts->outTriangleSet()->connect(mNeighborTriMeshQuery->inTriangleSet());
+
+            this->stateCenter()->connect(mNeighborTriMeshQuery->inCenter());
+            this->stateRotationMatrix()->connect(mNeighborTriMeshQuery->inRotationMatrix());
+            this->stateTopology()->connect(mNeighborTriMeshQuery->inDiscreteElements());
             this->animationPipeline()->pushModule(mNeighborTriMeshQuery);
 
             // Bridge module output to a Node field so GraphicsPipeline can discover render modules.
@@ -134,7 +139,8 @@ namespace dyno
             } else {
                 mNeighborTriMeshQuery->inEnableVisualizeCollisionTriSet()->setValue(false);
             }
-        } else if (this->varCollisionDetectionType()->getValue() == Element) {
+        }
+        else if (this->varCollisionDetectionType()->getValue() == Element) {
             auto elementQuery = std::make_shared<NeighborElementQuery<TDataType>>();
             elementQuery->varSelfCollision()->setValue(true);
             this->stateTopology()->connect(elementQuery->inDiscreteElements());
@@ -181,8 +187,14 @@ namespace dyno
     template<typename TDataType>
     void BatchRigidBodySystem<TDataType>::resetStates()
     {
+        if (!mConstraintSolver)
+        {
+            initCollisionPipeline();
+        }
+
         ArticulatedBody<TDataType>::resetStates();
-        if (this->varCollisionDetectionType()->getValue() == TriMesh)
+        if (this->varCollisionDetectionType()->getValue() == TriMesh ||
+            this->varCollisionDetectionType()->getValue() == MeshLevel)
         {
             setupNeighborTriMeshQueryFromUrdf();
         }

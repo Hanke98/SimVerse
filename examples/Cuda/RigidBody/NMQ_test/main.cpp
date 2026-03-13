@@ -41,6 +41,7 @@ std::shared_ptr<SceneGraph> creatScene()
 	std::shared_ptr<SceneGraph> scn = std::make_shared<SceneGraph>();
 
 	auto multiRobotArm = scn->addNode(std::make_shared<BatchRigidBodySystem<DataType3f>>());
+	multiRobotArm->varCollisionDetectionType()->setValue(BatchRigidBodySystem<DataType3f>::MeshLevel);
 	multiRobotArm->varFilePath()->setValue(getAssetPath() + "../asset/NTQ_test/scene_cube_sphere.urdf");
 
 	std::vector<Transform3f> vehiclesTransform;

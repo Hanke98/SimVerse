@@ -17,6 +17,7 @@
 namespace dyno
 {
   template<typename TDataType> class NeighborTriMeshQuery;
+  template<typename TDataType> class NeighborMeshLevelQuery;
   template<typename TDataType> class TJConstraintSolver;
 
   template<typename TDataType>
@@ -92,7 +93,8 @@ public:
     enum CollisionDetectionType
     {
         Element,
-        TriMesh
+        TriMesh,
+        MeshLevel
     };
 
     BatchRigidBodySystem();

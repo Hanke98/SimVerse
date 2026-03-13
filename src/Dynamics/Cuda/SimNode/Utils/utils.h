@@ -4,9 +4,23 @@
 #include "Array/Array2D.h"
 #include <thrust/device_ptr.h>
 #include <thrust/extrema.h>
+#include "Quat.h"
 
 namespace dyno
 {
+    #define INIT_DYNO_ARRAY(arr, length)    \
+        arr.resize(length); \
+        arr.reset();
+    
+    #define INIT_DYNO_ARRAY2D(arr, num_1d, max_length)    \
+        arr.resize(num_1d, max_length); \
+        arr.reset();
+    
+
+    // rigid_body_system->batch_nv.resize(num_envs);
+        // rigid_body_system->batch_nv.reset();
+
+
     template<typename T>
     void FlattenArray2D(const DArray2D<T>& src,  DArray<T>& dst, int total_count,
         const DArray<int>& array_lengths, const DArray<int>& array_offsets);
@@ -81,5 +95,16 @@ namespace dyno
         thrust::device_ptr<const T> d_ptr(arr.begin());
 
         return *thrust::max_element(d_ptr, d_ptr + count);
+    }
+
+    template<typename T>
+    __global__ void BatchDenseMatrixVectorMul(DArray2D<T> mat, DArray2D<T> vec, DArray2D<T> out, DArray<int> rows, DArray<int> cols, int num_sys);
+
+    template<typename T>
+    inline __host__ __device__ Quat<T> QuatFromAxisAngle(const Vec3f& axis, Real angle)
+    {
+        Real half_angle = angle * 0.5f;
+        Real s = sin(half_angle);
+        return Quat<T>(cos(half_angle), axis.x * s, axis.y * s, axis.z * s);
     }
 }

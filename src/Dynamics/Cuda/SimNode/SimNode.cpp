@@ -33,7 +33,19 @@ namespace dyno {
         this->statetopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
 
         auto env_infos = var_env_infos.getValue();
-        env_infos.num_envs = 2;
+        env_infos.num_envs = 1;
+        
+        CArray<Vec3f> gravities(env_infos.num_envs);
+        CArray<Real> timesteps(env_infos.num_envs);
+        for (int i = 0; i < env_infos.num_envs; ++i)
+        {
+            gravities[i] = Vec3f(0.f, -9.81f, 0.f);
+            timesteps[i] = 6e-3f;
+        }
+        env_infos.gravities.assign(gravities);
+        env_infos.timesteps.assign(timesteps);       
+
+
         var_env_infos.setValue(env_infos);
 
         InitRigidBody(env_infos.num_envs, 3);    // TEST;
@@ -56,16 +68,16 @@ namespace dyno {
         std::vector<dyno::TopologyModule::Edge> edge_z = { {0, 3} };
 
         #define SET_AXIS_RENDER(axis, color) \
-        auto edge_set_##axis = std::make_shared<dyno::EdgeSet<TDataType>>(); \
-        edge_set_##axis->setPoints(points);  \
-        edge_set_##axis->setEdges(edge_##axis);   \
-        this->stateaxis_##axis()->setDataPtr(edge_set_##axis);    \
-        auto render_##axis = std::make_shared<dyno::GLWireframeVisualModule>();  \
-        render_##axis->setColor(color); \
-        render_##axis->varLineWidth()->setValue(3.f);   \
-        this->stateaxis_##axis()->connect(render_##axis->inEdgeSet());    \
-        this->graphicsPipeline()->pushModule(render_##axis); \
-        render_##axis->varForceUpdate()->setValue(true);
+            auto edge_set_##axis = std::make_shared<dyno::EdgeSet<TDataType>>(); \
+            edge_set_##axis->setPoints(points);  \
+            edge_set_##axis->setEdges(edge_##axis);   \
+            this->stateaxis_##axis()->setDataPtr(edge_set_##axis);    \
+            auto render_##axis = std::make_shared<dyno::GLWireframeVisualModule>();  \
+            render_##axis->setColor(color); \
+            render_##axis->varLineWidth()->setValue(3.f);   \
+            this->stateaxis_##axis()->connect(render_##axis->inEdgeSet());    \
+            this->graphicsPipeline()->pushModule(render_##axis); \
+            render_##axis->varForceUpdate()->setValue(true);
 
         SET_AXIS_RENDER(x, Color(1.f, 0.f, 0.f));
         SET_AXIS_RENDER(y, Color(0.f, 1.f, 0.f));

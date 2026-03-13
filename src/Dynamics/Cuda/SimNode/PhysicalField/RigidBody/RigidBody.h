@@ -57,11 +57,14 @@ namespace dyno {
         DArray2D<int>       qpos_offset;
         DArray2D<Real>      batch_qpos;     // [env_id, dof_idx] generalized position
         
-        DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix
+        DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
         DArray2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
         DArray2D<Real>      batch_cdofdot; // [env_id, dof_idx] projection basis time derivative
+        DArray2D<Real>      batch_crb;     // dense vec num_bodies * 10
 
         DArray2D<Real>      dof_frictionloss;
+
+        DArray<int>         batch_num_constraints;
 
 
         DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body

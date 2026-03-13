@@ -11,7 +11,7 @@ namespace dyno
     {
         using Real = typename TDataType::Real;
         int num_envs = 0;
-        FArray<Vec3f, DeviceType::GPU> gravities;
-        FArray<Real, DeviceType::GPU> timesteps;
+        DArray<Vec3f> gravities;
+        DArray<Real> timesteps;
     };
 }

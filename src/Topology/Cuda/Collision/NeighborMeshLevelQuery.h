@@ -66,6 +66,15 @@ namespace dyno
 		DArray<int> mFilteredTri1;
 		DArray<int> mFilteredPatchPairId;
 
+		DArray<int> mPrimitivePassCounts;
+		DArray<int> mPrimitivePassOffsets;
+		DArray<ContactPair> mPrimitiveCandidateContacts;
+		DArray<unsigned long long> mPrimitiveCandidateKeys;
+		DArray<int> mPrimitiveCandidateSortedIndices;
+		DArray<int> mPrimitiveCandidateKeepFlags;
+		DArray<int> mSelectedPrimitiveCounts;
+		DArray<int> mFallbackContactCounts;
+
 		DArray<int> mTriPairContactCounts;
 		DArray<int> mTriPairContactOffsets;
 

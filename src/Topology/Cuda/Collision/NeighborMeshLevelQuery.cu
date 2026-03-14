@@ -1,10 +1,12 @@
 #include "NeighborMeshLevelQuery.h"
 
+#include "CollisionDetectionAlgorithm.h"
 #include "FCallbackFunc.h"
 #include "Topology/TopologyConstants.h"
 
 #include <cmath>
 #include <limits>
+#include <thrust/sort.h>
 #include <vector>
 
 namespace
@@ -18,6 +20,17 @@ namespace
 		NMLQ_REGION_EDGE = 2,
 		NMLQ_REGION_VERTEX = 3,
 	};
+
+	enum NMLQPrimitivePassType
+	{
+		NMLQ_PASS_TRI0_VERTEX = 0,
+		NMLQ_PASS_TRI0_EDGE = 1,
+		NMLQ_PASS_TRI1_VERTEX = 2,
+		NMLQ_PASS_TRI1_EDGE = 3,
+		NMLQ_PASS_COUNT = 4,
+	};
+
+	static constexpr unsigned long long NMLQ_EdgePrimitiveKeyMask = 1ull << 63;
 
 	template<typename Real, typename Coord, typename Matrix, typename Triangle, typename Edge, typename Tri2Edg, typename Edg2Tri, typename AABB>
 	struct NMLQRuntimeView
@@ -54,6 +67,36 @@ namespace
 		Real dHat = Real(0);
 		bool verticesInRestWorld = false;
 	};
+
+	template<typename View>
+	struct NMLQTriPairContext
+	{
+		using Real = typename View::RealType;
+
+		int tri0 = EMPTY;
+		int tri1 = EMPTY;
+		int bodyId1 = INVALID;
+		int bodyId2 = INVALID;
+		int tri0Shape = EMPTY;
+		int tri1Shape = EMPTY;
+		dyno::TTriangle3D<Real> triangle0;
+		dyno::TTriangle3D<Real> triangle1;
+	};
+
+	DYN_FUNC inline int NMLQ_GetPairPassSlot(int pairId, int passType)
+	{
+		return pairId * NMLQ_PASS_COUNT + passType;
+	}
+
+	DYN_FUNC inline unsigned long long NMLQ_EncodeVertexPrimitiveKey(int vertexId)
+	{
+		return static_cast<unsigned long long>(vertexId);
+	}
+
+	DYN_FUNC inline unsigned long long NMLQ_EncodeEdgePrimitiveKey(int edgeId)
+	{
+		return NMLQ_EdgePrimitiveKeyMask | static_cast<unsigned long long>(edgeId);
+	}
 
 	template<typename Coord>
 	DYN_FUNC Coord NLQ_StablePerpendicular(const Coord& direction)
@@ -853,33 +896,15 @@ namespace
 		{
 			Coord faceNormal = targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size()
 				? view.faceNormalsWorld[targetTriId]
-				: Coord(1, 0, 0);
-
-			Coord witness = p - r;
-			if (faceNormal.normSquared() <= epsSqr || witness.normSquared() <= epsSqr)
-			{
-				Coord centerDelta = NMLQ_TriangleCenter(sourceTriangle.v[0], sourceTriangle.v[1], sourceTriangle.v[2])
-					- NMLQ_TriangleCenter(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
-				if (centerDelta.normSquared() > epsSqr)
-					faceNormal = centerDelta;
-				else
-					faceNormal = NLQ_StablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]);
-			}
-
+				: NLQ_BuildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
 			nTarget = NLQ_NormalizeOrFallback(faceNormal, NLQ_StablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
-			if (nTarget.dot(witness) < Real(0))
-				nTarget = -nTarget;
 
-			Real gap = NLQ_AbsValue((p - targetTriangle.v[0]).dot(nTarget));
-			if (gap * gap <= epsSqr)
-				gap = (p - r).norm();
-			if (gap > view.dHat)
+			Real signedDistance = (p - targetTriangle.v[0]).dot(nTarget);
+			if (signedDistance > view.dHat)
 				return false;
 
 			contactPoint = r;
-			depth = view.dHat - gap;
-			if (depth < Real(0))
-				depth = Real(0);
+			depth = signedDistance < Real(0) ? -signedDistance : Real(0);
 			contactType = dyno::ContactType::CT_VERTEX_FACE;
 			return true;
 		}
@@ -1072,94 +1097,247 @@ namespace
 	}
 
 	template<typename View, typename ContactPair>
-	DYN_FUNC int NMLQ_ProcessDirectedVertexTests(
+	DYN_FUNC int NMLQ_ProcessTriPairFallback(
 		const View& view,
-		int fixedTri0,
-		int fixedTri1,
-		int sourceTriId,
-		int sourceShapeId,
-		const dyno::TTriangle3D<typename View::RealType>& sourceTriangle,
-		int targetTriId,
-		int targetShapeId,
-		const dyno::TTriangle3D<typename View::RealType>& targetTriangle,
+		int tri0,
+		int tri1,
 		int bodyId1,
 		int bodyId2,
-		bool targetIsTri1,
+		const dyno::TTriangle3D<typename View::RealType>& triangle0,
+		const dyno::TTriangle3D<typename View::RealType>& triangle1,
 		ContactPair* contacts,
 		int contactsSize,
 		int writeBase,
 		bool write)
 	{
-		int count = 0;
-		if (sourceTriId < 0 || sourceTriId + 1 >= view.faceAssignedVertexOffsets.size())
-			return 0;
+		using Real = typename View::RealType;
+		using Coord = typename View::CoordType;
 
-		int begin = view.faceAssignedVertexOffsets[sourceTriId];
-		int end = view.faceAssignedVertexOffsets[sourceTriId + 1];
-		for (int i = begin; i < end; ++i)
+		dyno::TManifold<Real> manifold;
+		dyno::CollisionDetection<Real>::request(manifold, triangle0, triangle1, view.dHat, view.dHat);
+
+		const int contactCount = static_cast<int>(manifold.contactCount);
+		if (!write || contacts == nullptr || contactCount <= 0)
+			return contactCount;
+
+		for (int n = 0; n < contactCount; ++n)
 		{
-			int vertexId = view.faceAssignedVertexIndices[i];
-			typename View::CoordType contactPoint;
-			typename View::CoordType nTarget;
-			typename View::RealType depth = typename View::RealType(0);
-			dyno::ContactType type = dyno::ContactType::CT_UNKNOWN;
-			if (!NMLQ_TryVertexTriangleContact(
-				view,
-				sourceTriId,
-				sourceShapeId,
-				vertexId,
-				sourceTriangle,
-				targetTriId,
-				targetShapeId,
-				targetTriangle,
-				contactPoint,
-				nTarget,
-				depth,
-				type))
-				continue;
+			int outIdx = writeBase + n;
+			if (outIdx < 0 || outIdx >= contactsSize)
+				break;
 
-			if (write && contacts != nullptr)
-			{
-				int outIdx = writeBase + count;
-				if (outIdx < contactsSize)
-				{
-					ContactPair cp;
-					NMLQ_WriteContact(cp, bodyId1, bodyId2, fixedTri0, fixedTri1, contactPoint, nTarget, targetIsTri1, depth, type);
-					contacts[outIdx] = cp;
-				}
-			}
-			++count;
+			Coord contactPoint = manifold.contacts[n].position + view.dHat * manifold.normal;
+			Real depth = -manifold.contacts[n].penetration - Real(2) * view.dHat;
+			if (depth < Real(0))
+				depth = Real(0);
+
+			ContactPair cp;
+			cp.bodyId1 = bodyId1;
+			cp.bodyId2 = bodyId2;
+			cp.localId1 = tri0;
+			cp.localId2 = tri1;
+			cp.pos1 = contactPoint;
+			cp.pos2 = contactPoint;
+			cp.normal1 = -manifold.normal;
+			cp.normal2 = manifold.normal;
+			cp.contactType = dyno::ContactType::CT_NONPENETRATION;
+			cp.interpenetration = depth;
+			contacts[outIdx] = cp;
 		}
-		return count;
+
+		return contactCount;
+	}
+
+	template<typename View>
+	DYN_FUNC bool NMLQ_BuildTriPairContext(
+		const View& view,
+		int tri0,
+		int tri1,
+		int pairId,
+		NMLQTriPairContext<View>& ctx)
+	{
+		using Real = typename View::RealType;
+		using Coord = typename View::CoordType;
+
+		int shape0 = EMPTY;
+		int shape1 = EMPTY;
+		if (!NMLQ_GetBodyIdsForPair(view, pairId, ctx.bodyId1, ctx.bodyId2, shape0, shape1))
+			return false;
+
+		Coord tri0p0, tri0p1, tri0p2;
+		Coord tri1p0, tri1p1, tri1p2;
+		if (!NMLQ_GetWorldTriangle(view, tri0, tri0p0, tri0p1, tri0p2, &ctx.tri0Shape)
+			|| !NMLQ_GetWorldTriangle(view, tri1, tri1p0, tri1p1, tri1p2, &ctx.tri1Shape))
+			return false;
+
+		ctx.tri0 = tri0;
+		ctx.tri1 = tri1;
+		ctx.triangle0 = dyno::TTriangle3D<Real>(tri0p0, tri0p1, tri0p2);
+		ctx.triangle1 = dyno::TTriangle3D<Real>(tri1p0, tri1p1, tri1p2);
+		return true;
+	}
+
+	template<typename View>
+	DYN_FUNC bool NMLQ_GetPrimitivePassContext(
+		const NMLQTriPairContext<View>& ctx,
+		int passType,
+		int& sourceTriId,
+		int& sourceShapeId,
+		const dyno::TTriangle3D<typename View::RealType>*& sourceTriangle,
+		int& targetTriId,
+		int& targetShapeId,
+		const dyno::TTriangle3D<typename View::RealType>*& targetTriangle,
+		bool& targetIsTri1,
+		bool& vertexPass)
+	{
+		switch (passType)
+		{
+		case NMLQ_PASS_TRI0_VERTEX:
+			sourceTriId = ctx.tri0;
+			sourceShapeId = ctx.tri0Shape;
+			sourceTriangle = &ctx.triangle0;
+			targetTriId = ctx.tri1;
+			targetShapeId = ctx.tri1Shape;
+			targetTriangle = &ctx.triangle1;
+			targetIsTri1 = true;
+			vertexPass = true;
+			return true;
+		case NMLQ_PASS_TRI0_EDGE:
+			sourceTriId = ctx.tri0;
+			sourceShapeId = ctx.tri0Shape;
+			sourceTriangle = &ctx.triangle0;
+			targetTriId = ctx.tri1;
+			targetShapeId = ctx.tri1Shape;
+			targetTriangle = &ctx.triangle1;
+			targetIsTri1 = true;
+			vertexPass = false;
+			return true;
+		case NMLQ_PASS_TRI1_VERTEX:
+			sourceTriId = ctx.tri1;
+			sourceShapeId = ctx.tri1Shape;
+			sourceTriangle = &ctx.triangle1;
+			targetTriId = ctx.tri0;
+			targetShapeId = ctx.tri0Shape;
+			targetTriangle = &ctx.triangle0;
+			targetIsTri1 = false;
+			vertexPass = true;
+			return true;
+		case NMLQ_PASS_TRI1_EDGE:
+			sourceTriId = ctx.tri1;
+			sourceShapeId = ctx.tri1Shape;
+			sourceTriangle = &ctx.triangle1;
+			targetTriId = ctx.tri0;
+			targetShapeId = ctx.tri0Shape;
+			targetTriangle = &ctx.triangle0;
+			targetIsTri1 = false;
+			vertexPass = false;
+			return true;
+		default:
+			break;
+		}
+
+		sourceTriId = EMPTY;
+		sourceShapeId = EMPTY;
+		sourceTriangle = nullptr;
+		targetTriId = EMPTY;
+		targetShapeId = EMPTY;
+		targetTriangle = nullptr;
+		targetIsTri1 = true;
+		vertexPass = true;
+		return false;
 	}
 
 	template<typename View, typename ContactPair>
-	DYN_FUNC int NMLQ_ProcessDirectedEdgeTests(
+	DYN_FUNC int NMLQ_ProcessPrimitivePass(
 		const View& view,
-		int fixedTri0,
-		int fixedTri1,
-		int sourceTriId,
-		int sourceShapeId,
-		int targetTriId,
-		int targetShapeId,
-		const dyno::TTriangle3D<typename View::RealType>& targetTriangle,
-		int bodyId1,
-		int bodyId2,
-		bool targetIsTri1,
+		const NMLQTriPairContext<View>& ctx,
+		int passType,
 		ContactPair* contacts,
+		unsigned long long* primitiveKeys,
 		int contactsSize,
 		int writeBase,
 		bool write)
 	{
-		int count = 0;
-		if (sourceTriId < 0 || sourceTriId + 1 >= view.faceAssignedEdgeOffsets.size())
+		int sourceTriId = EMPTY;
+		int sourceShapeId = EMPTY;
+		int targetTriId = EMPTY;
+		int targetShapeId = EMPTY;
+		const dyno::TTriangle3D<typename View::RealType>* sourceTriangle = nullptr;
+		const dyno::TTriangle3D<typename View::RealType>* targetTriangle = nullptr;
+		bool targetIsTri1 = true;
+		bool vertexPass = true;
+		if (!NMLQ_GetPrimitivePassContext(
+			ctx,
+			passType,
+			sourceTriId,
+			sourceShapeId,
+			sourceTriangle,
+			targetTriId,
+			targetShapeId,
+			targetTriangle,
+			targetIsTri1,
+			vertexPass))
 			return 0;
 
-		int begin = view.faceAssignedEdgeOffsets[sourceTriId];
-		int end = view.faceAssignedEdgeOffsets[sourceTriId + 1];
-		for (int i = begin; i < end; ++i)
+		int count = 0;
+		if (vertexPass)
 		{
-			int edgeId = view.faceAssignedEdgeIndices[i];
+			if (sourceTriId < 0 || sourceTriId >= view.triangles.size())
+				return 0;
+
+			auto sourceTriIndices = view.triangles[sourceTriId];
+			for (int localVertexId = 0; localVertexId < 3; ++localVertexId)
+			{
+				int vertexId = sourceTriIndices[localVertexId];
+				if (vertexId < 0 || vertexId >= view.vertices.size())
+					continue;
+
+				typename View::CoordType contactPoint;
+				typename View::CoordType nTarget;
+				typename View::RealType depth = typename View::RealType(0);
+				dyno::ContactType type = dyno::ContactType::CT_UNKNOWN;
+				if (!NMLQ_TryVertexTriangleContact(
+					view,
+					sourceTriId,
+					sourceShapeId,
+					vertexId,
+					*sourceTriangle,
+					targetTriId,
+					targetShapeId,
+					*targetTriangle,
+					contactPoint,
+					nTarget,
+					depth,
+					type))
+					continue;
+
+				if (write && contacts != nullptr && primitiveKeys != nullptr)
+				{
+					int outIdx = writeBase + count;
+					if (outIdx >= 0 && outIdx < contactsSize)
+					{
+						ContactPair cp;
+						NMLQ_WriteContact(cp, ctx.bodyId1, ctx.bodyId2, ctx.tri0, ctx.tri1, contactPoint, nTarget, targetIsTri1, depth, type);
+						contacts[outIdx] = cp;
+						primitiveKeys[outIdx] = NMLQ_EncodeVertexPrimitiveKey(vertexId);
+					}
+				}
+
+				++count;
+			}
+			return count;
+		}
+
+		if (sourceTriId < 0 || sourceTriId >= view.triangleEdges.size())
+			return 0;
+
+		auto sourceTriEdges = view.triangleEdges[sourceTriId];
+		for (int localEdgeId = 0; localEdgeId < 3; ++localEdgeId)
+		{
+			int edgeId = sourceTriEdges[localEdgeId];
+			if (edgeId == EMPTY)
+				continue;
+
 			typename View::CoordType contactPoint;
 			typename View::CoordType nTarget;
 			typename View::RealType depth = typename View::RealType(0);
@@ -1171,65 +1349,27 @@ namespace
 				edgeId,
 				targetTriId,
 				targetShapeId,
-				targetTriangle,
+				*targetTriangle,
 				contactPoint,
 				nTarget,
 				depth,
 				type))
 				continue;
 
-			if (write && contacts != nullptr)
+			if (write && contacts != nullptr && primitiveKeys != nullptr)
 			{
 				int outIdx = writeBase + count;
-				if (outIdx < contactsSize)
+				if (outIdx >= 0 && outIdx < contactsSize)
 				{
 					ContactPair cp;
-					NMLQ_WriteContact(cp, bodyId1, bodyId2, fixedTri0, fixedTri1, contactPoint, nTarget, targetIsTri1, depth, type);
+					NMLQ_WriteContact(cp, ctx.bodyId1, ctx.bodyId2, ctx.tri0, ctx.tri1, contactPoint, nTarget, targetIsTri1, depth, type);
 					contacts[outIdx] = cp;
+					primitiveKeys[outIdx] = NMLQ_EncodeEdgePrimitiveKey(edgeId);
 				}
 			}
+
 			++count;
 		}
-		return count;
-	}
-
-	template<typename View, typename ContactPair>
-	DYN_FUNC int NMLQ_ProcessTriPair(
-		const View& view,
-		int tri0,
-		int tri1,
-		int pairId,
-		ContactPair* contacts,
-		int contactsSize,
-		int writeBase,
-		bool write)
-	{
-		using Real = typename View::RealType;
-		using Coord = typename View::CoordType;
-
-		int bodyId1 = INVALID;
-		int bodyId2 = INVALID;
-		int shape0 = EMPTY;
-		int shape1 = EMPTY;
-		if (!NMLQ_GetBodyIdsForPair(view, pairId, bodyId1, bodyId2, shape0, shape1))
-			return 0;
-
-		Coord tri0p0, tri0p1, tri0p2;
-		Coord tri1p0, tri1p1, tri1p2;
-		int tri0Shape = EMPTY;
-		int tri1Shape = EMPTY;
-		if (!NMLQ_GetWorldTriangle(view, tri0, tri0p0, tri0p1, tri0p2, &tri0Shape)
-			|| !NMLQ_GetWorldTriangle(view, tri1, tri1p0, tri1p1, tri1p2, &tri1Shape))
-			return 0;
-
-		dyno::TTriangle3D<Real> triangle0(tri0p0, tri0p1, tri0p2);
-		dyno::TTriangle3D<Real> triangle1(tri1p0, tri1p1, tri1p2);
-
-		int count = 0;
-		count += NMLQ_ProcessDirectedVertexTests(view, tri0, tri1, tri0, tri0Shape, triangle0, tri1, tri1Shape, triangle1, bodyId1, bodyId2, true, contacts, contactsSize, writeBase + count, write);
-		count += NMLQ_ProcessDirectedEdgeTests(view, tri0, tri1, tri0, tri0Shape, tri1, tri1Shape, triangle1, bodyId1, bodyId2, true, contacts, contactsSize, writeBase + count, write);
-		count += NMLQ_ProcessDirectedVertexTests(view, tri0, tri1, tri1, tri1Shape, triangle1, tri0, tri0Shape, triangle0, bodyId1, bodyId2, false, contacts, contactsSize, writeBase + count, write);
-		count += NMLQ_ProcessDirectedEdgeTests(view, tri0, tri1, tri1, tri1Shape, tri0, tri0Shape, triangle0, bodyId1, bodyId2, false, contacts, contactsSize, writeBase + count, write);
 		return count;
 	}
 
@@ -1255,7 +1395,8 @@ namespace
 		box.v0 = p0.minimum(p1).minimum(p2);
 		box.v1 = p0.maximum(p1).maximum(p2);
 		view.triangleAabbsWorld[triId] = box;
-		view.faceNormalsWorld[triId] = NLQ_BuildRobustFaceNormal(p0, p1, p2);
+		dyno::TTriangle3D<Real> tri(p0, p1, p2);
+		view.faceNormalsWorld[triId] = tri.normal();
 	}
 
 	template<typename View>
@@ -1446,46 +1587,290 @@ namespace
 	}
 
 	template<typename View>
-	__global__ void NMLQ_CountContactsPerTriPair(
-		dyno::DArray<int> counts,
+	__global__ void NMLQ_CountPrimitiveCandidatesPerPass(
+		dyno::DArray<int> primitivePassCounts,
 		dyno::DArray<int> filteredTri0,
 		dyno::DArray<int> filteredTri1,
 		dyno::DArray<int> filteredPatchPairId,
 		View view)
 	{
-		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (pairId >= counts.size() || pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
+		int slotId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (slotId >= primitivePassCounts.size())
 			return;
 
-		counts[pairId] = NMLQ_ProcessTriPair(
+		int pairId = slotId / NMLQ_PASS_COUNT;
+		int passType = slotId % NMLQ_PASS_COUNT;
+		if (pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
+		{
+			primitivePassCounts[slotId] = 0;
+			return;
+		}
+
+		NMLQTriPairContext<View> ctx;
+		if (!NMLQ_BuildTriPairContext(view, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId], ctx))
+		{
+			primitivePassCounts[slotId] = 0;
+			return;
+		}
+
+		primitivePassCounts[slotId] = NMLQ_ProcessPrimitivePass(
 			view,
-			filteredTri0[pairId],
-			filteredTri1[pairId],
-			filteredPatchPairId[pairId],
+			ctx,
+			passType,
 			(dyno::TContactPair<typename View::RealType>*)nullptr,
+			nullptr,
 			0,
 			0,
 			false);
 	}
 
 	template<typename View, typename ContactPair>
-	__global__ void NMLQ_SetContactsPerTriPair(
-		dyno::DArray<ContactPair> contacts,
-		dyno::DArray<int> offsets,
+	__global__ void NMLQ_SetPrimitiveCandidatesPerPass(
+		dyno::DArray<ContactPair> primitiveCandidateContacts,
+		dyno::DArray<unsigned long long> primitiveCandidateKeys,
+		dyno::DArray<int> primitivePassOffsets,
+		dyno::DArray<int> primitivePassCounts,
+		dyno::DArray<int> filteredTri0,
+		dyno::DArray<int> filteredTri1,
+		dyno::DArray<int> filteredPatchPairId,
+		View view)
+	{
+		int slotId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (slotId >= primitivePassOffsets.size() || slotId >= primitivePassCounts.size())
+			return;
+
+		int count = primitivePassCounts[slotId];
+		if (count <= 0)
+			return;
+
+		int pairId = slotId / NMLQ_PASS_COUNT;
+		int passType = slotId % NMLQ_PASS_COUNT;
+		if (pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
+			return;
+
+		NMLQTriPairContext<View> ctx;
+		if (!NMLQ_BuildTriPairContext(view, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId], ctx))
+			return;
+
+		NMLQ_ProcessPrimitivePass(
+			view,
+			ctx,
+			passType,
+			primitiveCandidateContacts.begin(),
+			primitiveCandidateKeys.begin(),
+			primitiveCandidateContacts.size(),
+			primitivePassOffsets[slotId],
+			true);
+	}
+
+	__global__ void NMLQ_InitPrimitiveCandidateIndices(
+		dyno::DArray<int> primitiveCandidateSortedIndices)
+	{
+		int idx = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (idx >= primitiveCandidateSortedIndices.size())
+			return;
+		primitiveCandidateSortedIndices[idx] = idx;
+	}
+
+	template<typename ContactPair, typename Real>
+	__global__ void NMLQ_MarkMinDepthCandidatesPerPrimitiveKey(
+		dyno::DArray<int> primitiveCandidateKeepFlags,
+		dyno::DArray<unsigned long long> primitiveCandidateKeys,
+		dyno::DArray<int> primitiveCandidateSortedIndices,
+		dyno::DArray<ContactPair> primitiveCandidateContacts,
+		Real depthTieEps)
+	{
+		int sortedIdx = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (sortedIdx >= primitiveCandidateKeys.size() || sortedIdx >= primitiveCandidateSortedIndices.size())
+			return;
+
+		if (sortedIdx > 0 && primitiveCandidateKeys[sortedIdx - 1] == primitiveCandidateKeys[sortedIdx])
+			return;
+
+		unsigned long long key = primitiveCandidateKeys[sortedIdx];
+		int groupEnd = sortedIdx;
+		Real minDepth = std::numeric_limits<Real>::max();
+		while (groupEnd < primitiveCandidateKeys.size() && primitiveCandidateKeys[groupEnd] == key)
+		{
+			int rawIdx = primitiveCandidateSortedIndices[groupEnd];
+			if (rawIdx >= 0 && rawIdx < primitiveCandidateContacts.size())
+			{
+				Real depth = primitiveCandidateContacts[rawIdx].interpenetration;
+				if (depth < minDepth)
+					minDepth = depth;
+			}
+			++groupEnd;
+		}
+
+		if (minDepth == std::numeric_limits<Real>::max())
+			return;
+
+		for (int i = sortedIdx; i < groupEnd; ++i)
+		{
+			int rawIdx = primitiveCandidateSortedIndices[i];
+			if (rawIdx < 0 || rawIdx >= primitiveCandidateKeepFlags.size() || rawIdx >= primitiveCandidateContacts.size())
+				continue;
+
+			Real depth = primitiveCandidateContacts[rawIdx].interpenetration;
+			if (depth <= minDepth + depthTieEps)
+				primitiveCandidateKeepFlags[rawIdx] = 1;
+		}
+	}
+
+	__global__ void NMLQ_CountSelectedPrimitiveContactsPerTriPair(
+		dyno::DArray<int> selectedPrimitiveCounts,
+		dyno::DArray<int> primitivePassCounts,
+		dyno::DArray<int> primitivePassOffsets,
+		dyno::DArray<int> primitiveCandidateKeepFlags)
+	{
+		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (pairId >= selectedPrimitiveCounts.size())
+			return;
+
+		int slotBase = NMLQ_GetPairPassSlot(pairId, 0);
+		if (slotBase < 0 || slotBase + (NMLQ_PASS_COUNT - 1) >= primitivePassCounts.size()
+			|| slotBase >= primitivePassOffsets.size())
+		{
+			selectedPrimitiveCounts[pairId] = 0;
+			return;
+		}
+
+		int rawCount = 0;
+		for (int passType = 0; passType < NMLQ_PASS_COUNT; ++passType)
+			rawCount += primitivePassCounts[slotBase + passType];
+		if (rawCount <= 0)
+		{
+			selectedPrimitiveCounts[pairId] = 0;
+			return;
+		}
+
+		int rawBegin = primitivePassOffsets[slotBase];
+		int selectedCount = 0;
+		for (int rawIdx = rawBegin; rawIdx < rawBegin + rawCount && rawIdx < primitiveCandidateKeepFlags.size(); ++rawIdx)
+		{
+			if (primitiveCandidateKeepFlags[rawIdx] > 0)
+				++selectedCount;
+		}
+		selectedPrimitiveCounts[pairId] = selectedCount;
+	}
+
+	template<typename View>
+	__global__ void NMLQ_CountFallbackContactsPerTriPair(
+		dyno::DArray<int> fallbackContactCounts,
+		dyno::DArray<int> selectedPrimitiveCounts,
 		dyno::DArray<int> filteredTri0,
 		dyno::DArray<int> filteredTri1,
 		dyno::DArray<int> filteredPatchPairId,
 		View view)
 	{
 		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (pairId >= offsets.size() || pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
+		if (pairId >= fallbackContactCounts.size() || pairId >= selectedPrimitiveCounts.size()
+			|| pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
 			return;
 
-		NMLQ_ProcessTriPair(
+		if (selectedPrimitiveCounts[pairId] > 0)
+		{
+			fallbackContactCounts[pairId] = 0;
+			return;
+		}
+
+		NMLQTriPairContext<View> ctx;
+		if (!NMLQ_BuildTriPairContext(view, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId], ctx))
+		{
+			fallbackContactCounts[pairId] = 0;
+			return;
+		}
+
+		fallbackContactCounts[pairId] = NMLQ_ProcessTriPairFallback(
 			view,
-			filteredTri0[pairId],
-			filteredTri1[pairId],
-			filteredPatchPairId[pairId],
+			ctx.tri0,
+			ctx.tri1,
+			ctx.bodyId1,
+			ctx.bodyId2,
+			ctx.triangle0,
+			ctx.triangle1,
+			(dyno::TContactPair<typename View::RealType>*)nullptr,
+			0,
+			0,
+			false);
+	}
+
+	__global__ void NMLQ_SetFinalContactCounts(
+		dyno::DArray<int> finalContactCounts,
+		dyno::DArray<int> selectedPrimitiveCounts,
+		dyno::DArray<int> fallbackContactCounts)
+	{
+		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (pairId >= finalContactCounts.size() || pairId >= selectedPrimitiveCounts.size() || pairId >= fallbackContactCounts.size())
+			return;
+
+		finalContactCounts[pairId] = selectedPrimitiveCounts[pairId] > 0
+			? selectedPrimitiveCounts[pairId]
+			: fallbackContactCounts[pairId];
+	}
+
+	template<typename View, typename ContactPair>
+	__global__ void NMLQ_SetFinalContactsPerTriPair(
+		dyno::DArray<ContactPair> contacts,
+		dyno::DArray<int> offsets,
+		dyno::DArray<int> primitivePassCounts,
+		dyno::DArray<int> primitivePassOffsets,
+		dyno::DArray<int> primitiveCandidateKeepFlags,
+		dyno::DArray<ContactPair> primitiveCandidateContacts,
+		dyno::DArray<int> selectedPrimitiveCounts,
+		dyno::DArray<int> fallbackContactCounts,
+		dyno::DArray<int> filteredTri0,
+		dyno::DArray<int> filteredTri1,
+		dyno::DArray<int> filteredPatchPairId,
+		View view)
+	{
+		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
+		if (pairId >= offsets.size() || pairId >= selectedPrimitiveCounts.size() || pairId >= fallbackContactCounts.size()
+			|| pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
+			return;
+
+		int writeBase = offsets[pairId];
+		int selectedCount = selectedPrimitiveCounts[pairId];
+		if (selectedCount > 0)
+		{
+			int slotBase = NMLQ_GetPairPassSlot(pairId, 0);
+			if (slotBase < 0 || slotBase + (NMLQ_PASS_COUNT - 1) >= primitivePassCounts.size()
+				|| slotBase >= primitivePassOffsets.size())
+				return;
+
+			int rawCount = 0;
+			for (int passType = 0; passType < NMLQ_PASS_COUNT; ++passType)
+				rawCount += primitivePassCounts[slotBase + passType];
+			int rawBegin = primitivePassOffsets[slotBase];
+			int written = 0;
+			for (int rawIdx = rawBegin; rawIdx < rawBegin + rawCount && rawIdx < primitiveCandidateKeepFlags.size(); ++rawIdx)
+			{
+				if (primitiveCandidateKeepFlags[rawIdx] <= 0 || rawIdx >= primitiveCandidateContacts.size())
+					continue;
+
+				int outIdx = writeBase + written;
+				if (outIdx >= 0 && outIdx < contacts.size())
+					contacts[outIdx] = primitiveCandidateContacts[rawIdx];
+				++written;
+			}
+			return;
+		}
+
+		if (fallbackContactCounts[pairId] <= 0)
+			return;
+
+		NMLQTriPairContext<View> ctx;
+		if (!NMLQ_BuildTriPairContext(view, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId], ctx))
+			return;
+
+		NMLQ_ProcessTriPairFallback(
+			view,
+			ctx.tri0,
+			ctx.tri1,
+			ctx.bodyId1,
+			ctx.bodyId2,
+			ctx.triangle0,
+			ctx.triangle1,
 			contacts.begin(),
 			contacts.size(),
 			offsets[pairId],
@@ -1559,6 +1944,14 @@ namespace dyno
 		mFilteredTri0.clear();
 		mFilteredTri1.clear();
 		mFilteredPatchPairId.clear();
+		mPrimitivePassCounts.clear();
+		mPrimitivePassOffsets.clear();
+		mPrimitiveCandidateContacts.clear();
+		mPrimitiveCandidateKeys.clear();
+		mPrimitiveCandidateSortedIndices.clear();
+		mPrimitiveCandidateKeepFlags.clear();
+		mSelectedPrimitiveCounts.clear();
+		mFallbackContactCounts.clear();
 		mTriPairContactCounts.clear();
 		mTriPairContactOffsets.clear();
 
@@ -2000,6 +2393,7 @@ namespace dyno
 			this->varInputVerticesInRestWorld()->getValue()
 		};
 
+		// Precompute world-space triangle AABBs, face normals, edge normals for coarse culling and narrow-phase reuse.
 		cuExecute(triCount, NMLQ_PrepareTriangleWorldData, view);
 		if (edgeCount > 0)
 			cuExecute(edgeCount, NMLQ_PrepareEdgeNormalsWorld, view);
@@ -2049,6 +2443,7 @@ namespace dyno
 			mCoarsePassCounts.resize(totalCandidateTriPairs);
 		mCoarsePassCounts.reset();
 
+		// count how many aabbs of triangle pair are overlapped
 		cuExecute(totalCandidateTriPairs,
 			NMLQ_CountCoarsePassedTriPairs,
 			mCoarsePassCounts,
@@ -2088,17 +2483,107 @@ namespace dyno
 			mCoarsePassOffsets,
 			mCoarsePassCounts);
 
-		if (mTriPairContactCounts.size() != static_cast<uint>(totalFilteredTriPairs))
-			mTriPairContactCounts.resize(totalFilteredTriPairs);
-		mTriPairContactCounts.reset();
+		const int primitivePassSlotCount = totalFilteredTriPairs * NMLQ_PASS_COUNT;
+		if (mPrimitivePassCounts.size() != static_cast<uint>(primitivePassSlotCount))
+			mPrimitivePassCounts.resize(primitivePassSlotCount);
+		mPrimitivePassCounts.reset();
 
-		cuExecute(totalFilteredTriPairs,
-			NMLQ_CountContactsPerTriPair,
-			mTriPairContactCounts,
+		cuExecute(primitivePassSlotCount,
+			NMLQ_CountPrimitiveCandidatesPerPass,
+			mPrimitivePassCounts,
 			mFilteredTri0,
 			mFilteredTri1,
 			mFilteredPatchPairId,
 			view);
+
+		int totalPrimitiveCandidates = primitivePassSlotCount > 0
+			? mReduce.accumulate(mPrimitivePassCounts.begin(), mPrimitivePassCounts.size())
+			: 0;
+
+		if (mPrimitivePassOffsets.size() != mPrimitivePassCounts.size())
+			mPrimitivePassOffsets.resize(mPrimitivePassCounts.size());
+		mPrimitivePassOffsets.assign(mPrimitivePassCounts);
+		if (mPrimitivePassOffsets.size() > 0)
+			mScan.exclusive(mPrimitivePassOffsets, true);
+
+		if (mPrimitiveCandidateContacts.size() != static_cast<uint>(totalPrimitiveCandidates))
+			mPrimitiveCandidateContacts.resize(totalPrimitiveCandidates);
+		if (mPrimitiveCandidateKeys.size() != static_cast<uint>(totalPrimitiveCandidates))
+			mPrimitiveCandidateKeys.resize(totalPrimitiveCandidates);
+		if (mPrimitiveCandidateSortedIndices.size() != static_cast<uint>(totalPrimitiveCandidates))
+			mPrimitiveCandidateSortedIndices.resize(totalPrimitiveCandidates);
+		if (mPrimitiveCandidateKeepFlags.size() != static_cast<uint>(totalPrimitiveCandidates))
+			mPrimitiveCandidateKeepFlags.resize(totalPrimitiveCandidates);
+		mPrimitiveCandidateKeepFlags.reset();
+
+		if (totalPrimitiveCandidates > 0)
+		{
+			cuExecute(primitivePassSlotCount,
+				NMLQ_SetPrimitiveCandidatesPerPass,
+				mPrimitiveCandidateContacts,
+				mPrimitiveCandidateKeys,
+				mPrimitivePassOffsets,
+				mPrimitivePassCounts,
+				mFilteredTri0,
+				mFilteredTri1,
+				mFilteredPatchPairId,
+				view);
+
+			cuExecute(totalPrimitiveCandidates,
+				NMLQ_InitPrimitiveCandidateIndices,
+				mPrimitiveCandidateSortedIndices);
+
+			thrust::stable_sort_by_key(
+				thrust::device,
+				mPrimitiveCandidateKeys.begin(),
+				mPrimitiveCandidateKeys.begin() + mPrimitiveCandidateKeys.size(),
+				mPrimitiveCandidateSortedIndices.begin());
+
+			{
+				uint pDims = cudaGridSize((uint)totalPrimitiveCandidates, BLOCK_SIZE);
+				NMLQ_MarkMinDepthCandidatesPerPrimitiveKey<ContactPair, Real><<<pDims, BLOCK_SIZE>>>(
+					mPrimitiveCandidateKeepFlags,
+					mPrimitiveCandidateKeys,
+					mPrimitiveCandidateSortedIndices,
+					mPrimitiveCandidateContacts,
+					Real(1e-6));
+				cuSynchronize();
+			}
+		}
+
+		if (mSelectedPrimitiveCounts.size() != static_cast<uint>(totalFilteredTriPairs))
+			mSelectedPrimitiveCounts.resize(totalFilteredTriPairs);
+		mSelectedPrimitiveCounts.reset();
+		if (totalPrimitiveCandidates > 0)
+		{
+			cuExecute(totalFilteredTriPairs,
+				NMLQ_CountSelectedPrimitiveContactsPerTriPair,
+				mSelectedPrimitiveCounts,
+				mPrimitivePassCounts,
+				mPrimitivePassOffsets,
+				mPrimitiveCandidateKeepFlags);
+		}
+
+		if (mFallbackContactCounts.size() != static_cast<uint>(totalFilteredTriPairs))
+			mFallbackContactCounts.resize(totalFilteredTriPairs);
+		mFallbackContactCounts.reset();
+		cuExecute(totalFilteredTriPairs,
+			NMLQ_CountFallbackContactsPerTriPair,
+			mFallbackContactCounts,
+			mSelectedPrimitiveCounts,
+			mFilteredTri0,
+			mFilteredTri1,
+			mFilteredPatchPairId,
+			view);
+
+		if (mTriPairContactCounts.size() != static_cast<uint>(totalFilteredTriPairs))
+			mTriPairContactCounts.resize(totalFilteredTriPairs);
+		mTriPairContactCounts.reset();
+		cuExecute(totalFilteredTriPairs,
+			NMLQ_SetFinalContactCounts,
+			mTriPairContactCounts,
+			mSelectedPrimitiveCounts,
+			mFallbackContactCounts);
 
 		int totalContacts = mReduce.accumulate(mTriPairContactCounts.begin(), mTriPairContactCounts.size());
 		if (totalContacts <= 0)
@@ -2115,9 +2600,15 @@ namespace dyno
 
 		this->outContacts()->resize(totalContacts);
 		cuExecute(totalFilteredTriPairs,
-			NMLQ_SetContactsPerTriPair,
+			NMLQ_SetFinalContactsPerTriPair,
 			this->outContacts()->getData(),
 			mTriPairContactOffsets,
+			mPrimitivePassCounts,
+			mPrimitivePassOffsets,
+			mPrimitiveCandidateKeepFlags,
+			mPrimitiveCandidateContacts,
+			mSelectedPrimitiveCounts,
+			mFallbackContactCounts,
 			mFilteredTri0,
 			mFilteredTri1,
 			mFilteredPatchPairId,

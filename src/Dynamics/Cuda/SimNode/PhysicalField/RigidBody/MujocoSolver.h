@@ -25,7 +25,8 @@ namespace dyno
     
     private:
         void ForwardKinematics();
-
+        
+        void MakeConstraints();
     };
 }
 

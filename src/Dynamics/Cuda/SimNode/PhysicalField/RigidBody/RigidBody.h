@@ -3,6 +3,7 @@
 #include "Collision/CollisionData.h"
 
 #include "../PhysicalField.h"
+#include "../../Utils/Constraints.h"
 
 // TODO: consider using a more flexible data structure to support more complex shapes (e.g., triangle mesh) and their parameters. For example, we can have a separate array for each shape type, and store the shape type and offset for each body to access the corresponding shape parameters.
 // enum ShapeType
@@ -86,6 +87,13 @@ namespace dyno {
         DArray2D<Real>      batch_q_inner_force;
         DArray2D<Real>      batch_q_ex_force;
         DArray2D<Real>      batch_ex_acc;
+
+        // For constraints
+        BatchConstraintParas         constraint_paras;
+        CollisionConstraintParas     collision_paras;
+        BatchCollisionConstraints    collision_constraints;
+
+        
 
         // Shape information for rendering and collision handling
         DArray2D<int>           shape_type;    // [body_id] type

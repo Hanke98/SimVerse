@@ -415,7 +415,7 @@ namespace dyno
             boxes_host(0, 0).center = Vec3f(0.f, 0.f, 0.0f);
             boxes_host(0, 0).halfLength = Vec3f(0.4f, 0.4f, 0.4f);
 
-            body_pos_host(0, 0) = Vec3f(0.f, 6.f, 0.0f);
+            body_pos_host(0, 0) = Vec3f(0.f, 5.f, 0.0f);
 
             // 1) Count shapes in each environment.
             for (int eid = 0; eid < envs; ++eid)

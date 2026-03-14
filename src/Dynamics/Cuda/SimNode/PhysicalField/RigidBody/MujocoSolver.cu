@@ -423,6 +423,66 @@ namespace dyno
 
         qvel(env_id, dof_idx) += qacc(env_id, dof_idx) * dt;
     }
+
+
+    __device__ void CubeCollitionWithGround(const Vec3f& pos, const Mat3f& rot, const BoxInfo& box,
+        BatchCollisionConstraints& collision_constraints, int env_id, int bid)
+    {
+        Vec3f ground_normal = Vec3f(0.f, 1.f, 0.f);
+
+        for(int i = 0; i < 8; i++)
+        {
+            int sx = (i & 1) ? 1 : -1;
+            int sy = (i & 2) ? 1 : -1;
+            int sz = (i & 4) ? 1 : -1;
+            
+            Vec3f vertex_origin = Vec3f(sx * box.halfLength.x, sy * box.halfLength.y, sz * box.halfLength.z);
+            Vec3f vertex_trans = rot * vertex_origin;
+            vertex_trans += pos;
+
+            if(vertex_trans.y > 0.f)
+                continue;
+
+            auto& idx = collision_constraints.num_constraints[env_id];
+            
+            collision_constraints.body_idxs(env_id, idx) = Pair(bid, -1);
+            collision_constraints.depth(env_id, idx) = -vertex_trans.y;
+            collision_constraints.normal(env_id, idx) = ground_normal;
+            collision_constraints.point(env_id, idx) = Vec3f(vertex_trans.x, 0.5f * vertex_trans.y, vertex_trans.z);
+            idx += 1;
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void CollisonDetectionKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockDim.x * blockIdx.x + threadIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        auto& collision_constraints = rigid_body_system.collision_constraints;
+        const auto& collision_paras = rigid_body_system.collision_paras;
+    
+        const int num_bodies = rigid_body_system.batch_bodies[env_id];
+
+        for(int bid = 0; bid < num_bodies; bid++)
+        {
+            const int& is_static = rigid_body_system.is_static(env_id, bid);
+            if(is_static)
+                continue;
+
+            const Vec3f& pos = rigid_body_system.batch_pos(env_id, bid);
+            const Mat3f& rot = rigid_body_system.batch_rot(env_id, bid);
+
+            const int shape_type = rigid_body_system.shape_type(env_id, bid);
+            const int shape_idx = rigid_body_system.shape_idx(env_id, bid);
+            if(shape_type == 1)   // cube
+            {
+                CubeCollitionWithGround(pos, rot, rigid_body_system.boxes(env_id, shape_idx), collision_constraints, env_id, bid);
+            }
+        }
+    
+    }
 }
 
 
@@ -432,6 +492,15 @@ namespace dyno
     void MujocoSolver<TDataType>::Init()
     {
         spdlog::info("[MujocoSolver Solver] Starting initialization.");
+
+        auto& collision_paras = this->rigid_body->collision_paras;
+        collision_paras.time_const = 0.02f;
+        collision_paras.damp_ratio = 1.f;
+        collision_paras.dmax = 0.95f;
+        collision_paras.dmin = 0.9f;
+        collision_paras.midpoint = 0.5f;
+        collision_paras.power = 2;
+
 
         const auto& env_infos = this->env_infos;
         const auto& rigid_body_system = this->rigid_body;
@@ -480,6 +549,14 @@ namespace dyno
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_crb, num_envs, max_bodies * 10);
 
+        INIT_DYNO_ARRAY(rigid_body_system->collision_constraints.num_constraints, num_envs);
+        INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.body_idxs, num_envs, 1024);
+        INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.depth, num_envs, 1024);
+        INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.normal, num_envs, 1024);
+        INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.point, num_envs, 1024);
+        
+
+
         spdlog::info("[MujocoSolver Solver] Allocated solver state arrays based on DoF counts.");
         // 3. Initialize the qpos
         InitQposKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
@@ -511,7 +588,8 @@ namespace dyno
         // Update forward kinematics and subtree com
         ForwardKinematics();
 
-        // TODO: Make constraints
+        MakeConstraints();
+
         // TODO: compute comvel
         // TODO: compute RNE
 
@@ -581,6 +659,22 @@ namespace dyno
         spdlog::info("[MujocoSolver Solver] Finished forward kinematics.");
     }
 
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::MakeConstraints()
+    {
+        spdlog::info("[MujocoSolver Solver] MakeConstraints called.");
+        const auto& env_infos = this->env_infos;
+        const auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+        // 1. collision constraints
+        auto& collision_constraints = rigid_body_system->collision_constraints;
+        collision_constraints.num_constraints.reset();
+        const auto& collision_paras = rigid_body_system->collision_paras;
+
+        CollisonDetectionKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+        
+    }
 
     DEFINE_UNIQUE_CLASS(MujocoSolver, DataType3f);
 }

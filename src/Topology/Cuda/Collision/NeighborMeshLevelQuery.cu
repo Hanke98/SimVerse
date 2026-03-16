@@ -98,6 +98,11 @@ namespace
 		return NMLQ_EdgePrimitiveKeyMask | static_cast<unsigned long long>(edgeId);
 	}
 
+	DYN_FUNC inline bool NMLQ_IsEdgePrimitiveKey(unsigned long long key)
+	{
+		return (key & NMLQ_EdgePrimitiveKeyMask) != 0ull;
+	}
+
 	template<typename Coord>
 	DYN_FUNC Coord NLQ_StablePerpendicular(const Coord& direction)
 	{
@@ -1678,7 +1683,8 @@ namespace
 		dyno::DArray<unsigned long long> primitiveCandidateKeys,
 		dyno::DArray<int> primitiveCandidateSortedIndices,
 		dyno::DArray<ContactPair> primitiveCandidateContacts,
-		Real depthTieEps)
+		Real depthTieEps,
+		Real sameDirectionDotEps)
 	{
 		int sortedIdx = threadIdx.x + (blockIdx.x * blockDim.x);
 		if (sortedIdx >= primitiveCandidateKeys.size() || sortedIdx >= primitiveCandidateSortedIndices.size())
@@ -1688,6 +1694,7 @@ namespace
 			return;
 
 		unsigned long long key = primitiveCandidateKeys[sortedIdx];
+		const bool edgePrimitive = NMLQ_IsEdgePrimitiveKey(key);
 		int groupEnd = sortedIdx;
 		Real minDepth = std::numeric_limits<Real>::max();
 		while (groupEnd < primitiveCandidateKeys.size() && primitiveCandidateKeys[groupEnd] == key)
@@ -1712,8 +1719,48 @@ namespace
 				continue;
 
 			Real depth = primitiveCandidateContacts[rawIdx].interpenetration;
-			if (depth <= minDepth + depthTieEps)
-				primitiveCandidateKeepFlags[rawIdx] = 1;
+			if (depth > minDepth + depthTieEps)
+				continue;
+
+			if (!edgePrimitive)
+			{
+				auto direction = primitiveCandidateContacts[rawIdx].normal1;
+				const Real dirNorm2 = direction.normSquared();
+				if (dirNorm2 > Real(1e-12))
+				{
+					direction /= sqrt(dirNorm2);
+					bool duplicateDirection = false;
+					for (int j = sortedIdx; j < i; ++j)
+					{
+						int prevRawIdx = primitiveCandidateSortedIndices[j];
+						if (prevRawIdx < 0 || prevRawIdx >= primitiveCandidateKeepFlags.size()
+							|| prevRawIdx >= primitiveCandidateContacts.size()
+							|| primitiveCandidateKeepFlags[prevRawIdx] <= 0)
+							continue;
+
+						Real prevDepth = primitiveCandidateContacts[prevRawIdx].interpenetration;
+						if (prevDepth > minDepth + depthTieEps)
+							continue;
+
+						auto prevDirection = primitiveCandidateContacts[prevRawIdx].normal1;
+						const Real prevNorm2 = prevDirection.normSquared();
+						if (prevNorm2 <= Real(1e-12))
+							continue;
+
+						prevDirection /= sqrt(prevNorm2);
+						if (direction.dot(prevDirection) >= Real(1) - sameDirectionDotEps)
+						{
+							duplicateDirection = true;
+							break;
+						}
+					}
+
+					if (duplicateDirection)
+						continue;
+				}
+			}
+
+			primitiveCandidateKeepFlags[rawIdx] = 1;
 		}
 	}
 
@@ -2541,12 +2588,13 @@ namespace dyno
 
 			{
 				uint pDims = cudaGridSize((uint)totalPrimitiveCandidates, BLOCK_SIZE);
-				NMLQ_MarkMinDepthCandidatesPerPrimitiveKey<ContactPair, Real><<<pDims, BLOCK_SIZE>>>(
-					mPrimitiveCandidateKeepFlags,
-					mPrimitiveCandidateKeys,
-					mPrimitiveCandidateSortedIndices,
-					mPrimitiveCandidateContacts,
-					Real(1e-6));
+					NMLQ_MarkMinDepthCandidatesPerPrimitiveKey<ContactPair, Real><<<pDims, BLOCK_SIZE>>>(
+						mPrimitiveCandidateKeepFlags,
+						mPrimitiveCandidateKeys,
+						mPrimitiveCandidateSortedIndices,
+						mPrimitiveCandidateContacts,
+						Real(1e-6),
+						Real(1e-4));
 				cuSynchronize();
 			}
 		}

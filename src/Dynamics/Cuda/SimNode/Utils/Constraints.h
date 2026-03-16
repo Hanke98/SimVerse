@@ -32,8 +32,8 @@ namespace dyno
 
     struct BatchCollisionConstraints
     {
-        DArray<int>                 num_constraints;   // [env_id] number of constraints in each environment
-        DArray2D<Pair<int, int>>    body_idxs;          // [env_id, constraint_id] pair of body indices involved in the constraint
+        DArray<int>                 collision_nums;    // [env_id] number of collision constraints in each environment
+        DArray2D<Pair<int, int>>    body_idxs;         // [env_id, constraint_id] pair of body indices involved in the constraint
         DArray2D<Real>              depth;             // [env_id, constraint_id] penetration depth of the constraint
         DArray2D<Vec3f>             normal;            // [env_id, constraint_id] contact normal of the constraint
         DArray2D<Vec3f>             point;             // [env_id, constraint_id] contact point of the constraint

@@ -27,6 +27,7 @@ namespace dyno
         void ForwardKinematics();
         
         void MakeConstraints();
+        void MakeJacobian();
     };
 }
 

@@ -89,10 +89,15 @@ namespace dyno {
         DArray2D<Real>      batch_ex_acc;
 
         // For constraints
+        DArray2D<Real>               batch_J;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints
+        DArray<int>                  num_constraints;   // [env_id] number of constraints in each environment = num_collision_constraints + num_topo_invariant_constraints
+        DArray<Vec4i>                num_each_constraint; // [env_id] num of each type of constraint (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
+        DArray<Vec4i>                constraint_offset;   // [env_id] offset of each type of constraint in the batch_J (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
+        
         BatchConstraintParas         constraint_paras;
+        // Collision
         CollisionConstraintParas     collision_paras;
         BatchCollisionConstraints    collision_constraints;
-
         
 
         // Shape information for rendering and collision handling

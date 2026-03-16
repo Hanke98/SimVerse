@@ -101,10 +101,112 @@ namespace dyno
     __global__ void BatchDenseMatrixVectorMul(DArray2D<T> mat, DArray2D<T> vec, DArray2D<T> out, DArray<int> rows, DArray<int> cols, int num_sys);
 
     template<typename T>
+    __device__ void DenseAnyMatrixMatrixMul(const DArray2D<T>& matA, const DArray2D<T>& matB, DArray2D<T>& mat_out, 
+        int sys_id, Vec2i size_A, Vec2i size_B, Vec2i offset_A, Vec2i offset_B, Vec2i offset_out)
+    {
+        // A(sub) [size_A.x x size_A.y] * B(sub) [size_B.x x size_B.y]
+        // -> Out(sub) [size_A.x x size_B.y]
+        if (size_A.y != size_B.x)
+            return;
+
+        for (int r = 0; r < size_A.x; r++)
+        {
+            for (int c = 0; c < size_B.y; c++)
+            {
+                T sum = 0;
+
+                for (int k = 0; k < size_A.y; k++)
+                {
+                    const T valA = MatrixAt(matA, sys_id, Vec2i(r, k), offset_A);
+                    const T valB = MatrixAt(matB, sys_id, Vec2i(k, c), offset_B);
+                    sum += valA * valB;
+                }
+
+                MatrixAt(mat_out, sys_id, Vec2i(r, c), offset_out) = sum;
+            }
+        }
+    }
+
+    template<typename T>
+    __device__ void DenseMat3x3MatirxAnyMul(const Mat3f& matA, const DArray2D<T>& matB, DArray2D<T>& mat_out,
+        int sys_id, Vec2i size_B, Vec2i offset_B, Vec2i offset_out)
+    {
+        // A [3 x 3] * B(sub) [3 x size_B.y]
+        // -> Out(sub) [3 x size_B.y]
+        if (size_B.x != 3)
+            return;
+
+        for (int r = 0; r < 3; r++)
+        {
+            for (int c = 0; c < size_B.y; c++)
+            {
+                T sum = 0;
+
+                for (int k = 0; k < 3; k++)
+                {
+                    const T valA = matA(r, k);
+                    const T valB = MatrixAt(matB, sys_id, Vec2i(k, c), offset_B);
+                    sum += valA * valB;
+                }
+
+                MatrixAt(mat_out, sys_id, Vec2i(r, c), offset_out) = sum;
+            }
+        }
+    }
+
+    template<typename T>
     inline __host__ __device__ Quat<T> QuatFromAxisAngle(const Vec3f& axis, Real angle)
     {
         Real half_angle = angle * 0.5f;
         Real s = sin(half_angle);
         return Quat<T>(cos(half_angle), axis.x * s, axis.y * s, axis.z * s);
+    }
+
+    template<typename T>    // 这个函数用来查batch matrix的元素, 相当于vector[sys_id][vec<mat1D>], sys_id是batch_id, mat_id表示第几个小矩阵，row col是小矩阵内的行列，submat_size是小矩阵的尺寸
+    inline __device__ T& MatrixAt(DArray2D<T>& mat, int sys_id, int mat_id, int row, int col, Vec2i submat_size)
+    {
+        int submat_start = submat_size.x * submat_size.y * mat_id;
+        // submat是按行展开存
+        int idx = submat_start + row * submat_size.y + col;
+        return mat(sys_id, idx);
+    }
+
+    template<typename T>    // 这个函数用来查batch matrix的元素, 相当于vector[sys_id][mat1D]
+    inline __device__ T& MatrixAt(DArray2D<T>& mat, int sys_id, int row, int col, Vec2i mat_size)
+    {
+        int idx = row * mat_size.y + col;
+        return mat(sys_id, idx);
+    }
+
+    template<typename T>
+    inline __device__ const T& MatrixAt(const DArray2D<T>& mat, int sys_id, int row, int col, Vec2i mat_size)
+    {
+        int idx = row * mat_size.y + col;
+        return mat(sys_id, idx);
+    }
+
+    template<typename T>
+    inline __device__ T& MatrixAt(DArray2D<T>& mat, int sys_id, Vec2i submat_idx, Vec2i submat_offset)
+    {
+        // submat_idx is local (row, col) inside the submatrix.
+        int local_r = submat_idx.x;
+        int local_c = submat_idx.y;
+
+        int global_r = submat_offset.x + local_r;
+        int global_c = submat_offset.y + local_c;
+        int idx = global_r * static_cast<int>(mat.ny()) + global_c;
+        return mat(sys_id, idx);
+    }
+
+    template<typename T>
+    inline __device__ const T& MatrixAt(const DArray2D<T>& mat, int sys_id, Vec2i submat_idx, Vec2i submat_offset)
+    {
+        int local_r = submat_idx.x;
+        int local_c = submat_idx.y;
+
+        int global_r = submat_offset.x + local_r;
+        int global_c = submat_offset.y + local_c;
+        int idx = global_r * static_cast<int>(mat.ny()) + global_c;
+        return mat(sys_id, idx);
     }
 }

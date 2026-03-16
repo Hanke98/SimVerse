@@ -2,6 +2,7 @@
 #include <spdlog/spdlog.h>
 #include <thrust/device_ptr.h>
 #include "../../Utils/utils.h"
+#include "Algorithm.h"
 
 namespace dyno
 {
@@ -258,7 +259,7 @@ namespace dyno
             return;
 
         int env_self_bodies = rigid_body_system.batch_bodies[env_id];
-        int bid = blockDim.x * blockIdx.y + threadIdx.x;
+        int bid = threadIdx.x;
         if(bid >= env_self_bodies)
             return;
 
@@ -268,6 +269,9 @@ namespace dyno
         const Mat3f rot = rigid_body_system.batch_rot(env_id, bid);
         const Vec3f& subtree_com = rigid_body_system.subtree_com(env_id, bid);
 
+        const int q_start = rigid_body_system.q_offset(env_id, bid);
+        int cdof_start = q_start * 6;   // each body has 6 cdof (3 for linear, 3 for angular)
+
         if(parent_idx != -1)    // joint attached to parent
         {
 
@@ -276,11 +280,12 @@ namespace dyno
         {
             if(rigid_body_system.is_static(env_id, bid))
                 return;
-            const int q_start = rigid_body_system.q_offset(env_id, bid);
+            
             for(int i = 0; i < 3; i++)  // linear velocity
                 cdof(env_id, (q_start + i) * 6 + 3 + i) = 1.f;
             
             Vec3f offset = subtree_com - pos;
+            
             // For angular velocity
             for(int i = 0; i < 3; i++)
             {
@@ -292,6 +297,13 @@ namespace dyno
                     cdof(env_id, (q_start + i + 3) * 6 + j) = rot_axis[j];
                 }
             }
+            // printf("Env %d, Body %d, cdof:\n", env_id, bid);
+            // for(int i = 0; i < 6; i++)
+            //     printf("  cdof[%d]: %f %f, %f %f, %f %f\n", i, cdof(env_id, (q_start + i) * 6 + 0),
+            //         cdof(env_id, (q_start + i) * 6 + 1), cdof(env_id, (q_start + i) * 6 + 2),
+            //         cdof(env_id, (q_start + i) * 6 + 3), cdof(env_id, (q_start + i) * 6 + 4), 
+            //         cdof(env_id, (q_start + i) * 6 + 5));
+            
         }
     }
 
@@ -443,7 +455,7 @@ namespace dyno
             if(vertex_trans.y > 0.f)
                 continue;
 
-            auto& idx = collision_constraints.num_constraints[env_id];
+            auto& idx = collision_constraints.collision_nums[env_id];
             
             collision_constraints.body_idxs(env_id, idx) = Pair(bid, -1);
             collision_constraints.depth(env_id, idx) = -vertex_trans.y;
@@ -451,6 +463,34 @@ namespace dyno
             collision_constraints.point(env_id, idx) = Vec3f(vertex_trans.x, 0.5f * vertex_trans.y, vertex_trans.z);
             idx += 1;
         }
+    }
+
+    template<typename TDataType>
+    __global__ void CountConstraintNums(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockDim.x * blockIdx.x + threadIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        auto& num_each_constraint = rigid_body_system.num_each_constraint;
+        auto& constraints = rigid_body_system.collision_constraints;
+
+        const auto& collisions = rigid_body_system.collision_constraints;
+
+        num_each_constraint[env_id] = Vec4i(0, 0, 0, collisions.collision_nums[env_id] * 4);
+        
+        auto& offsets = rigid_body_system.constraint_offset[env_id];
+        auto& num_constraints = rigid_body_system.num_constraints[env_id];
+
+        offsets[0] = 0;
+        for(int i = 1; i < 4; i++)
+            offsets[i] = offsets[i - 1] + num_each_constraint[env_id][i - 1];
+
+        num_constraints = offsets[3] + num_each_constraint[env_id][3];
+
+
+        printf("Env: %d, Num constraints(total: %d): %d, %d, %d, %d\n", env_id, num_constraints, num_each_constraint[env_id].x, num_each_constraint[env_id].y, num_each_constraint[env_id].z, num_each_constraint[env_id].w);
+        printf("Env: %d, Constraint offsets: %d, %d, %d, %d\n", env_id, offsets[0], offsets[1], offsets[2], offsets[3]);
     }
 
     template<typename TDataType>
@@ -476,12 +516,149 @@ namespace dyno
 
             const int shape_type = rigid_body_system.shape_type(env_id, bid);
             const int shape_idx = rigid_body_system.shape_idx(env_id, bid);
-            if(shape_type == 1)   // cube
+            if(shape_type == 0)   // cube
             {
                 CubeCollitionWithGround(pos, rot, rigid_body_system.boxes(env_id, shape_idx), collision_constraints, env_id, bid);
             }
+
+            if(collision_constraints.collision_nums[env_id] > 0)
+            {
+                printf("Env %d, Body %d, Collision Num: %d\n", env_id, bid, collision_constraints.collision_nums[env_id]);
+                for(int cidx = 0; cidx < collision_constraints.collision_nums[env_id]; cidx++)
+                {
+                    printf("  Collision %d: depth = %f, normal = (%f, %f, %f), point = (%f, %f, %f)\n", cidx,
+                        collision_constraints.depth(env_id, cidx),
+                        collision_constraints.normal(env_id, cidx).x,
+                        collision_constraints.normal(env_id, cidx).y,
+                        collision_constraints.normal(env_id, cidx).z,
+                        collision_constraints.point(env_id, cidx).x,
+                        collision_constraints.point(env_id, cidx).y,
+                        collision_constraints.point(env_id, cidx).z);
+                }
+            }
         }
     
+    }
+
+    template<typename TDataType>
+    __device__ void ComputeJac(DArray2D<Real>& dst_jac, const Vec3f& c_point, const RigidBody<TDataType>& rigid_body_system, int env_id, int bid, int cidx)
+    {
+        const int root_idx = rigid_body_system.root_idx(env_id, bid);
+        Vec3f offset = c_point - rigid_body_system.subtree_com(env_id, root_idx);
+
+        const auto& q_offset = rigid_body_system.q_offset(env_id, bid);
+        const auto& cdof = rigid_body_system.batch_cdof;
+        const int num_nv = rigid_body_system.batch_nv[env_id];
+        const int jac_offset = cidx * 6;
+        const int nv = rigid_body_system.batch_nv[env_id];
+        if(rigid_body_system.is_static(env_id, bid))
+            return;
+
+        const int parent_idx = rigid_body_system.parent_idx(env_id, bid);
+        if(parent_idx == -1)
+        {
+            for(int i = 0; i < 6; i++)
+            {
+                Vec3f cdof_angular = Vec3f(cdof(env_id, (q_offset + i) * 6 + 0), cdof(env_id, (q_offset + i) * 6 + 1), cdof(env_id, (q_offset + i) * 6 + 2));
+                Vec3f d = cross(cdof_angular, offset);
+                MatrixAt(dst_jac, env_id, cidx, 0, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 0);
+                MatrixAt(dst_jac, env_id, cidx, 1, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 1);
+                MatrixAt(dst_jac, env_id, cidx, 2, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 2);
+                
+                MatrixAt(dst_jac, env_id, cidx, 3, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 3) + d.x;
+                MatrixAt(dst_jac, env_id, cidx, 4, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 4) + d.y;
+                MatrixAt(dst_jac, env_id, cidx, 5, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 5) + d.z;
+                
+            }
+        }
+        else
+        {
+            ;
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void ContactConstraintJacobianKernel(RigidBody<TDataType> rigid_body_system, int num_envs, DArray2D<Real> Jac_temp1, DArray2D<Real> Jac_temp2)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        auto& collisions = rigid_body_system.collision_constraints;
+        const int num_collisions = collisions.collision_nums[env_id];
+        const int num_nv = rigid_body_system.batch_nv[env_id];
+
+        int cidx = threadIdx.x;
+        if(cidx >= num_collisions)
+            return;
+
+        const Vec3f& normal = collisions.normal(env_id, cidx);
+        const Vec3f& c_point = collisions.point(env_id, cidx);
+        int a_idx = collisions.body_idxs(env_id, cidx).first;
+        int b_idx = collisions.body_idxs(env_id, cidx).second;
+        auto& J = rigid_body_system.batch_J;
+
+        Vec3f t = abs(normal.y) < 0.5 ? Vec3f(0.f, 1.f, 0.f) : Vec3f(0.f, 0.f, 1.f);
+        Vec3f y = t - dot(t, normal) * normal;
+        y.normalize();
+        Vec3f z = cross(normal, y);
+
+        Mat3f c_basis;
+        c_basis.setCol(0, normal);
+        c_basis.setCol(1, y);
+        c_basis.setCol(2, z);
+
+
+        ComputeJac(Jac_temp1, c_point, rigid_body_system, env_id, a_idx, cidx);
+        if(b_idx != -1)
+            ComputeJac(Jac_temp2, c_point, rigid_body_system, env_id, b_idx, cidx);
+        else
+        {
+            for(int i = 0; i < 6; i++)
+                for(int j = 0; j < num_nv; j++)
+                    MatrixAt(Jac_temp2, env_id, cidx, i, j, Vec2i(6, num_nv)) = 0;
+        }
+
+        int test_idx = 3;
+        if(cidx == test_idx)
+        {
+            printf("collision point: (%f, %f, %f)\n", c_point.x, c_point.y, c_point.z);
+            for(int i = 0; i < 6; i++)
+            {
+                printf("JacA: ");
+                for(int j = 0; j < num_nv; j++)
+                    printf("%f\t", Jac_temp1(env_id, (cidx * 6 + i) * num_nv + j));
+                printf("\n");
+            }
+        }
+       
+
+        // 用jacA的buffer来放jacp, 用jacB的buffer来放jacdif
+
+        for(int j = 0; j < 3; j++)
+            for(int k = 0; k < num_nv; k++)
+                MatrixAt(Jac_temp1, env_id, cidx, j, k, Vec2i(3, num_nv)) = MatrixAt(Jac_temp1, env_id, cidx, j + 3, k, Vec2i(6, num_nv)) - MatrixAt(Jac_temp2, env_id, cidx, j + 3, k, Vec2i(6, num_nv));
+
+        for(int i = 0; i < 3; i++)
+            for(int j = 0; j < num_nv; j++)
+            {
+                Real sum = 0;
+                for(int k = 0; k < 3; k++)
+                    sum += c_basis(k, i) * MatrixAt(Jac_temp1, env_id, cidx, k, j, Vec2i(3, num_nv));
+                MatrixAt(Jac_temp2, env_id, cidx, i, j, Vec2i(3, num_nv)) = sum;
+            }
+
+        if(cidx == test_idx)
+        {
+            for(int i = 0; i < 3; i++)
+            {
+                printf("JacDif: ");
+                for(int j = 0; j < num_nv; j++)
+                    printf("%f\t", Jac_temp2(env_id, (cidx * 3 + i) * num_nv + j));
+                printf("\n");
+            }
+        }
+        
     }
 }
 
@@ -506,6 +683,7 @@ namespace dyno
         const auto& rigid_body_system = this->rigid_body;
 
         const int num_envs = env_infos->num_envs;
+        const int num_max_constraints = env_infos->max_constraints;
         rigid_body_system->max_bodies = GetMaxValue(rigid_body_system->batch_bodies, num_envs);
         const int max_bodies = rigid_body_system->max_bodies;
         const int max_nv = max_bodies * 6;
@@ -549,11 +727,18 @@ namespace dyno
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_crb, num_envs, max_bodies * 10);
 
-        INIT_DYNO_ARRAY(rigid_body_system->collision_constraints.num_constraints, num_envs);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_J, num_envs, num_max_constraints * max_nv);
+        INIT_DYNO_ARRAY(rigid_body_system->num_constraints, num_envs);
+        INIT_DYNO_ARRAY(rigid_body_system->num_each_constraint, num_envs);
+        INIT_DYNO_ARRAY(rigid_body_system->constraint_offset, num_envs);
+
+        INIT_DYNO_ARRAY(rigid_body_system->collision_constraints.collision_nums, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.body_idxs, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.depth, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.normal, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.point, num_envs, 1024);
+
+
         
 
 
@@ -589,6 +774,8 @@ namespace dyno
         ForwardKinematics();
 
         MakeConstraints();
+
+        MakeJacobian();
 
         // TODO: compute comvel
         // TODO: compute RNE
@@ -639,7 +826,7 @@ namespace dyno
         SubtreeComKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
-        ComputeCdofKernel<TDataType><<<dim3(num_envs, 32), 512>>>(*rigid_body_system, num_envs);
+        ComputeCdofKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
         // Crb 
@@ -666,14 +853,39 @@ namespace dyno
         const auto& env_infos = this->env_infos;
         const auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
+
         // 1. collision constraints
         auto& collision_constraints = rigid_body_system->collision_constraints;
-        collision_constraints.num_constraints.reset();
+        collision_constraints.collision_nums.reset();
         const auto& collision_paras = rigid_body_system->collision_paras;
+
 
         CollisonDetectionKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
         
+    }
+
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::MakeJacobian()
+    {
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+
+        // 碰撞检测已完成
+        
+        CountConstraintNums<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+        // Function2Pt::plus(rigid_body_system->num_constraints, rigid_body_system->num_topo_invariant_constraints, rigid_body_system->collision_constraints.collision_nums);
+        
+        rigid_body_system->batch_J.reset();
+        
+        DArray2D<Real> Mat_temp1(num_envs, rigid_body_system->batch_J.size() / num_envs);   // num_constraints * nv
+        DArray2D<Real> Mat_temp2(num_envs, rigid_body_system->batch_J.size() / num_envs);
+
+        ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, Mat_temp1, Mat_temp2);
+        cudaDeviceSynchronize();
     }
 
     DEFINE_UNIQUE_CLASS(MujocoSolver, DataType3f);

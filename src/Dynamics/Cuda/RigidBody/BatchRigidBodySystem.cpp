@@ -181,7 +181,7 @@ namespace dyno
         merge->outContacts()->connect(iterSolver->inContacts());
         this->animationPipeline()->pushModule(iterSolver);
 
-        this->setDt(0.006f);
+        this->setDt(0.005f);
     }
 
     template<typename TDataType>

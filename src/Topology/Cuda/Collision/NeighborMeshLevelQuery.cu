@@ -1084,13 +1084,13 @@ namespace
 		contact.pos2 = contactPoint;
 		if (targetIsTri1)
 		{
-			contact.normal2 = nTarget;
-			contact.normal1 = -nTarget;
+			contact.normal2 = -nTarget;
+			contact.normal1 = nTarget;
 		}
 		else
 		{
-			contact.normal1 = nTarget;
-			contact.normal2 = -nTarget;
+			contact.normal1 = -nTarget;
+			contact.normal2 = nTarget;
 		}
 		contact.contactType = type;
 		contact.interpenetration = depth < Real(0) ? Real(0) : depth;

@@ -98,11 +98,6 @@ namespace
 		return NMLQ_EdgePrimitiveKeyMask | static_cast<unsigned long long>(edgeId);
 	}
 
-	DYN_FUNC inline bool NMLQ_IsEdgePrimitiveKey(unsigned long long key)
-	{
-		return (key & NMLQ_EdgePrimitiveKeyMask) != 0ull;
-	}
-
 	template<typename Coord>
 	DYN_FUNC Coord NLQ_StablePerpendicular(const Coord& direction)
 	{
@@ -809,59 +804,34 @@ namespace
 		auto pq = sourceSegment.proximity(targetSegment);
 		Coord cSource = pq.startPoint();
 		Coord cTarget = pq.endPoint();
-		Real gap = pq.length();
-		if (gap > view.dHat)
+		Coord pqVec = cTarget - cSource;
+		Real gap = pqVec.norm();
+
+		if (targetEdgeId < 0 || targetEdgeId >= view.edgeNormalsWorld.size())
 			return false;
 
-		if (gap * gap > epsSqr)
-		{
-			nTarget = cSource - cTarget;
-			nTarget.normalize();
-		}
-		else
-		{
-			sourceDir.normalize();
-			targetDir.normalize();
-			Coord targetEdgeNormal = targetEdgeId >= 0 && targetEdgeId < view.edgeNormalsWorld.size()
-				? view.edgeNormalsWorld[targetEdgeId]
-				: Coord(1, 0, 0);
-			Coord binormal = sourceDir.cross(targetDir);
-			if (binormal.normSquared() > epsSqr)
-			{
-				Coord nTmp = binormal.cross(targetDir);
-				if (nTmp.normSquared() > epsSqr)
-				{
-					nTmp.normalize();
-					if (nTmp.dot(targetEdgeNormal) < Real(0))
-						nTmp = -nTmp;
-					nTarget = nTmp;
-				}
-				else
-				{
-					nTarget = targetEdgeNormal;
-				}
-			}
-			else
-			{
-				Coord nProj = targetEdgeNormal - targetDir.dot(targetEdgeNormal) * targetDir;
-				if (nProj.normSquared() > epsSqr)
-				{
-					nProj.normalize();
-					nTarget = nProj;
-				}
-				else
-				{
-					nTarget = NLQ_StablePerpendicular(targetDir);
-				}
-			}
+		Coord nTargetEdge = view.edgeNormalsWorld[targetEdgeId];
+		if (nTargetEdge.normSquared() <= epsSqr)
+			return false;
+		nTargetEdge.normalize();
 
-			nTarget = NLQ_NormalizeOrFallback(nTarget, targetEdgeNormal);
-		}
+		// Only keep the pair when pq lies on the positive side of the target edge normal.
+		if (nTargetEdge.dot(pqVec) <= Real(0))
+			return false;
+
+		sourceDir.normalize();
+		targetDir.normalize();
+		nTarget = sourceDir.cross(targetDir);
+		if (nTarget.normSquared() <= epsSqr)
+			return false;
+		nTarget.normalize();
+
+		// Orient the final normal to the same side as the target edge normal.
+		if (nTarget.dot(nTargetEdge) <= Real(0))
+			nTarget = -nTarget;
 
 		contactPoint = Real(0.5) * (cSource + cTarget);
-		depth = view.dHat - gap;
-		if (depth < Real(0))
-			depth = Real(0);
+		depth = 0.5 * gap;
 		return true;
 	}
 
@@ -914,60 +884,16 @@ namespace
 			return true;
 		}
 
-		if (targetTriId < 0 || targetTriId >= view.triangleEdges.size())
-			return false;
-
 		if (regionType == NMLQ_REGION_EDGE)
 		{
-			int targetEdgeId = view.triangleEdges[targetTriId][localEdgeId];
-			if (targetEdgeId == EMPTY)
-				return false;
-
-			dyno::TSegment3D<Real> targetSegment;
-			if (!NMLQ_GetWorldEdge(view, targetEdgeId, targetShapeId, targetSegment))
-				return false;
-
-			int sourceEdgeId = NMLQ_SelectSourceEdgeForTargetEdge(
-				view,
-				sourceVertexId,
-				sourceTriId,
-				sourceShapeId,
-				targetEdgeId,
-				targetSegment);
-			if (sourceEdgeId == EMPTY)
-				return false;
-
-			if (!NMLQ_BuildEdgeEdgeContact(view, sourceEdgeId, sourceShapeId, targetEdgeId, targetShapeId, contactPoint, nTarget, depth))
-				return false;
-			contactType = dyno::ContactType::CT_EDGE_EDGE;
-			return true;
+			// Temporarily disable edge-edge fallback in vertex passes for debugging.
+			return false;
 		}
 
 		if (regionType == NMLQ_REGION_VERTEX)
 		{
-			if (localVertexId == EMPTY || localVertexId < 0 || localVertexId > 2)
-				return false;
-
-			auto targetTriIndices = view.triangles[targetTriId];
-			int targetVertexId = targetTriIndices[localVertexId];
-			int sourceEdgeId = EMPTY;
-			int targetEdgeId = EMPTY;
-			if (!NMLQ_SelectEdgePairFromVertices(
-				view,
-				sourceVertexId,
-				sourceTriId,
-				sourceShapeId,
-				targetVertexId,
-				targetTriId,
-				targetShapeId,
-				sourceEdgeId,
-				targetEdgeId))
-				return false;
-
-			if (!NMLQ_BuildEdgeEdgeContact(view, sourceEdgeId, sourceShapeId, targetEdgeId, targetShapeId, contactPoint, nTarget, depth))
-				return false;
-			contactType = dyno::ContactType::CT_EDGE_EDGE;
-			return true;
+			// Temporarily disable edge-edge fallback in vertex passes for debugging.
+			return false;
 		}
 
 		return false;
@@ -1605,6 +1531,13 @@ namespace
 
 		int pairId = slotId / NMLQ_PASS_COUNT;
 		int passType = slotId % NMLQ_PASS_COUNT;
+		if (passType == NMLQ_PASS_TRI0_EDGE || passType == NMLQ_PASS_TRI1_EDGE)
+		{
+			// Temporarily disable edge passes for debugging.
+			primitivePassCounts[slotId] = 0;
+			return;
+		}
+
 		if (pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
 		{
 			primitivePassCounts[slotId] = 0;
@@ -1650,6 +1583,12 @@ namespace
 
 		int pairId = slotId / NMLQ_PASS_COUNT;
 		int passType = slotId % NMLQ_PASS_COUNT;
+		if (passType == NMLQ_PASS_TRI0_EDGE || passType == NMLQ_PASS_TRI1_EDGE)
+		{
+			// Temporarily disable edge passes for debugging.
+			return;
+		}
+
 		if (pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
 			return;
 
@@ -1694,7 +1633,6 @@ namespace
 			return;
 
 		unsigned long long key = primitiveCandidateKeys[sortedIdx];
-		const bool edgePrimitive = NMLQ_IsEdgePrimitiveKey(key);
 		int groupEnd = sortedIdx;
 		Real minDepth = std::numeric_limits<Real>::max();
 		while (groupEnd < primitiveCandidateKeys.size() && primitiveCandidateKeys[groupEnd] == key)
@@ -1722,42 +1660,39 @@ namespace
 			if (depth > minDepth + depthTieEps)
 				continue;
 
-			if (!edgePrimitive)
+			auto direction = primitiveCandidateContacts[rawIdx].normal1;
+			const Real dirNorm2 = direction.normSquared();
+			if (dirNorm2 > Real(1e-12))
 			{
-				auto direction = primitiveCandidateContacts[rawIdx].normal1;
-				const Real dirNorm2 = direction.normSquared();
-				if (dirNorm2 > Real(1e-12))
+				direction /= sqrt(dirNorm2);
+				bool duplicateDirection = false;
+				for (int j = sortedIdx; j < i; ++j)
 				{
-					direction /= sqrt(dirNorm2);
-					bool duplicateDirection = false;
-					for (int j = sortedIdx; j < i; ++j)
-					{
-						int prevRawIdx = primitiveCandidateSortedIndices[j];
-						if (prevRawIdx < 0 || prevRawIdx >= primitiveCandidateKeepFlags.size()
-							|| prevRawIdx >= primitiveCandidateContacts.size()
-							|| primitiveCandidateKeepFlags[prevRawIdx] <= 0)
-							continue;
-
-						Real prevDepth = primitiveCandidateContacts[prevRawIdx].interpenetration;
-						if (prevDepth > minDepth + depthTieEps)
-							continue;
-
-						auto prevDirection = primitiveCandidateContacts[prevRawIdx].normal1;
-						const Real prevNorm2 = prevDirection.normSquared();
-						if (prevNorm2 <= Real(1e-12))
-							continue;
-
-						prevDirection /= sqrt(prevNorm2);
-						if (direction.dot(prevDirection) >= Real(1) - sameDirectionDotEps)
-						{
-							duplicateDirection = true;
-							break;
-						}
-					}
-
-					if (duplicateDirection)
+					int prevRawIdx = primitiveCandidateSortedIndices[j];
+					if (prevRawIdx < 0 || prevRawIdx >= primitiveCandidateKeepFlags.size()
+						|| prevRawIdx >= primitiveCandidateContacts.size()
+						|| primitiveCandidateKeepFlags[prevRawIdx] <= 0)
 						continue;
+
+					Real prevDepth = primitiveCandidateContacts[prevRawIdx].interpenetration;
+					if (prevDepth > minDepth + depthTieEps)
+						continue;
+
+					auto prevDirection = primitiveCandidateContacts[prevRawIdx].normal1;
+					const Real prevNorm2 = prevDirection.normSquared();
+					if (prevNorm2 <= Real(1e-12))
+						continue;
+
+					prevDirection /= sqrt(prevNorm2);
+					if (direction.dot(prevDirection) >= Real(1) - sameDirectionDotEps)
+					{
+						duplicateDirection = true;
+						break;
+					}
 				}
+
+				if (duplicateDirection)
+					continue;
 			}
 
 			primitiveCandidateKeepFlags[rawIdx] = 1;
@@ -2615,14 +2550,7 @@ namespace dyno
 		if (mFallbackContactCounts.size() != static_cast<uint>(totalFilteredTriPairs))
 			mFallbackContactCounts.resize(totalFilteredTriPairs);
 		mFallbackContactCounts.reset();
-		cuExecute(totalFilteredTriPairs,
-			NMLQ_CountFallbackContactsPerTriPair,
-			mFallbackContactCounts,
-			mSelectedPrimitiveCounts,
-			mFilteredTri0,
-			mFilteredTri1,
-			mFilteredPatchPairId,
-			view);
+		// Temporarily disable tri-tri fallback to isolate primitive point-face behavior.
 
 		if (mTriPairContactCounts.size() != static_cast<uint>(totalFilteredTriPairs))
 			mTriPairContactCounts.resize(totalFilteredTriPairs);

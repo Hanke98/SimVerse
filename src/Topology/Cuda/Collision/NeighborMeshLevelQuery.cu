@@ -629,33 +629,21 @@ namespace
 		const dyno::TSegment3D<typename View::RealType>& targetSegment)
 	{
 		using Real = typename View::RealType;
-		using Coord = typename View::CoordType;
 		int bestEdge = EMPTY;
 		Real bestDist2 = std::numeric_limits<Real>::max();
 		Real bestAlign = Real(-1);
 
-		bool usedIncident = false;
-		if (sourceVertexId >= 0 && sourceVertexId < view.vertexIncidentEdges.size())
-		{
-			auto& incident = view.vertexIncidentEdges[sourceVertexId];
-			for (int i = 0; i < incident.size(); ++i)
-			{
-				usedIncident = true;
-				NMLQ_TryBestSourceEdgeCandidate(view, incident[i], sourceShapeId, targetSegment, bestEdge, bestDist2, bestAlign);
-			}
-		}
+		if (sourceTriId < 0 || sourceTriId >= view.triangleEdges.size())
+			return EMPTY;
 
-		if (!usedIncident && sourceTriId >= 0 && sourceTriId < view.triangleEdges.size())
-		{
-			int localVertexId = NMLQ_FindLocalVertexInTriangle(view, sourceTriId, sourceVertexId);
-			int edge0 = EMPTY;
-			int edge1 = EMPTY;
-			if (localVertexId != EMPTY && NMLQ_GetLocalIncidentEdges(view.triangleEdges[sourceTriId], localVertexId, edge0, edge1))
-			{
-				NMLQ_TryBestSourceEdgeCandidate(view, edge0, sourceShapeId, targetSegment, bestEdge, bestDist2, bestAlign);
-				NMLQ_TryBestSourceEdgeCandidate(view, edge1, sourceShapeId, targetSegment, bestEdge, bestDist2, bestAlign);
-			}
-		}
+		int localVertexId = NMLQ_FindLocalVertexInTriangle(view, sourceTriId, sourceVertexId);
+		int edge0 = EMPTY;
+		int edge1 = EMPTY;
+		if (localVertexId == EMPTY || !NMLQ_GetLocalIncidentEdges(view.triangleEdges[sourceTriId], localVertexId, edge0, edge1))
+			return EMPTY;
+
+		NMLQ_TryBestSourceEdgeCandidate(view, edge0, sourceShapeId, targetSegment, bestEdge, bestDist2, bestAlign);
+		NMLQ_TryBestSourceEdgeCandidate(view, edge1, sourceShapeId, targetSegment, bestEdge, bestDist2, bestAlign);
 
 		return bestEdge;
 	}
@@ -677,71 +665,26 @@ namespace
 		Real bestAlign = Real(-1);
 		bestSourceEdge = EMPTY;
 		bestTargetEdge = EMPTY;
-		bool sourceIncidentUsed = false;
-		bool targetIncidentUsed = false;
 
-		if (sourceVertexId >= 0 && sourceVertexId < view.vertexIncidentEdges.size())
-			sourceIncidentUsed = view.vertexIncidentEdges[sourceVertexId].size() > 0;
-		if (targetVertexId >= 0 && targetVertexId < view.vertexIncidentEdges.size())
-			targetIncidentUsed = view.vertexIncidentEdges[targetVertexId].size() > 0;
+		if (sourceTriId < 0 || sourceTriId >= view.triangleEdges.size()
+			|| targetTriId < 0 || targetTriId >= view.triangleEdges.size())
+			return false;
 
-		if (sourceIncidentUsed && targetIncidentUsed)
-		{
-			auto& sourceIncident = view.vertexIncidentEdges[sourceVertexId];
-			auto& targetIncident = view.vertexIncidentEdges[targetVertexId];
-			for (int i = 0; i < sourceIncident.size(); ++i)
-			{
-				for (int j = 0; j < targetIncident.size(); ++j)
-					NMLQ_TryBestEdgePairCandidate(view, sourceIncident[i], sourceShapeId, targetIncident[j], targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-			}
-		}
+		int sourceLocalVertexId = NMLQ_FindLocalVertexInTriangle(view, sourceTriId, sourceVertexId);
+		int targetLocalVertexId = NMLQ_FindLocalVertexInTriangle(view, targetTriId, targetVertexId);
+		int e0 = EMPTY;
+		int e1 = EMPTY;
+		int te0 = EMPTY;
+		int te1 = EMPTY;
+		if (sourceLocalVertexId == EMPTY || targetLocalVertexId == EMPTY
+			|| !NMLQ_GetLocalIncidentEdges(view.triangleEdges[sourceTriId], sourceLocalVertexId, e0, e1)
+			|| !NMLQ_GetLocalIncidentEdges(view.triangleEdges[targetTriId], targetLocalVertexId, te0, te1))
+			return false;
 
-		if (!sourceIncidentUsed && sourceTriId >= 0 && sourceTriId < view.triangleEdges.size())
-		{
-			int localVertexId = NMLQ_FindLocalVertexInTriangle(view, sourceTriId, sourceVertexId);
-			int e0 = EMPTY;
-			int e1 = EMPTY;
-			if (localVertexId != EMPTY && NMLQ_GetLocalIncidentEdges(view.triangleEdges[sourceTriId], localVertexId, e0, e1))
-			{
-				if (targetIncidentUsed)
-				{
-					auto& targetIncident = view.vertexIncidentEdges[targetVertexId];
-					for (int j = 0; j < targetIncident.size(); ++j)
-					{
-						NMLQ_TryBestEdgePairCandidate(view, e0, sourceShapeId, targetIncident[j], targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-						NMLQ_TryBestEdgePairCandidate(view, e1, sourceShapeId, targetIncident[j], targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-					}
-				}
-				else if (targetTriId >= 0 && targetTriId < view.triangleEdges.size())
-				{
-					int targetLocalVertexId = NMLQ_FindLocalVertexInTriangle(view, targetTriId, targetVertexId);
-					int te0 = EMPTY;
-					int te1 = EMPTY;
-					if (targetLocalVertexId != EMPTY && NMLQ_GetLocalIncidentEdges(view.triangleEdges[targetTriId], targetLocalVertexId, te0, te1))
-					{
-						NMLQ_TryBestEdgePairCandidate(view, e0, sourceShapeId, te0, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-						NMLQ_TryBestEdgePairCandidate(view, e0, sourceShapeId, te1, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-						NMLQ_TryBestEdgePairCandidate(view, e1, sourceShapeId, te0, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-						NMLQ_TryBestEdgePairCandidate(view, e1, sourceShapeId, te1, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-					}
-				}
-			}
-		}
-		else if (!targetIncidentUsed && targetTriId >= 0 && targetTriId < view.triangleEdges.size())
-		{
-			int targetLocalVertexId = NMLQ_FindLocalVertexInTriangle(view, targetTriId, targetVertexId);
-			int te0 = EMPTY;
-			int te1 = EMPTY;
-			if (targetLocalVertexId != EMPTY && NMLQ_GetLocalIncidentEdges(view.triangleEdges[targetTriId], targetLocalVertexId, te0, te1))
-			{
-				auto& sourceIncident = view.vertexIncidentEdges[sourceVertexId];
-				for (int i = 0; i < sourceIncident.size(); ++i)
-				{
-					NMLQ_TryBestEdgePairCandidate(view, sourceIncident[i], sourceShapeId, te0, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-					NMLQ_TryBestEdgePairCandidate(view, sourceIncident[i], sourceShapeId, te1, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
-				}
-			}
-		}
+		NMLQ_TryBestEdgePairCandidate(view, e0, sourceShapeId, te0, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
+		NMLQ_TryBestEdgePairCandidate(view, e0, sourceShapeId, te1, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
+		NMLQ_TryBestEdgePairCandidate(view, e1, sourceShapeId, te0, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
+		NMLQ_TryBestEdgePairCandidate(view, e1, sourceShapeId, te1, targetShapeId, bestSourceEdge, bestTargetEdge, bestDist2, bestAlign);
 
 		return bestSourceEdge != EMPTY && bestTargetEdge != EMPTY;
 	}
@@ -805,6 +748,8 @@ namespace
 		Coord cTarget = pq.endPoint();
 		Coord pqVec = cTarget - cSource;
 		Real gap = pqVec.norm();
+		if (gap > view.dHat)
+			return false;
 
 		if (targetEdgeId < 0 || targetEdgeId >= view.edgeNormalsWorld.size())
 			return false;
@@ -830,7 +775,10 @@ namespace
 			nTarget = -nTarget;
 
 		contactPoint = Real(0.5) * (cSource + cTarget);
-		depth = 0.5 * gap;
+		// Use shell penetration so separated edge pairs do not inject a positive depth.
+		depth = view.dHat - gap;
+		if (depth < Real(0))
+			depth = Real(0);
 		return true;
 	}
 
@@ -848,14 +796,13 @@ namespace
 		typename View::CoordType& nTarget,
 		typename View::RealType& depth,
 		dyno::ContactType& contactType)
-	{
-		using Real = typename View::RealType;
-		using Coord = typename View::CoordType;
+		{
+			using Real = typename View::RealType;
+			using Coord = typename View::CoordType;
 
-		const Real epsSqr = Real(1e-12);
-		const Real epsBary = Real(1e-5);
-		Coord p;
-		if (!NMLQ_GetWorldVertex(view, sourceVertexId, sourceShapeId, p))
+			const Real epsBary = Real(1e-5);
+			Coord p;
+			if (!NMLQ_GetWorldVertex(view, sourceVertexId, sourceShapeId, p))
 			return false;
 
 		Coord r = dyno::TPoint3D<Real>(p).project(targetTriangle).origin;
@@ -881,19 +828,63 @@ namespace
 			depth = signedDistance < Real(0) ? -signedDistance : Real(0);
 			contactType = dyno::ContactType::CT_VERTEX_FACE;
 			return true;
-		}
+			}
 
-		if (regionType == NMLQ_REGION_EDGE)
-		{
-			// Temporarily disable edge-edge fallback in vertex passes for debugging.
-			return false;
-		}
+			if (regionType == NMLQ_REGION_EDGE)
+			{
+				if (targetTriId < 0 || targetTriId >= view.triangleEdges.size())
+					return false;
 
-		if (regionType == NMLQ_REGION_VERTEX)
-		{
-			// Temporarily disable edge-edge fallback in vertex passes for debugging.
-			return false;
-		}
+				int targetEdgeId = view.triangleEdges[targetTriId][localEdgeId];
+				if (targetEdgeId == EMPTY)
+					return false;
+
+				dyno::TSegment3D<Real> targetSegment;
+				if (!NMLQ_GetWorldEdge(view, targetEdgeId, targetShapeId, targetSegment))
+					return false;
+
+				int sourceEdgeId = NMLQ_SelectSourceEdgeForTargetEdge(
+					view,
+					sourceVertexId,
+					sourceTriId,
+					sourceShapeId,
+					targetEdgeId,
+					targetSegment);
+				if (sourceEdgeId == EMPTY)
+					return false;
+
+				if (!NMLQ_BuildEdgeEdgeContact(view, sourceEdgeId, sourceShapeId, targetEdgeId, targetShapeId, contactPoint, nTarget, depth))
+					return false;
+				contactType = dyno::ContactType::CT_EDGE_EDGE;
+				return true;
+			}
+
+			if (regionType == NMLQ_REGION_VERTEX)
+			{
+				if (targetTriId < 0 || targetTriId >= view.triangles.size())
+					return false;
+
+				auto targetTriIndices = view.triangles[targetTriId];
+				int targetVertexId = targetTriIndices[localVertexId];
+				int sourceEdgeId = EMPTY;
+				int targetEdgeId = EMPTY;
+				if (!NMLQ_SelectEdgePairFromVertices(
+					view,
+					sourceVertexId,
+					sourceTriId,
+					sourceShapeId,
+					targetVertexId,
+					targetTriId,
+					targetShapeId,
+					sourceEdgeId,
+					targetEdgeId))
+					return false;
+
+				if (!NMLQ_BuildEdgeEdgeContact(view, sourceEdgeId, sourceShapeId, targetEdgeId, targetShapeId, contactPoint, nTarget, depth))
+					return false;
+				contactType = dyno::ContactType::CT_EDGE_EDGE;
+				return true;
+			}
 
 		return false;
 	}

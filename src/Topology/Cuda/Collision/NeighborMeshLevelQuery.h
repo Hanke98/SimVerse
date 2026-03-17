@@ -69,14 +69,13 @@ namespace dyno
 		DArray<int> mPrimitivePassCounts;
 		DArray<int> mPrimitivePassOffsets;
 		DArray<ContactPair> mPrimitiveCandidateContacts;
-		DArray<unsigned long long> mPrimitiveCandidateKeys;
-		DArray<int> mPrimitiveCandidateSortedIndices;
-		DArray<int> mPrimitiveCandidateKeepFlags;
-		DArray<int> mSelectedPrimitiveCounts;
-		DArray<int> mFallbackContactCounts;
+			DArray<unsigned long long> mPrimitiveCandidateKeys;
+			DArray<int> mPrimitiveCandidateSortedIndices;
+			DArray<int> mPrimitiveCandidateKeepFlags;
+			DArray<int> mSelectedPrimitiveCounts;
 
-		DArray<int> mTriPairContactCounts;
-		DArray<int> mTriPairContactOffsets;
+			DArray<int> mTriPairContactCounts;
+			DArray<int> mTriPairContactOffsets;
 
 		bool mTopologyOwnershipReady = false;
 		bool mTriShapeReady = false;

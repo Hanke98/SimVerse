@@ -1,6 +1,5 @@
 #include "NeighborMeshLevelQuery.h"
 
-#include "CollisionDetectionAlgorithm.h"
 #include "FCallbackFunc.h"
 #include "Topology/TopologyConstants.h"
 
@@ -1027,58 +1026,6 @@ namespace
 		contact.interpenetration = depth < Real(0) ? Real(0) : depth;
 	}
 
-	template<typename View, typename ContactPair>
-	DYN_FUNC int NMLQ_ProcessTriPairFallback(
-		const View& view,
-		int tri0,
-		int tri1,
-		int bodyId1,
-		int bodyId2,
-		const dyno::TTriangle3D<typename View::RealType>& triangle0,
-		const dyno::TTriangle3D<typename View::RealType>& triangle1,
-		ContactPair* contacts,
-		int contactsSize,
-		int writeBase,
-		bool write)
-	{
-		using Real = typename View::RealType;
-		using Coord = typename View::CoordType;
-
-		dyno::TManifold<Real> manifold;
-		dyno::CollisionDetection<Real>::request(manifold, triangle0, triangle1, view.dHat, view.dHat);
-
-		const int contactCount = static_cast<int>(manifold.contactCount);
-		if (!write || contacts == nullptr || contactCount <= 0)
-			return contactCount;
-
-		for (int n = 0; n < contactCount; ++n)
-		{
-			int outIdx = writeBase + n;
-			if (outIdx < 0 || outIdx >= contactsSize)
-				break;
-
-			Coord contactPoint = manifold.contacts[n].position + view.dHat * manifold.normal;
-			Real depth = -manifold.contacts[n].penetration - Real(2) * view.dHat;
-			if (depth < Real(0))
-				depth = Real(0);
-
-			ContactPair cp;
-			cp.bodyId1 = bodyId1;
-			cp.bodyId2 = bodyId2;
-			cp.localId1 = tri0;
-			cp.localId2 = tri1;
-			cp.pos1 = contactPoint;
-			cp.pos2 = contactPoint;
-			cp.normal1 = -manifold.normal;
-			cp.normal2 = manifold.normal;
-			cp.contactType = dyno::ContactType::CT_NONPENETRATION;
-			cp.interpenetration = depth;
-			contacts[outIdx] = cp;
-		}
-
-		return contactCount;
-	}
-
 	template<typename View>
 	DYN_FUNC bool NMLQ_BuildTriPairContext(
 		const View& view,
@@ -1736,62 +1683,18 @@ namespace
 		selectedPrimitiveCounts[pairId] = selectedCount;
 	}
 
-	template<typename View>
-	__global__ void NMLQ_CountFallbackContactsPerTriPair(
-		dyno::DArray<int> fallbackContactCounts,
-		dyno::DArray<int> selectedPrimitiveCounts,
-		dyno::DArray<int> filteredTri0,
-		dyno::DArray<int> filteredTri1,
-		dyno::DArray<int> filteredPatchPairId,
-		View view)
-	{
-		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (pairId >= fallbackContactCounts.size() || pairId >= selectedPrimitiveCounts.size()
-			|| pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
-			return;
-
-		if (selectedPrimitiveCounts[pairId] > 0)
-		{
-			fallbackContactCounts[pairId] = 0;
-			return;
-		}
-
-		NMLQTriPairContext<View> ctx;
-		if (!NMLQ_BuildTriPairContext(view, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId], ctx))
-		{
-			fallbackContactCounts[pairId] = 0;
-			return;
-		}
-
-		fallbackContactCounts[pairId] = NMLQ_ProcessTriPairFallback(
-			view,
-			ctx.tri0,
-			ctx.tri1,
-			ctx.bodyId1,
-			ctx.bodyId2,
-			ctx.triangle0,
-			ctx.triangle1,
-			(dyno::TContactPair<typename View::RealType>*)nullptr,
-			0,
-			0,
-			false);
-	}
-
 	__global__ void NMLQ_SetFinalContactCounts(
 		dyno::DArray<int> finalContactCounts,
-		dyno::DArray<int> selectedPrimitiveCounts,
-		dyno::DArray<int> fallbackContactCounts)
+		dyno::DArray<int> selectedPrimitiveCounts)
 	{
 		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (pairId >= finalContactCounts.size() || pairId >= selectedPrimitiveCounts.size() || pairId >= fallbackContactCounts.size())
+		if (pairId >= finalContactCounts.size() || pairId >= selectedPrimitiveCounts.size())
 			return;
 
-		finalContactCounts[pairId] = selectedPrimitiveCounts[pairId] > 0
-			? selectedPrimitiveCounts[pairId]
-			: fallbackContactCounts[pairId];
+		finalContactCounts[pairId] = selectedPrimitiveCounts[pairId];
 	}
 
-	template<typename View, typename ContactPair>
+	template<typename ContactPair>
 	__global__ void NMLQ_SetFinalContactsPerTriPair(
 		dyno::DArray<ContactPair> contacts,
 		dyno::DArray<int> offsets,
@@ -1799,16 +1702,10 @@ namespace
 		dyno::DArray<int> primitivePassOffsets,
 		dyno::DArray<int> primitiveCandidateKeepFlags,
 		dyno::DArray<ContactPair> primitiveCandidateContacts,
-		dyno::DArray<int> selectedPrimitiveCounts,
-		dyno::DArray<int> fallbackContactCounts,
-		dyno::DArray<int> filteredTri0,
-		dyno::DArray<int> filteredTri1,
-		dyno::DArray<int> filteredPatchPairId,
-		View view)
+		dyno::DArray<int> selectedPrimitiveCounts)
 	{
 		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
-		if (pairId >= offsets.size() || pairId >= selectedPrimitiveCounts.size() || pairId >= fallbackContactCounts.size()
-			|| pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
+		if (pairId >= offsets.size() || pairId >= selectedPrimitiveCounts.size())
 			return;
 
 		int writeBase = offsets[pairId];
@@ -1834,29 +1731,9 @@ namespace
 				if (outIdx >= 0 && outIdx < contacts.size())
 					contacts[outIdx] = primitiveCandidateContacts[rawIdx];
 				++written;
+				}
+				return;
 			}
-			return;
-		}
-
-		if (fallbackContactCounts[pairId] <= 0)
-			return;
-
-		NMLQTriPairContext<View> ctx;
-		if (!NMLQ_BuildTriPairContext(view, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId], ctx))
-			return;
-
-		NMLQ_ProcessTriPairFallback(
-			view,
-			ctx.tri0,
-			ctx.tri1,
-			ctx.bodyId1,
-			ctx.bodyId2,
-			ctx.triangle0,
-			ctx.triangle1,
-			contacts.begin(),
-			contacts.size(),
-			offsets[pairId],
-			true);
 	}
 }
 
@@ -1930,12 +1807,11 @@ namespace dyno
 		mPrimitivePassOffsets.clear();
 		mPrimitiveCandidateContacts.clear();
 		mPrimitiveCandidateKeys.clear();
-		mPrimitiveCandidateSortedIndices.clear();
-		mPrimitiveCandidateKeepFlags.clear();
-		mSelectedPrimitiveCounts.clear();
-		mFallbackContactCounts.clear();
-		mTriPairContactCounts.clear();
-		mTriPairContactOffsets.clear();
+			mPrimitiveCandidateSortedIndices.clear();
+			mPrimitiveCandidateKeepFlags.clear();
+			mSelectedPrimitiveCounts.clear();
+			mTriPairContactCounts.clear();
+			mTriPairContactOffsets.clear();
 
 		mTopologyOwnershipReady = false;
 		mTriShapeReady = false;
@@ -2547,19 +2423,13 @@ namespace dyno
 				mPrimitiveCandidateKeepFlags);
 		}
 
-		if (mFallbackContactCounts.size() != static_cast<uint>(totalFilteredTriPairs))
-			mFallbackContactCounts.resize(totalFilteredTriPairs);
-		mFallbackContactCounts.reset();
-		// Temporarily disable tri-tri fallback to isolate primitive point-face behavior.
-
 		if (mTriPairContactCounts.size() != static_cast<uint>(totalFilteredTriPairs))
 			mTriPairContactCounts.resize(totalFilteredTriPairs);
 		mTriPairContactCounts.reset();
 		cuExecute(totalFilteredTriPairs,
 			NMLQ_SetFinalContactCounts,
 			mTriPairContactCounts,
-			mSelectedPrimitiveCounts,
-			mFallbackContactCounts);
+			mSelectedPrimitiveCounts);
 
 		int totalContacts = mReduce.accumulate(mTriPairContactCounts.begin(), mTriPairContactCounts.size());
 		if (totalContacts <= 0)
@@ -2583,12 +2453,7 @@ namespace dyno
 			mPrimitivePassOffsets,
 			mPrimitiveCandidateKeepFlags,
 			mPrimitiveCandidateContacts,
-			mSelectedPrimitiveCounts,
-			mFallbackContactCounts,
-			mFilteredTri0,
-			mFilteredTri1,
-			mFilteredPatchPairId,
-			view);
+			mSelectedPrimitiveCounts);
 
 		buildCollisionTriSet();
 	}

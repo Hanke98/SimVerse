@@ -209,4 +209,32 @@ namespace dyno
         int idx = global_r * static_cast<int>(mat.ny()) + global_c;
         return mat(sys_id, idx);
     }
+
+    template<typename T>
+    __global__ void PrintVector(DArray2D<T> vec, int sys_id, int length)
+    {
+        if(threadIdx.x != 0)
+            return;
+
+        printf("PrintVector[%d]: ", sys_id);
+        for(int i = 0; i < length; i++)
+            printf("%f\t", vec(sys_id, i));
+        printf("\n");
+    }
+
+    template<typename T>
+    __global__ void SumArray2D(DArray2D<T> arr_src1, DArray2D<T> arr_src2, DArray2D<T> arr_dst, int sys_num, DArray<int> lengths, bool is_sum)
+    {
+        int sys_id = blockIdx.x;
+        if(sys_id >= sys_num)
+            return;
+
+        int len = lengths[sys_id];
+        for(int i = threadIdx.x; i < len; i += blockDim.x)
+        {
+            T a = arr_src1(sys_id, i);
+            T b = arr_src2(sys_id, i);
+            arr_dst(sys_id, i) = is_sum ? (a + b) : (a - b);
+        }
+    }
 }

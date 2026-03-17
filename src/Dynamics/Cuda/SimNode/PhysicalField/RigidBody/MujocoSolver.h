@@ -26,8 +26,12 @@ namespace dyno
     private:
         void ForwardKinematics();
         
+        void NewtonSolver();
+
         void MakeConstraints();
         void MakeJacobian();
+        void ComputeAref();
+        void ComputeRD();
     };
 }
 

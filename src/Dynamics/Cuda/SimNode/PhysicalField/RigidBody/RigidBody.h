@@ -52,20 +52,21 @@ namespace dyno {
         DArray2D<int>       q_offset;       // [env_id, body_id] offset of generalized DoFs;
         DArray2D<Real>      batch_qacc;    // [env_id, dof_idx] generalized acceleration
         DArray2D<Real>      batch_qvel;    // [env_id, dof_idx] generalized velocity
-
+        DArray2D<Real>      batch_aref;    // nc * 1
+        DArray2D<Real>      batch_Jaref;   // J * qacc
+        DArray2D<Real>      batch_imp;
 
         DArray2D<int>       qpos_lengths;       // [env_id, body_id] num of generalized position
         DArray2D<int>       qpos_offset;
         DArray2D<Real>      batch_qpos;     // [env_id, dof_idx] generalized position
         
         DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
+        DArray2D<Real>      batch_qM_inv;
         DArray2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
         DArray2D<Real>      batch_cdofdot; // [env_id, dof_idx] projection basis time derivative
         DArray2D<Real>      batch_crb;     // dense vec num_bodies * 10
 
         DArray2D<Real>      dof_frictionloss;
-
-        DArray<int>         batch_num_constraints;
 
 
         DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body
@@ -87,13 +88,23 @@ namespace dyno {
         DArray2D<Real>      batch_q_inner_force;
         DArray2D<Real>      batch_q_ex_force;
         DArray2D<Real>      batch_ex_acc;
+        DArray2D<Real>      batch_Ma;       // qM * qacc
+        DArray2D<Real>      batch_weight_inv;    // nbody * 1
+        DArray2D<Real>      batch_dof_weight_inv; // nv * 1
+        DArray2D<Real>      batch_dA;       // nc * 1
+        DArray2D<Real>      batch_D;        // nc * 1
+
+        DArray2D<Real>      Mat_temp1;
+        DArray2D<Real>      Mat_temp2;
 
         // For constraints
         DArray2D<Real>               batch_J;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints
         DArray<int>                  num_constraints;   // [env_id] number of constraints in each environment = num_collision_constraints + num_topo_invariant_constraints
         DArray<Vec4i>                num_each_constraint; // [env_id] num of each type of constraint (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
         DArray<Vec4i>                constraint_offset;   // [env_id] offset of each type of constraint in the batch_J (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
-        
+        DArray2D<Real>               batch_constraint_vel;
+
+
         BatchConstraintParas         constraint_paras;
         // Collision
         CollisionConstraintParas     collision_paras;

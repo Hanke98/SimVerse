@@ -37,6 +37,7 @@ namespace dyno
         DArray2D<Real>              depth;             // [env_id, constraint_id] penetration depth of the constraint
         DArray2D<Vec3f>             normal;            // [env_id, constraint_id] contact normal of the constraint
         DArray2D<Vec3f>             point;             // [env_id, constraint_id] contact point of the constraint
+        DArray2D<Real>              mu;                // [env_id, constraint_id] friction coefficient of the constraint
     };
 
     // TODO: Other constraint types

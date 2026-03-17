@@ -399,6 +399,7 @@ namespace dyno
             return;
 
         auto& batch_qM = rigid_body_system.batch_qM;
+        auto& batch_qM_inv = rigid_body_system.batch_qM_inv;
         const int q_start = rigid_body_system.q_offset(env_id, bid);
         const int nv = rigid_body_system.batch_nv[env_id];
         for(int i = 0; i < 6; i++)
@@ -406,9 +407,9 @@ namespace dyno
             {
                 int idx = (q_start + i) * nv + (q_start + j);
                 if (i == j)
-                    batch_qM(env_id, idx) = 1.f / batch_qM(env_id, idx);
+                    batch_qM_inv(env_id, idx) = 1.f / batch_qM(env_id, idx);
                 else
-                    batch_qM(env_id, idx) = 0.f;
+                    batch_qM_inv(env_id, idx) = 0.f;
 
             }
     }
@@ -461,6 +462,7 @@ namespace dyno
             collision_constraints.depth(env_id, idx) = -vertex_trans.y;
             collision_constraints.normal(env_id, idx) = ground_normal;
             collision_constraints.point(env_id, idx) = Vec3f(vertex_trans.x, 0.5f * vertex_trans.y, vertex_trans.z);
+            collision_constraints.mu(env_id, idx) = 0.6f;
             idx += 1;
         }
     }
@@ -658,7 +660,264 @@ namespace dyno
                 printf("\n");
             }
         }
+
+        const Real mu = collisions.mu(env_id, cidx);
+        const int row0 = 4 * cidx;
+        for(int i = 0; i < num_nv; i++)
+        {
+            const Real jn = MatrixAt(Jac_temp2, env_id, cidx, 0, i, Vec2i(3, num_nv));
+            const Real jt1 = MatrixAt(Jac_temp2, env_id, cidx, 1, i, Vec2i(3, num_nv));
+            const Real jt2 = MatrixAt(Jac_temp2, env_id, cidx, 2, i, Vec2i(3, num_nv));
+
+            MatrixAt(J, env_id, row0 + 0, 0, i, Vec2i(1, num_nv)) = jn + mu * jt1;
+            MatrixAt(J, env_id, row0 + 1, 0, i, Vec2i(1, num_nv)) = jn - mu * jt1;
+            MatrixAt(J, env_id, row0 + 2, 0, i, Vec2i(1, num_nv)) = jn + mu * jt2;
+            MatrixAt(J, env_id, row0 + 3, 0, i, Vec2i(1, num_nv)) = jn - mu * jt2;
+        }
         
+    }
+
+    template<typename TDataType>
+    __global__ void PrintJacobian(RigidBody<TDataType> rigid_body_system, int env_id)
+    {
+        if(threadIdx.x != 0)
+            return;
+        const auto& J = rigid_body_system.batch_J;
+        const int num_constraints = rigid_body_system.num_constraints[env_id];
+        const int num_nv = rigid_body_system.batch_nv[env_id];
+
+        for(int i = 0; i < num_constraints; i++)
+        {
+            for(int j = 0; j < num_nv; j++)
+                printf("%f\t", J(env_id, i * num_nv + j));
+            printf("\n");
+        }
+    }
+
+    __device__ Vec4f ComputeKBIP(Real error, const CollisionConstraintParas& collision_paras)
+    {
+        const Real& dmax = collision_paras.dmax;
+        const Real& dmin = collision_paras.dmin;
+        const Real& time_const = collision_paras.time_const;
+        const Real& damp_ratio = collision_paras.damp_ratio;
+        const Real& midpoint = collision_paras.midpoint;
+        const Real& width = collision_paras.width;
+        const Real& power = collision_paras.power;
+
+        Real K = 1.f / (dmax * dmax * time_const * time_const * damp_ratio * damp_ratio);
+        Real B = 2.f / (dmax * time_const);
+
+        Real x = error / width;
+        Real sign = 1.f;
+        x < 0.f ? sign = -1.f : sign = 1.f;
+        x *= sign;
+
+        if(x > 1.f)
+            return Vec4f(K, B, dmax, 0.f);
+        else if(x < 0.f)
+            return Vec4f(K, B, dmin, 0.f);
+
+        Real y, yP;
+        if(x < midpoint)
+        {
+            Real tmp = 1.f / powf(midpoint, power - 1.f);
+            y = tmp * powf(x, power);
+            yP = tmp * power * powf(x, power - 1.f);
+        }
+        else
+        {
+            Real tmp = 1.f / powf(1.f - midpoint, power - 1.f);
+            y = 1.f - tmp * powf(1.f - x, power);
+            yP = tmp * power * powf(1.f - x, power - 1.f);
+        }
+
+        Real I = dmin + y * (dmax - dmin);
+        Real P = sign * yP * (dmax - dmin) / width;
+
+        return Vec4f(K, B, I, P);
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeContactAref(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if (env_id >= num_envs)
+            return;
+
+
+        const int contact_idx = threadIdx.x;
+        if(contact_idx >= rigid_body_system.collision_constraints.collision_nums[env_id])
+            return;
+
+        const int constraint_start = rigid_body_system.constraint_offset[env_id][3];
+        const int num_constraint = rigid_body_system.num_each_constraint[env_id][3];
+
+
+        const auto& collision_constraints = rigid_body_system.collision_constraints;
+        const auto& depth = collision_constraints.depth(env_id, contact_idx);
+        const auto& constraint_vels = rigid_body_system.batch_constraint_vel;
+
+        Vec4f KBIP = ComputeKBIP(depth, rigid_body_system.collision_paras);
+        
+        auto& imp = rigid_body_system.batch_imp;
+        auto& aref = rigid_body_system.batch_aref;
+
+        for(int i = 0; i < 4; i++)
+        {
+            int idx = constraint_start + contact_idx * 4 + i;
+            Real K = KBIP[0];
+            Real B = KBIP[1];
+            Real I = KBIP[2];
+            
+
+            imp(env_id, idx) = I;
+            aref(env_id, idx) = -B * constraint_vels(env_id, idx) + K * I * depth;
+        }
+    }
+
+    __device__ void RotateJacobianRow(DArray2D<Real>& jac_src, DArray2D<Real>& jac_dst, int mat_idx, int num_cols, int sys_id)
+    {
+        for(int i = 0; i < num_cols; i++)
+        {
+            for(int j = 0; j < 3; j++)
+            {
+                MatrixAt(jac_dst, sys_id, mat_idx, j, i, Vec2i(6, num_cols)) = MatrixAt(jac_src, sys_id, mat_idx, j + 3, i, Vec2i(6, num_cols));
+                MatrixAt(jac_dst, sys_id, mat_idx, j + 3, i, Vec2i(6, num_cols)) = MatrixAt(jac_src, sys_id, mat_idx, j, i, Vec2i(6, num_cols));
+            }
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeDiagJMinvJT(RigidBody<TDataType> rigid_body_system, int num_envs, DArray2D<Real> J_temp, DArray2D<Real> J_temp2)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int bid = threadIdx.x;
+        int env_self_bodies = rigid_body_system.batch_bodies[env_id];
+        if(bid >= env_self_bodies)
+            return;
+
+        
+        if(rigid_body_system.is_static(env_id, bid))
+        {
+            rigid_body_system.batch_weight_inv(env_id, bid) = 0.f;
+            return;
+        }
+
+        const int nv = rigid_body_system.batch_nv[env_id];
+        if(nv <= 0)
+        {
+            rigid_body_system.batch_weight_inv(env_id, bid) = 0.f;
+            return;
+        }
+
+        for(int r = 0; r < 6; r++)
+            for(int c = 0; c < nv; c++)
+            {
+                MatrixAt(J_temp, env_id, bid, r, c, Vec2i(6, nv)) = 0.f;
+                MatrixAt(J_temp2, env_id, bid, r, c, Vec2i(6, nv)) = 0.f;
+            }
+
+        const auto& pos = rigid_body_system.batch_pos(env_id, bid);
+        ComputeJac(J_temp, pos, rigid_body_system, env_id, bid, bid);
+        RotateJacobianRow(J_temp, J_temp2, bid, nv, env_id);    // J_temp2 now is jac
+
+        // J_temp(bid) = J_temp2(bid) * qM_inv, where shapes are (6 x nv) * (nv x nv).
+        for(int r = 0; r < 6; r++)
+            for(int c = 0; c < nv; c++)
+            {
+                Real sum = 0.f;
+                for(int k = 0; k < nv; k++)
+                {
+                    const Real a = MatrixAt(J_temp2, env_id, bid, r, k, Vec2i(6, nv));
+                    const Real b = MatrixAt(rigid_body_system.batch_qM_inv, env_id, k, c, Vec2i(nv, nv));
+                    sum += a * b;
+                }
+                MatrixAt(J_temp, env_id, bid, r, c, Vec2i(6, nv)) = sum;
+            }
+
+        Real a00 = 0.f;
+        Real a11 = 0.f;
+        Real a22 = 0.f;
+        for(int k = 0; k < nv; k++)
+        {
+            a00 += MatrixAt(J_temp2, env_id, bid, 0, k, Vec2i(6, nv)) * MatrixAt(J_temp, env_id, bid, 0, k, Vec2i(6, nv));
+            a11 += MatrixAt(J_temp2, env_id, bid, 1, k, Vec2i(6, nv)) * MatrixAt(J_temp, env_id, bid, 1, k, Vec2i(6, nv));
+            a22 += MatrixAt(J_temp2, env_id, bid, 2, k, Vec2i(6, nv)) * MatrixAt(J_temp, env_id, bid, 2, k, Vec2i(6, nv));
+        }
+
+        rigid_body_system.batch_weight_inv(env_id, bid) = (a00 + a11 + a22) / 3.f;
+        
+        
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeContact_dAKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        const int contact_idx = threadIdx.x;
+        const int num_contacts = rigid_body_system.collision_constraints.collision_nums[env_id];
+        if(contact_idx >= num_contacts)
+            return;
+
+        const auto& collision_constraints = rigid_body_system.collision_constraints;
+        const auto& weight_inv = rigid_body_system.batch_weight_inv;
+        int body_A_idx = collision_constraints.body_idxs(env_id, contact_idx).first;
+        int body_B_idx = collision_constraints.body_idxs(env_id, contact_idx).second;
+        Real mu = collision_constraints.mu(env_id, contact_idx);
+
+        Real w = body_B_idx != -1 ? weight_inv(env_id, body_A_idx) + weight_inv(env_id, body_B_idx) : weight_inv(env_id, body_A_idx);
+        Real tmp = w * (1 + mu * mu);
+
+        for(int i = 0; i < 4; i++)
+            rigid_body_system.batch_dA(env_id, contact_idx * 4 + i) = tmp;
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeRKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int cidx = threadIdx.x;
+        const int num_constraints = rigid_body_system.num_constraints[env_id];
+        if(cidx >= num_constraints)
+            return;
+
+        const int collition_offset = rigid_body_system.constraint_offset[env_id][3];
+        auto& R = rigid_body_system.batch_D;
+        const auto& imp = rigid_body_system.batch_imp;
+        const auto& dA = rigid_body_system.batch_dA;
+
+        
+        R(env_id, cidx) = (1.f - imp(env_id, cidx)) * dA(env_id, cidx) / imp(env_id, cidx);
+        if(cidx >= collition_offset)
+        {
+            const Real mu = rigid_body_system.collision_constraints.mu(env_id, (cidx - collition_offset) / 4);
+            R(env_id, cidx) *= 2.f * mu * mu;
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeDKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int cidx = threadIdx.x;
+        const int num_constraints = rigid_body_system.num_constraints[env_id];
+        if(cidx >= num_constraints)
+            return;
+
+        // auto& D = ri
+        auto& D = rigid_body_system.batch_D;
+        D(env_id, cidx) = 1.f / D(env_id, cidx);
     }
 }
 
@@ -713,8 +972,13 @@ namespace dyno
         // 2. malloc the solver states based on the DoF count
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qacc, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qvel, num_envs, max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_aref, num_envs, num_max_constraints);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_imp, num_envs, num_max_constraints);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_Jaref, num_envs, num_max_constraints);
+        
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM, num_envs, max_nv * max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM_inv, num_envs, max_nv * max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_cdof, num_envs, max_nv * 6);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_cdofdot, num_envs, max_nv * 6);
 
@@ -724,6 +988,11 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_inner_force, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_ex_force, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_ex_acc, num_envs, max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_Ma, num_envs, max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_weight_inv, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_dof_weight_inv, num_envs, max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_dA, num_envs, num_max_constraints);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_D, num_envs, num_max_constraints);
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_crb, num_envs, max_bodies * 10);
 
@@ -731,15 +1000,17 @@ namespace dyno
         INIT_DYNO_ARRAY(rigid_body_system->num_constraints, num_envs);
         INIT_DYNO_ARRAY(rigid_body_system->num_each_constraint, num_envs);
         INIT_DYNO_ARRAY(rigid_body_system->constraint_offset, num_envs);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_vel, num_envs, num_max_constraints);
 
         INIT_DYNO_ARRAY(rigid_body_system->collision_constraints.collision_nums, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.body_idxs, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.depth, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.normal, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.point, num_envs, 1024);
+        INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.mu, num_envs, 1024);
 
-
-        
+        INIT_DYNO_ARRAY2D(rigid_body_system->Mat_temp1, num_envs, num_max_constraints * max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->Mat_temp2, num_envs, num_max_constraints * max_nv);
 
 
         spdlog::info("[MujocoSolver Solver] Allocated solver state arrays based on DoF counts.");
@@ -775,10 +1046,11 @@ namespace dyno
 
         MakeConstraints();
 
-        MakeJacobian();
-
         // TODO: compute comvel
         // TODO: compute RNE
+
+
+        NewtonSolver();
 
         TrickAddGravityKernel<TDataType><<<1, 1>>>(*rigid_body_system, env_infos->gravities, env_infos->num_envs);
         cudaDeviceSynchronize();
@@ -788,12 +1060,22 @@ namespace dyno
         TrickMassMatInverse<TDataType><<<32, 512>>>(*rigid_body_system, env_infos->num_envs);
         cudaDeviceSynchronize();
 
-        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_q_ex_force,
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM_inv, rigid_body_system->batch_q_ex_force,
             rigid_body_system->batch_ex_acc, rigid_body_system->batch_nv, rigid_body_system->batch_nv, env_infos->num_envs);
         cudaDeviceSynchronize();
 
         rigid_body_system->batch_qacc.assign(rigid_body_system->batch_ex_acc);
 
+    }
+
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::NewtonSolver()
+    {
+        MakeJacobian();
+
+        ComputeAref();
+
+        ComputeRD();
     }
 
     template<typename TDataType>
@@ -880,12 +1162,85 @@ namespace dyno
         // Function2Pt::plus(rigid_body_system->num_constraints, rigid_body_system->num_topo_invariant_constraints, rigid_body_system->collision_constraints.collision_nums);
         
         rigid_body_system->batch_J.reset();
-        
-        DArray2D<Real> Mat_temp1(num_envs, rigid_body_system->batch_J.size() / num_envs);   // num_constraints * nv
-        DArray2D<Real> Mat_temp2(num_envs, rigid_body_system->batch_J.size() / num_envs);
 
-        ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, Mat_temp1, Mat_temp2);
+        ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, rigid_body_system->Mat_temp1, rigid_body_system->Mat_temp2);
         cudaDeviceSynchronize();
+
+        PrintJacobian<TDataType><<<1, 1>>>(*rigid_body_system, 0);
+        cudaDeviceSynchronize();
+
+        //
+    }
+
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::ComputeAref()
+    {
+        // constraint_vel = J * qvel
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_qvel, rigid_body_system->batch_constraint_vel,
+            rigid_body_system->num_constraints, rigid_body_system->batch_nv, num_envs);
+        cudaDeviceSynchronize();
+
+        // TODO: 等式约束
+        // TODO: 摩擦损失约束
+        // TODO: 关节限位约束
+
+        ComputeContactAref<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_aref, 0, 16);
+        // cudaDeviceSynchronize();
+
+
+        // Compute constraint residuals Jaref
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_qacc,
+            rigid_body_system->batch_Ma, rigid_body_system->batch_nv, rigid_body_system->batch_nv, num_envs);
+        cudaDeviceSynchronize();
+
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_qacc,
+            rigid_body_system->batch_Jaref, rigid_body_system->num_constraints, rigid_body_system->batch_nv, num_envs);
+        cudaDeviceSynchronize();
+
+        SumArray2D<<<32, 128>>>(rigid_body_system->batch_Jaref, rigid_body_system->batch_aref, rigid_body_system->batch_Jaref,
+            num_envs, rigid_body_system->num_constraints, false);
+        cudaDeviceSynchronize();
+    }
+
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::ComputeRD()
+    {
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+    
+        ComputeDiagJMinvJT<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, rigid_body_system->Mat_temp1, rigid_body_system->Mat_temp2);
+        cudaDeviceSynchronize();
+
+        // TODO: compute diag(JM^(-1)J^T) for joints
+
+        rigid_body_system->batch_dA.reset();
+
+        // TODO: handling equality constraints
+        // TODO: handling friction loss constraints
+        // TODO: handling joint limit constraints
+        ComputeContact_dAKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+        ComputeRKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0, 16);
+        cudaDeviceSynchronize();
+
+        ComputeDKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0, 16);
+        cudaDeviceSynchronize();
+
     }
 
     DEFINE_UNIQUE_CLASS(MujocoSolver, DataType3f);

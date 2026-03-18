@@ -223,7 +223,19 @@ namespace dyno
     }
 
     template<typename T>
-    __global__ void SumArray2D(DArray2D<T> arr_src1, DArray2D<T> arr_src2, DArray2D<T> arr_dst, int sys_num, DArray<int> lengths, bool is_sum)
+    __global__ void PrintVector(DArray<T> vec, int length)
+    {
+        if(threadIdx.x != 0)
+            return;
+
+        printf("PrintVector1D: ");
+        for(int i = 0; i < length; i++)
+            printf("%f\t", vec[i]);
+        printf("\n");
+    }
+
+    template<typename T>
+    __global__ void SumArray2D(DArray2D<T> arr_src1, DArray2D<T> arr_src2, DArray2D<T> arr_dst, int sys_num, DArray<int> lengths, bool is_sum=true)
     {
         int sys_id = blockIdx.x;
         if(sys_id >= sys_num)
@@ -237,4 +249,19 @@ namespace dyno
             arr_dst(sys_id, i) = is_sum ? (a + b) : (a - b);
         }
     }
+
+    // Variable-size batched Cholesky solve for packed row-major storage.
+    // DArray2D index meaning here:
+    // - first index: system/environment id
+    // - second index: flattened row-major data of that system
+    // A(sys, i * leading_dim + j) corresponds to A_ij of that system.
+    // b(sys, i) and x(sys, i) are packed vectors per system.
+    // NOTE: This kernel factorizes A in-place (A becomes its lower-triangular Cholesky factor L).
+    __global__ void BatchCholeskySolveVarSizeKernel(
+        DArray2D<Real> A_packed,         // [sys, leading_dim * leading_dim], row-major, overwritten by L
+        const DArray2D<Real> b_packed,   // [sys, leading_dim]
+        DArray2D<Real> x_packed,         // [sys, leading_dim]
+        const DArray<int> n_list,        // [env], actual n for each environment
+        int leading_dim,
+        int num_envs);
 }

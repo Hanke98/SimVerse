@@ -42,9 +42,8 @@ namespace dyno {
 
         DArray<int>         batch_bodies;  // [env_id] num of rigid bodies in each environment
         DArray<int>         batch_body_offset; // [env_id] flattened rigid body offset in topo position/rotation arrays
-        
+    
         DArray<int>         batch_nv;      // [env_id] num of generalized DoFs
-
         DArray2D<int>       nv_offset;     // [env_id, body_idx] 
         
         
@@ -55,6 +54,12 @@ namespace dyno {
         DArray2D<Real>      batch_aref;    // nc * 1
         DArray2D<Real>      batch_Jaref;   // J * qacc
         DArray2D<Real>      batch_imp;
+        DArray<Real>        batch_energy;
+        DArray2D<Real>      batch_constraint_energy;    
+        DArray2D<int>       batch_unquads;   // [env_id, constraint_idx]
+        DArray2D<Real>      batch_H;
+        DArray2D<Real>      batch_dx;    // [env_id, dof_idx] delta for current Newton iteration
+
 
         DArray2D<int>       qpos_lengths;       // [env_id, body_id] num of generalized position
         DArray2D<int>       qpos_offset;
@@ -87,8 +92,9 @@ namespace dyno {
         // solving cache
         DArray2D<Real>      batch_q_inner_force;
         DArray2D<Real>      batch_q_ex_force;
-        DArray2D<Real>      batch_ex_acc;
+        DArray2D<Real>      batch_q_ex_acc;
         DArray2D<Real>      batch_Ma;       // qM * qacc
+        DArray2D<Real>      batch_grad;     // nv * 1, Newton gradient: Ma - q_ex_force - J^T * constraint_force
         DArray2D<Real>      batch_weight_inv;    // nbody * 1
         DArray2D<Real>      batch_dof_weight_inv; // nv * 1
         DArray2D<Real>      batch_dA;       // nc * 1
@@ -103,6 +109,7 @@ namespace dyno {
         DArray<Vec4i>                num_each_constraint; // [env_id] num of each type of constraint (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
         DArray<Vec4i>                constraint_offset;   // [env_id] offset of each type of constraint in the batch_J (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
         DArray2D<Real>               batch_constraint_vel;
+        DArray2D<Real>               batch_constraint_force;
 
 
         BatchConstraintParas         constraint_paras;

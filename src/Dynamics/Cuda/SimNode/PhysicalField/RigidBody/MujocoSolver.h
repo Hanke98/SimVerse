@@ -32,6 +32,10 @@ namespace dyno
         void MakeJacobian();
         void ComputeAref();
         void ComputeRD();
+        void ComputeEnergy();
+        void BuildHessian();
+        void UpdateGradient();
+        void SolveSystem();
     };
 }
 

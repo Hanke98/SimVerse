@@ -3,6 +3,7 @@
 #include <thrust/device_ptr.h>
 #include "../../Utils/utils.h"
 #include "Algorithm.h"
+#include <Eigen/Dense>
 
 namespace dyno
 {
@@ -378,12 +379,31 @@ namespace dyno
 
         auto& q_inner_force = rigid_body_system.batch_q_inner_force;
 
-        q_inner_force(env_id, 0) = gravities[env_id].x;
-        q_inner_force(env_id, 1) = gravities[env_id].y;
-        q_inner_force(env_id, 2) = gravities[env_id].z;
+        // q_inner_force(env_id, 0) = gravities[env_id].x;
+        // q_inner_force(env_id, 1) = gravities[env_id].y;
+        // q_inner_force(env_id, 2) = gravities[env_id].z;
 
-        printf("Env: %d, q_inner_force: %f, %f, %f\n", env_id, q_inner_force(env_id, 0), q_inner_force(env_id, 1), q_inner_force(env_id, 2));
+        // printf("Env: %d, q_inner_force: %f, %f, %f\n", env_id, q_inner_force(env_id, 0), q_inner_force(env_id, 1), q_inner_force(env_id, 2));
 
+        const int num_bodies = rigid_body_system.batch_bodies[env_id];
+        const Vec3f g = gravities[env_id];
+
+        for(int bid = 0; bid < num_bodies; bid++)
+        {
+            if(rigid_body_system.is_static(env_id, bid))
+                continue;
+
+            if(rigid_body_system.parent_idx(env_id, bid) != -1)
+                continue;
+
+            const int q_start = rigid_body_system.q_offset(env_id, bid);
+            const Real mass = rigid_body_system.batch_mass(env_id, bid);
+
+            // Follow the test convention in pseudocode: q_inner_force is set to -m*g.
+            q_inner_force(env_id, q_start + 0) = -mass * g.x;
+            q_inner_force(env_id, q_start + 1) = -mass * g.y;
+            q_inner_force(env_id, q_start + 2) = -mass * g.z;
+        }
     }
 
     template<typename TDataType>    // only for test, only for all bodies without constraints 
@@ -919,6 +939,161 @@ namespace dyno
         auto& D = rigid_body_system.batch_D;
         D(env_id, cidx) = 1.f / D(env_id, cidx);
     }
+
+    template<typename TDataType>
+    __global__ void ContactAndJointLimitEnergyKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int num_constraints = rigid_body_system.num_constraints[env_id];
+        const int constraint_start = rigid_body_system.constraint_offset[env_id][2];
+
+        int cidx = threadIdx.x + constraint_start;
+        if(cidx >= num_constraints)
+            return ;
+
+        auto& constraint_force = rigid_body_system.batch_constraint_force;
+        auto& constraint_energy = rigid_body_system.batch_constraint_energy;
+        const Real& Jaref_cidx = rigid_body_system.batch_Jaref(env_id, cidx);
+        const Real& D_cidx = rigid_body_system.batch_D(env_id, cidx);
+
+        constraint_force(env_id, cidx) = - D_cidx * Jaref_cidx;
+        rigid_body_system.batch_unquads(env_id, cidx) = 0;
+        if(Jaref_cidx > 0)
+        {
+            constraint_force(env_id, cidx) = 0.f;
+            rigid_body_system.batch_unquads(env_id, cidx) = 1;
+        }
+        else
+            constraint_energy(env_id, cidx) += 0.5f * D_cidx * Jaref_cidx * Jaref_cidx;
+    }
+
+    template<typename TDataType>
+    __global__ void InertialEnergyKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int num_nv = rigid_body_system.batch_nv[env_id];
+        const int dof_idx = threadIdx.x;
+        if(dof_idx >= num_nv)
+            return;
+
+        const auto& Ma = rigid_body_system.batch_Ma(env_id, dof_idx);
+        const auto& q_ex_force = rigid_body_system.batch_q_ex_force(env_id, dof_idx);
+        const auto& q_acc = rigid_body_system.batch_qacc(env_id, dof_idx);
+        const auto& q_ex_acc = rigid_body_system.batch_q_ex_acc(env_id, dof_idx);
+        auto& energy = rigid_body_system.batch_energy[env_id];
+
+        atomicAdd(&energy, 0.5f * (Ma - q_ex_force) * (q_acc - q_ex_acc));
+    }
+
+    template<typename TDataType>
+    __global__ void ReduceConstraintEnergyKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        __shared__ Real sh_sum[256];
+
+        const int tid = threadIdx.x;
+        const int num_constraints = rigid_body_system.num_constraints[env_id];
+        const auto& constraint_energy = rigid_body_system.batch_constraint_energy;
+
+        Real local_sum = 0.f;
+        for(int cidx = tid; cidx < num_constraints; cidx += blockDim.x)
+            local_sum += constraint_energy(env_id, cidx);
+
+        sh_sum[tid] = local_sum;
+        __syncthreads();
+
+        for(int stride = blockDim.x / 2; stride > 0; stride >>= 1)
+        {
+            if(tid < stride)
+                sh_sum[tid] += sh_sum[tid + stride];
+            __syncthreads();
+        }
+
+        if(tid == 0)
+            rigid_body_system.batch_energy[env_id] = sh_sum[0];
+    }
+
+    template<typename TDataType>
+    __global__ void BuildHessianKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        const int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int nv = rigid_body_system.batch_nv[env_id];
+        const int num_constraints = rigid_body_system.num_constraints[env_id];
+
+        const int row = blockIdx.y * blockDim.y + threadIdx.y;
+        const int col = blockIdx.z * blockDim.x + threadIdx.x;
+
+        if(row >= nv || col > row)
+            return;
+
+        Real sum = 0.f;
+        const auto& J = rigid_body_system.batch_J;
+        const auto& D = rigid_body_system.batch_D;
+        const auto& unquads = rigid_body_system.batch_unquads;
+
+        // H = qM + J^T * diag(D_eff) * J, D_eff[cidx] = 0 for unquad constraints.
+        for(int cidx = 0; cidx < num_constraints; cidx++)
+        {
+            if(unquads(env_id, cidx) != 0)
+                continue;
+
+            const Real d = D(env_id, cidx);
+            const Real jr = MatrixAt(J, env_id, cidx, row, Vec2i(num_constraints, nv));
+            const Real jc = MatrixAt(J, env_id, cidx, col, Vec2i(num_constraints, nv));
+            sum += jr * d * jc;
+        }
+
+        const Real h = MatrixAt(rigid_body_system.batch_qM, env_id, row, col, Vec2i(nv, nv)) + sum;
+        MatrixAt(rigid_body_system.batch_H, env_id, row, col, Vec2i(nv, nv)) = h;
+        if(col != row)
+            MatrixAt(rigid_body_system.batch_H, env_id, col, row, Vec2i(nv, nv)) = h;
+    }
+
+    template<typename TDataType>
+    __global__ void UpdateGradientKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        const int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int dof_idx = threadIdx.x;
+        const int nv = rigid_body_system.batch_nv[env_id];
+        if(dof_idx >= nv)
+            return;
+
+        const int num_constraints = rigid_body_system.num_constraints[env_id];
+        const auto& J = rigid_body_system.batch_J;
+        const auto& constraint_force = rigid_body_system.batch_constraint_force;
+
+        Real jt_f = 0.f;
+        for(int cidx = 0; cidx < num_constraints; cidx++)
+        {
+            const Real j = MatrixAt(J, env_id, cidx, dof_idx, Vec2i(num_constraints, nv));
+            jt_f += j * constraint_force(env_id, cidx);
+        }
+
+        rigid_body_system.batch_grad(env_id, dof_idx) =
+            - rigid_body_system.batch_Ma(env_id, dof_idx)
+            + rigid_body_system.batch_q_ex_force(env_id, dof_idx)
+            + jt_f;
+    }
+
+    
+
+    
+
 }
 
 
@@ -975,7 +1150,11 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_aref, num_envs, num_max_constraints);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_imp, num_envs, num_max_constraints);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_Jaref, num_envs, num_max_constraints);
-        
+        INIT_DYNO_ARRAY(rigid_body_system->batch_energy, num_envs);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_energy, num_envs, num_max_constraints);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_unquads, num_envs, num_max_constraints);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_H, num_envs, max_nv * max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_dx, num_envs, max_nv);
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM, num_envs, max_nv * max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM_inv, num_envs, max_nv * max_nv);
@@ -987,8 +1166,9 @@ namespace dyno
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_inner_force, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_ex_force, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_ex_acc, num_envs, max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_ex_acc, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_Ma, num_envs, max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_grad, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_weight_inv, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_dof_weight_inv, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_dA, num_envs, num_max_constraints);
@@ -1001,6 +1181,7 @@ namespace dyno
         INIT_DYNO_ARRAY(rigid_body_system->num_each_constraint, num_envs);
         INIT_DYNO_ARRAY(rigid_body_system->constraint_offset, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_vel, num_envs, num_max_constraints);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_force, num_envs, num_max_constraints);
 
         INIT_DYNO_ARRAY(rigid_body_system->collision_constraints.collision_nums, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.body_idxs, num_envs, 1024);
@@ -1039,7 +1220,7 @@ namespace dyno
         // 1. Reset forces and accelerations
         rigid_body_system->batch_q_inner_force.reset();
         rigid_body_system->batch_q_ex_force.reset();
-        rigid_body_system->batch_ex_acc.reset();
+        rigid_body_system->batch_q_ex_acc.reset();
 
         // Update forward kinematics and subtree com
         ForwardKinematics();
@@ -1050,21 +1231,24 @@ namespace dyno
         // TODO: compute RNE
 
 
-        NewtonSolver();
-
-        TrickAddGravityKernel<TDataType><<<1, 1>>>(*rigid_body_system, env_infos->gravities, env_infos->num_envs);
+        TrickAddGravityKernel<TDataType><<<32, 512>>>(*rigid_body_system, env_infos->gravities, env_infos->num_envs);
         cudaDeviceSynchronize();
 
-        rigid_body_system->batch_q_ex_force.assign(rigid_body_system->batch_q_inner_force);
+        // q_ex_force = -q_inner_force
+        SumArray2D<<<32, 128>>>(rigid_body_system->batch_q_ex_force, rigid_body_system->batch_q_inner_force,
+            rigid_body_system->batch_q_ex_force, env_infos->num_envs, rigid_body_system->batch_nv, false);
+        cudaDeviceSynchronize();
 
         TrickMassMatInverse<TDataType><<<32, 512>>>(*rigid_body_system, env_infos->num_envs);
         cudaDeviceSynchronize();
 
         BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM_inv, rigid_body_system->batch_q_ex_force,
-            rigid_body_system->batch_ex_acc, rigid_body_system->batch_nv, rigid_body_system->batch_nv, env_infos->num_envs);
+            rigid_body_system->batch_q_ex_acc, rigid_body_system->batch_nv, rigid_body_system->batch_nv, env_infos->num_envs);
         cudaDeviceSynchronize();
 
-        rigid_body_system->batch_qacc.assign(rigid_body_system->batch_ex_acc);
+        rigid_body_system->batch_qacc.assign(rigid_body_system->batch_q_ex_acc);
+
+        NewtonSolver();
 
     }
 
@@ -1076,6 +1260,35 @@ namespace dyno
         ComputeAref();
 
         ComputeRD();
+
+        // Iterate 0
+        ComputeEnergy();
+        BuildHessian();
+        UpdateGradient();
+        SolveSystem();
+
+        // TODO:
+            // 计算惯性缩放因子 scale
+            // inertia_sum = sum of diagonal elements of qM
+            // scale = 1 / inertia_sum
+
+        // TODO: iterate more times
+        int iter = 0;
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+
+        while(iter < 1)
+        {
+            // todo: line search
+
+            // Newton step for minimization: qacc <- qacc - dx, where H * dx = grad.
+            SumArray2D<<<32, 128>>>(rigid_body_system->batch_qacc, rigid_body_system->batch_dx,
+                rigid_body_system->batch_qacc, num_envs, rigid_body_system->batch_nv);
+            cudaDeviceSynchronize();
+
+            iter++;
+        }
     }
 
     template<typename TDataType>
@@ -1207,6 +1420,12 @@ namespace dyno
         SumArray2D<<<32, 128>>>(rigid_body_system->batch_Jaref, rigid_body_system->batch_aref, rigid_body_system->batch_Jaref,
             num_envs, rigid_body_system->num_constraints, false);
         cudaDeviceSynchronize();
+
+        printf("Jaref:\n");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_Jaref, 0, 16);
+        cudaDeviceSynchronize();
+
+
     }
 
     template<typename TDataType>
@@ -1232,15 +1451,105 @@ namespace dyno
         ComputeRKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0, 16);
-        cudaDeviceSynchronize();
-
         ComputeDKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
         PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0, 16);
         cudaDeviceSynchronize();
 
+    }
+
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::ComputeEnergy()
+    {
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+        
+        rigid_body_system->batch_energy.reset();
+        rigid_body_system->batch_constraint_energy.reset();
+        // 1. equality constraint energy
+        // 2. friction loss constraint energy
+
+        // 3. contact constraint energy and joint limit constraint energy
+        ContactAndJointLimitEnergyKernel<TDataType><<<num_envs, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+        ReduceConstraintEnergyKernel<TDataType><<<num_envs, 256>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+        
+        // // PrintVector<<<1, 1>>>(rigid_body_system->batch_constraint_force, 0, 16);
+        // cudaDeviceSynchronize();
+
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_energy, 1);
+        // cudaDeviceSynchronize();
+
+        InertialEnergyKernel<TDataType><<<num_envs, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_energy, 1);
+        // cudaDeviceSynchronize();
+    }
+
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::BuildHessian()
+    {
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+
+        rigid_body_system->batch_H.reset();
+
+        const int max_nv = rigid_body_system->max_bodies * 6;
+        dim3 block(16, 16, 1);
+        dim3 grid(num_envs,
+            (max_nv + block.y - 1) / block.y,
+            (max_nv + block.x - 1) / block.x);
+
+        BuildHessianKernel<TDataType><<<grid, block>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+        
+        printf("Hessian:\n");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_H, 0, 6 * 6);
+        cudaDeviceSynchronize();
+    }
+
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::UpdateGradient()
+    {
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+
+        rigid_body_system->batch_grad.reset();
+
+        UpdateGradientKernel<TDataType><<<num_envs, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+        printf("Gradient:\n");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_grad, 0, 6);
+        cudaDeviceSynchronize();
+    }
+
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::SolveSystem()
+    {
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+        rigid_body_system->batch_dx.reset();
+
+        auto& H = rigid_body_system->batch_H;
+        auto& grad = rigid_body_system->batch_grad;
+        auto& x = rigid_body_system->batch_dx; // reuse qacc as solution
+
+        
+        BatchCholeskySolveVarSizeKernel<<<num_envs, 1>>>(H, grad, x, rigid_body_system->batch_nv, rigid_body_system->max_bodies * 6, num_envs);
+        cudaDeviceSynchronize();
+
+        printf("dx (solution):\n");
+        PrintVector<<<1, 1>>>(x, 0, 6);
+        cudaDeviceSynchronize();
     }
 
     DEFINE_UNIQUE_CLASS(MujocoSolver, DataType3f);

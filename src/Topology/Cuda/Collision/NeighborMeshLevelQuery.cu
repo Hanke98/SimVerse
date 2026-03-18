@@ -64,6 +64,7 @@ namespace
 		dyno::DArray<uint> patch2Shape;
 		dyno::DArray<int> shape2RigidBody;
 		Real dHat = Real(0);
+		Real edgeEdgeActivationMargin = Real(0);
 		bool verticesInRestWorld = false;
 	};
 
@@ -95,6 +96,23 @@ namespace
 	DYN_FUNC inline unsigned long long NMLQ_EncodeEdgePrimitiveKey(int edgeId)
 	{
 		return NMLQ_EdgePrimitiveKeyMask | static_cast<unsigned long long>(edgeId);
+	}
+
+	DYN_FUNC inline bool NMLQ_IsEdgePrimitiveKey(unsigned long long key)
+	{
+		return (key & NMLQ_EdgePrimitiveKeyMask) != 0;
+	}
+
+	DYN_FUNC inline bool NMLQ_IsPreferredEdgeContactType(
+		bool edgePrimitive,
+		bool preferEdgeFace,
+		dyno::ContactType type)
+	{
+		if (!edgePrimitive)
+			return true;
+		return preferEdgeFace
+			? type == dyno::ContactType::CT_EDGE_FACE
+			: type == dyno::ContactType::CT_EDGE_EDGE;
 	}
 
 	template<typename Coord>
@@ -743,13 +761,17 @@ namespace
 		if (sourceDir.normSquared() <= epsSqr || targetDir.normSquared() <= epsSqr)
 			return false;
 
-		auto pq = sourceSegment.proximity(targetSegment);
-		Coord cSource = pq.startPoint();
-		Coord cTarget = pq.endPoint();
-		Coord pqVec = cTarget - cSource;
-		Real gap = pqVec.norm();
-		if (gap > view.dHat)
-			return false;
+			auto pq = sourceSegment.proximity(targetSegment);
+			Coord cSource = pq.startPoint();
+			Coord cTarget = pq.endPoint();
+			Coord pqVec = cTarget - cSource;
+			Real gap = pqVec.norm();
+			Real edgeEdgeActivationMargin = view.edgeEdgeActivationMargin + view.dHat;
+			if (edgeEdgeActivationMargin < Real(0))
+				edgeEdgeActivationMargin = Real(0);
+			// Activate near edge-edge pairs using the dedicated margin plus the existing shell thickness.
+			if (gap > edgeEdgeActivationMargin)
+				return false;
 
 		if (targetEdgeId < 0 || targetEdgeId >= view.edgeNormalsWorld.size())
 			return false;
@@ -796,13 +818,13 @@ namespace
 		typename View::CoordType& nTarget,
 		typename View::RealType& depth,
 		dyno::ContactType& contactType)
-		{
-			using Real = typename View::RealType;
-			using Coord = typename View::CoordType;
+	{
+		using Real = typename View::RealType;
+		using Coord = typename View::CoordType;
 
-			const Real epsBary = Real(1e-5);
-			Coord p;
-			if (!NMLQ_GetWorldVertex(view, sourceVertexId, sourceShapeId, p))
+		const Real epsBary = Real(1e-5);
+		Coord p;
+		if (!NMLQ_GetWorldVertex(view, sourceVertexId, sourceShapeId, p))
 			return false;
 
 		Coord r = dyno::TPoint3D<Real>(p).project(targetTriangle).origin;
@@ -828,63 +850,19 @@ namespace
 			depth = signedDistance < Real(0) ? -signedDistance : Real(0);
 			contactType = dyno::ContactType::CT_VERTEX_FACE;
 			return true;
-			}
+		}
 
-			if (regionType == NMLQ_REGION_EDGE)
-			{
-				if (targetTriId < 0 || targetTriId >= view.triangleEdges.size())
-					return false;
+		if (regionType == NMLQ_REGION_EDGE)
+		{
+			// Let the dedicated edge passes handle edge-origin contacts.
+			return false;
+		}
 
-				int targetEdgeId = view.triangleEdges[targetTriId][localEdgeId];
-				if (targetEdgeId == EMPTY)
-					return false;
-
-				dyno::TSegment3D<Real> targetSegment;
-				if (!NMLQ_GetWorldEdge(view, targetEdgeId, targetShapeId, targetSegment))
-					return false;
-
-				int sourceEdgeId = NMLQ_SelectSourceEdgeForTargetEdge(
-					view,
-					sourceVertexId,
-					sourceTriId,
-					sourceShapeId,
-					targetEdgeId,
-					targetSegment);
-				if (sourceEdgeId == EMPTY)
-					return false;
-
-				if (!NMLQ_BuildEdgeEdgeContact(view, sourceEdgeId, sourceShapeId, targetEdgeId, targetShapeId, contactPoint, nTarget, depth))
-					return false;
-				contactType = dyno::ContactType::CT_EDGE_EDGE;
-				return true;
-			}
-
-			if (regionType == NMLQ_REGION_VERTEX)
-			{
-				if (targetTriId < 0 || targetTriId >= view.triangles.size())
-					return false;
-
-				auto targetTriIndices = view.triangles[targetTriId];
-				int targetVertexId = targetTriIndices[localVertexId];
-				int sourceEdgeId = EMPTY;
-				int targetEdgeId = EMPTY;
-				if (!NMLQ_SelectEdgePairFromVertices(
-					view,
-					sourceVertexId,
-					sourceTriId,
-					sourceShapeId,
-					targetVertexId,
-					targetTriId,
-					targetShapeId,
-					sourceEdgeId,
-					targetEdgeId))
-					return false;
-
-				if (!NMLQ_BuildEdgeEdgeContact(view, sourceEdgeId, sourceShapeId, targetEdgeId, targetShapeId, contactPoint, nTarget, depth))
-					return false;
-				contactType = dyno::ContactType::CT_EDGE_EDGE;
-				return true;
-			}
+		if (regionType == NMLQ_REGION_VERTEX)
+		{
+			// Let the dedicated edge passes handle edge-origin contacts.
+			return false;
+		}
 
 		return false;
 	}
@@ -911,6 +889,8 @@ namespace
 		if (!NMLQ_GetWorldEdge(view, sourceEdgeId, sourceShapeId, sourceSegment))
 			return false;
 
+		(void)sourceTriId;
+
 		auto pq = sourceSegment.proximity(targetTriangle);
 		Coord cTarget = pq.endPoint();
 		int regionType = NMLQ_REGION_INVALID;
@@ -921,7 +901,31 @@ namespace
 			return false;
 
 		if (regionType == NMLQ_REGION_FACE)
-			return false;
+		{
+			Coord faceNormal = targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size()
+				? view.faceNormalsWorld[targetTriId]
+				: NLQ_BuildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
+			nTarget = NLQ_NormalizeOrFallback(faceNormal, NLQ_StablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
+
+			Coord p0 = sourceSegment.startPoint();
+			Coord p1 = sourceSegment.endPoint();
+			Real d0 = (p0 - targetTriangle.v[0]).dot(nTarget);
+			Real d1 = (p1 - targetTriangle.v[0]).dot(nTarget);
+			Real minSignedDistance = d0 < d1 ? d0 : d1;
+			Real edgeActivation = view.edgeEdgeActivationMargin + view.dHat;
+			if (edgeActivation < Real(0))
+				edgeActivation = Real(0);
+
+			// Prefer a face-supported contact once the edge enters the face shell.
+			if (minSignedDistance > edgeActivation)
+				return false;
+
+			contactPoint = cTarget;
+			// Edge-face only contributes activation, normal, and point; vertex-face carries penetration depth.
+			depth = Real(0);
+			contactType = dyno::ContactType::CT_EDGE_FACE;
+			return true;
+		}
 
 		if (targetTriId < 0 || targetTriId >= view.triangleEdges.size())
 			return false;
@@ -940,37 +944,16 @@ namespace
 
 		if (regionType == NMLQ_REGION_VERTEX)
 		{
-			auto targetTriIndices = view.triangles[targetTriId];
-			int targetVertexId = targetTriIndices[localVertexId];
-			dyno::TSegment3D<Real> sourceSegmentWorld;
-			if (!NMLQ_GetWorldEdge(view, sourceEdgeId, sourceShapeId, sourceSegmentWorld))
-				return false;
-
 			int bestTargetEdge = EMPTY;
 			Real bestDist2 = std::numeric_limits<Real>::max();
 			Real bestAlign = Real(-1);
+			int edge0 = EMPTY;
+			int edge1 = EMPTY;
+			if (!NMLQ_GetLocalIncidentEdges(view.triangleEdges[targetTriId], localVertexId, edge0, edge1))
+				return false;
 
-			bool targetIncidentUsed = false;
-			if (targetVertexId >= 0 && targetVertexId < view.vertexIncidentEdges.size())
-			{
-				auto& incident = view.vertexIncidentEdges[targetVertexId];
-				for (int i = 0; i < incident.size(); ++i)
-				{
-					targetIncidentUsed = true;
-					NMLQ_TryBestTargetEdgeCandidate(view, incident[i], targetShapeId, sourceSegmentWorld, bestTargetEdge, bestDist2, bestAlign);
-				}
-			}
-
-			if (!targetIncidentUsed)
-			{
-				int edge0 = EMPTY;
-				int edge1 = EMPTY;
-				if (NMLQ_GetLocalIncidentEdges(view.triangleEdges[targetTriId], localVertexId, edge0, edge1))
-				{
-					NMLQ_TryBestTargetEdgeCandidate(view, edge0, targetShapeId, sourceSegmentWorld, bestTargetEdge, bestDist2, bestAlign);
-					NMLQ_TryBestTargetEdgeCandidate(view, edge1, targetShapeId, sourceSegmentWorld, bestTargetEdge, bestDist2, bestAlign);
-				}
-			}
+			NMLQ_TryBestTargetEdgeCandidate(view, edge0, targetShapeId, sourceSegment, bestTargetEdge, bestDist2, bestAlign);
+			NMLQ_TryBestTargetEdgeCandidate(view, edge1, targetShapeId, sourceSegment, bestTargetEdge, bestDist2, bestAlign);
 
 			if (bestTargetEdge == EMPTY)
 				return false;
@@ -1467,17 +1450,11 @@ namespace
 		if (slotId >= primitivePassCounts.size())
 			return;
 
-		int pairId = slotId / NMLQ_PASS_COUNT;
-		int passType = slotId % NMLQ_PASS_COUNT;
-		if (passType == NMLQ_PASS_TRI0_EDGE || passType == NMLQ_PASS_TRI1_EDGE)
-		{
-			// Temporarily disable edge passes for debugging.
-			primitivePassCounts[slotId] = 0;
-			return;
-		}
+			int pairId = slotId / NMLQ_PASS_COUNT;
+			int passType = slotId % NMLQ_PASS_COUNT;
 
-		if (pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
-		{
+			if (pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
+			{
 			primitivePassCounts[slotId] = 0;
 			return;
 		}
@@ -1515,20 +1492,15 @@ namespace
 		if (slotId >= primitivePassOffsets.size() || slotId >= primitivePassCounts.size())
 			return;
 
-		int count = primitivePassCounts[slotId];
-		if (count <= 0)
-			return;
+			int count = primitivePassCounts[slotId];
+			if (count <= 0)
+				return;
 
-		int pairId = slotId / NMLQ_PASS_COUNT;
-		int passType = slotId % NMLQ_PASS_COUNT;
-		if (passType == NMLQ_PASS_TRI0_EDGE || passType == NMLQ_PASS_TRI1_EDGE)
-		{
-			// Temporarily disable edge passes for debugging.
-			return;
-		}
+			int pairId = slotId / NMLQ_PASS_COUNT;
+			int passType = slotId % NMLQ_PASS_COUNT;
 
-		if (pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
-			return;
+			if (pairId >= filteredTri0.size() || pairId >= filteredTri1.size() || pairId >= filteredPatchPairId.size())
+				return;
 
 		NMLQTriPairContext<View> ctx;
 		if (!NMLQ_BuildTriPairContext(view, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId], ctx))
@@ -1572,15 +1544,35 @@ namespace
 
 		unsigned long long key = primitiveCandidateKeys[sortedIdx];
 		int groupEnd = sortedIdx;
+		const bool edgePrimitive = NMLQ_IsEdgePrimitiveKey(key);
+		bool preferEdgeFace = false;
+		if (edgePrimitive)
+		{
+			for (int i = sortedIdx; i < primitiveCandidateKeys.size() && primitiveCandidateKeys[i] == key; ++i)
+			{
+				int rawIdx = primitiveCandidateSortedIndices[i];
+				if (rawIdx >= 0 && rawIdx < primitiveCandidateContacts.size()
+					&& primitiveCandidateContacts[rawIdx].contactType == dyno::ContactType::CT_EDGE_FACE)
+				{
+					preferEdgeFace = true;
+					break;
+				}
+			}
+		}
+
 		Real minDepth = std::numeric_limits<Real>::max();
 		while (groupEnd < primitiveCandidateKeys.size() && primitiveCandidateKeys[groupEnd] == key)
 		{
 			int rawIdx = primitiveCandidateSortedIndices[groupEnd];
 			if (rawIdx >= 0 && rawIdx < primitiveCandidateContacts.size())
 			{
-				Real depth = primitiveCandidateContacts[rawIdx].interpenetration;
-				if (depth < minDepth)
-					minDepth = depth;
+				dyno::ContactType type = primitiveCandidateContacts[rawIdx].contactType;
+				if (NMLQ_IsPreferredEdgeContactType(edgePrimitive, preferEdgeFace, type))
+				{
+					Real depth = primitiveCandidateContacts[rawIdx].interpenetration;
+					if (depth < minDepth)
+						minDepth = depth;
+				}
 			}
 			++groupEnd;
 		}
@@ -1592,6 +1584,10 @@ namespace
 		{
 			int rawIdx = primitiveCandidateSortedIndices[i];
 			if (rawIdx < 0 || rawIdx >= primitiveCandidateKeepFlags.size() || rawIdx >= primitiveCandidateContacts.size())
+				continue;
+
+			dyno::ContactType type = primitiveCandidateContacts[rawIdx].contactType;
+			if (!NMLQ_IsPreferredEdgeContactType(edgePrimitive, preferEdgeFace, type))
 				continue;
 
 			Real depth = primitiveCandidateContacts[rawIdx].interpenetration;
@@ -1610,6 +1606,10 @@ namespace
 					if (prevRawIdx < 0 || prevRawIdx >= primitiveCandidateKeepFlags.size()
 						|| prevRawIdx >= primitiveCandidateContacts.size()
 						|| primitiveCandidateKeepFlags[prevRawIdx] <= 0)
+						continue;
+
+					dyno::ContactType prevType = primitiveCandidateContacts[prevRawIdx].contactType;
+					if (!NMLQ_IsPreferredEdgeContactType(edgePrimitive, preferEdgeFace, prevType))
 						continue;
 
 					Real prevDepth = primitiveCandidateContacts[prevRawIdx].interpenetration;
@@ -2230,17 +2230,18 @@ namespace dyno
 			mFaceNormalsWorld,
 			mEdgeNormalsWorld,
 			mTriangleAabbsWorld,
-			mVertexIncidentEdges,
-			mFaceAssignedVertexOffsets,
-			mFaceAssignedVertexIndices,
-			mFaceAssignedEdgeOffsets,
-			mFaceAssignedEdgeIndices,
-			patchPairs,
-			this->patch2ShapeData(),
-			this->inShape2RigidBodyIds()->getData(),
-			this->varDHead()->getValue(),
-			this->varInputVerticesInRestWorld()->getValue()
-		};
+				mVertexIncidentEdges,
+				mFaceAssignedVertexOffsets,
+				mFaceAssignedVertexIndices,
+				mFaceAssignedEdgeOffsets,
+				mFaceAssignedEdgeIndices,
+				patchPairs,
+				this->patch2ShapeData(),
+				this->inShape2RigidBodyIds()->getData(),
+				this->varDHead()->getValue(),
+				this->varEdgeEdgeActivationMargin()->getValue(),
+				this->varInputVerticesInRestWorld()->getValue()
+			};
 
 		// Precompute world-space triangle AABBs, face normals, edge normals for coarse culling and narrow-phase reuse.
 		cuExecute(triCount, NMLQ_PrepareTriangleWorldData, view);

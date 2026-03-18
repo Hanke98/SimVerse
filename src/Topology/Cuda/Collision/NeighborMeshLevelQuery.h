@@ -8,9 +8,9 @@ namespace dyno
 	{
 		DECLARE_TCLASS(NeighborMeshLevelQuery, TDataType)
 
-	public:
-		typedef typename TDataType::Real Real;
-		typedef typename TDataType::Coord Coord;
+		public:
+			typedef typename TDataType::Real Real;
+			typedef typename TDataType::Coord Coord;
 		typedef typename TDataType::Matrix Matrix;
 		typedef typename TopologyModule::Triangle Triangle;
 		typedef typename TopologyModule::Edge Edge;
@@ -22,6 +22,9 @@ namespace dyno
 
 		NeighborMeshLevelQuery();
 		~NeighborMeshLevelQuery() override;
+
+	public:
+		DEF_VAR(Real, EdgeEdgeActivationMargin, Real(0.003), "Additional activation margin for edge-edge contacts");
 
 	protected:
 		bool initializeImpl() override;

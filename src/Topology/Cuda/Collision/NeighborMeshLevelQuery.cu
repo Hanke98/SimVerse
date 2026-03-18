@@ -843,7 +843,7 @@ namespace
 			nTarget = NLQ_NormalizeOrFallback(faceNormal, NLQ_StablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
 
 			Real signedDistance = (p - targetTriangle.v[0]).dot(nTarget);
-			if (signedDistance > view.dHat)
+			if (signedDistance > view.dHat || signedDistance < -0.5)
 				return false;
 
 			contactPoint = r;
@@ -1637,6 +1637,87 @@ namespace
 		}
 	}
 
+	template<typename ContactPair, typename Real>
+	__global__ void NMLQ_SuppressRedundantEdgeFaceAgainstVertexFace(
+		dyno::DArray<int> primitiveCandidateKeepFlags,
+		dyno::DArray<int> primitivePassCounts,
+		dyno::DArray<int> primitivePassOffsets,
+		dyno::DArray<ContactPair> primitiveCandidateContacts,
+		Real positionNearEps,
+		Real sameDirectionDotEps)
+	{
+		int pairId = threadIdx.x + (blockIdx.x * blockDim.x);
+		int slotBase = NMLQ_GetPairPassSlot(pairId, 0);
+		if (pairId < 0
+			|| slotBase < 0
+			|| slotBase + (NMLQ_PASS_COUNT - 1) >= primitivePassCounts.size()
+			|| slotBase >= primitivePassOffsets.size())
+			return;
+
+		int rawCount = 0;
+		for (int passType = 0; passType < NMLQ_PASS_COUNT; ++passType)
+			rawCount += primitivePassCounts[slotBase + passType];
+		if (rawCount <= 0)
+			return;
+
+		const int rawBegin = primitivePassOffsets[slotBase];
+		const Real positionNearEps2 = positionNearEps * positionNearEps;
+		const Real minNormalNorm2 = Real(1e-12);
+
+		for (int rawIdx = rawBegin; rawIdx < rawBegin + rawCount; ++rawIdx)
+		{
+			if (rawIdx < 0
+				|| rawIdx >= primitiveCandidateKeepFlags.size()
+				|| rawIdx >= primitiveCandidateContacts.size()
+				|| primitiveCandidateKeepFlags[rawIdx] <= 0)
+				continue;
+
+			ContactPair edgeFace = primitiveCandidateContacts[rawIdx];
+			if (edgeFace.contactType != dyno::ContactType::CT_EDGE_FACE)
+				continue;
+
+			auto edgeNormal = edgeFace.normal1;
+			const Real edgeNormalNorm2 = edgeNormal.normSquared();
+			if (edgeNormalNorm2 <= minNormalNorm2)
+				continue;
+			edgeNormal /= sqrt(edgeNormalNorm2);
+
+			bool suppressEdgeFace = false;
+			for (int otherIdx = rawBegin; otherIdx < rawBegin + rawCount; ++otherIdx)
+			{
+				if (otherIdx < 0
+					|| otherIdx >= primitiveCandidateKeepFlags.size()
+					|| otherIdx >= primitiveCandidateContacts.size()
+					|| primitiveCandidateKeepFlags[otherIdx] <= 0
+					|| otherIdx == rawIdx)
+					continue;
+
+				ContactPair vertexFace = primitiveCandidateContacts[otherIdx];
+				if (vertexFace.contactType != dyno::ContactType::CT_VERTEX_FACE)
+					continue;
+
+				auto delta = vertexFace.pos1 - edgeFace.pos1;
+				if (delta.normSquared() > positionNearEps2)
+					continue;
+
+				auto vertexNormal = vertexFace.normal1;
+				const Real vertexNormalNorm2 = vertexNormal.normSquared();
+				if (vertexNormalNorm2 <= minNormalNorm2)
+					continue;
+				vertexNormal /= sqrt(vertexNormalNorm2);
+
+				if (edgeNormal.dot(vertexNormal) >= Real(1) - sameDirectionDotEps)
+				{
+					suppressEdgeFace = true;
+					break;
+				}
+			}
+
+			if (suppressEdgeFace)
+				primitiveCandidateKeepFlags[rawIdx] = 0;
+		}
+	}
+
 	__global__ void NMLQ_CountSelectedPrimitiveContactsPerTriPair(
 		dyno::DArray<int> selectedPrimitiveCounts,
 		dyno::DArray<int> primitivePassCounts,
@@ -2389,18 +2470,35 @@ namespace dyno
 				mPrimitiveCandidateKeys.begin() + mPrimitiveCandidateKeys.size(),
 				mPrimitiveCandidateSortedIndices.begin());
 
-			{
-				uint pDims = cudaGridSize((uint)totalPrimitiveCandidates, BLOCK_SIZE);
-					NMLQ_MarkMinDepthCandidatesPerPrimitiveKey<ContactPair, Real><<<pDims, BLOCK_SIZE>>>(
-						mPrimitiveCandidateKeepFlags,
-						mPrimitiveCandidateKeys,
+				{
+					uint pDims = cudaGridSize((uint)totalPrimitiveCandidates, BLOCK_SIZE);
+						NMLQ_MarkMinDepthCandidatesPerPrimitiveKey<ContactPair, Real><<<pDims, BLOCK_SIZE>>>(
+							mPrimitiveCandidateKeepFlags,
+							mPrimitiveCandidateKeys,
 						mPrimitiveCandidateSortedIndices,
 						mPrimitiveCandidateContacts,
 						Real(1e-6),
+							Real(1e-4));
+					cuSynchronize();
+				}
+
+				if (totalFilteredTriPairs > 0)
+				{
+					Real crossTypePositionEps = this->varEdgeEdgeActivationMargin()->getData() * Real(0.5);
+					if (crossTypePositionEps < Real(1e-4))
+						crossTypePositionEps = Real(1e-4);
+
+					uint pDims = cudaGridSize((uint)totalFilteredTriPairs, BLOCK_SIZE);
+					NMLQ_SuppressRedundantEdgeFaceAgainstVertexFace<ContactPair, Real><<<pDims, BLOCK_SIZE>>>(
+						mPrimitiveCandidateKeepFlags,
+						mPrimitivePassCounts,
+						mPrimitivePassOffsets,
+						mPrimitiveCandidateContacts,
+						crossTypePositionEps,
 						Real(1e-4));
-				cuSynchronize();
+					cuSynchronize();
+				}
 			}
-		}
 
 		if (mSelectedPrimitiveCounts.size() != static_cast<uint>(totalFilteredTriPairs))
 			mSelectedPrimitiveCounts.resize(totalFilteredTriPairs);

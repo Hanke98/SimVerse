@@ -48,7 +48,7 @@ int main() {
             return false;
         return true;
     }();
-    bool enableSaveScreen = false;
+    bool enableSaveScreen = true;
     bool render_collision = false;
     std::string savePath = getAssetPath() + "../examples/Cuda/RigidBody/RobotArm_Collision/screenSave/";
     Vec3f base{ -0.0f, 0.5f, -0.0f };

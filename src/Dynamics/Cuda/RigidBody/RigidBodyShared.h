@@ -45,7 +45,7 @@ namespace dyno
 			bodyId = 0;
 			mass = -1.0f;
 			inertia = SquareMatrix<Real, 3>(0.0f);
-			friction = 1.0f;
+			friction = 0.03f;
 			restitution = 0.0f;
 			motionType = BodyType::Dynamic;
 			collisionMask = CT_AllObjects;

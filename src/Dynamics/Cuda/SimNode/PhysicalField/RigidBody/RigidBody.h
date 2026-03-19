@@ -67,6 +67,8 @@ namespace dyno {
         
         DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
         DArray2D<Real>      batch_qM_inv;
+        DArray2D<Real>      batch_qM_diag_elem;
+        DArray<Real>        batch_scale;
         DArray2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
         DArray2D<Real>      batch_cdofdot; // [env_id, dof_idx] projection basis time derivative
         DArray2D<Real>      batch_crb;     // dense vec num_bodies * 10
@@ -99,6 +101,8 @@ namespace dyno {
         DArray2D<Real>      batch_dof_weight_inv; // nv * 1
         DArray2D<Real>      batch_dA;       // nc * 1
         DArray2D<Real>      batch_D;        // nc * 1
+        DArray<int>         is_converged;
+        DArray<Real>        sys_alpha;
 
         DArray2D<Real>      Mat_temp1;
         DArray2D<Real>      Mat_temp2;

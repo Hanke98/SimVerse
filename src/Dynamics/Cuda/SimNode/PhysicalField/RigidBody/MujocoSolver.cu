@@ -379,12 +379,6 @@ namespace dyno
 
         auto& q_inner_force = rigid_body_system.batch_q_inner_force;
 
-        // q_inner_force(env_id, 0) = gravities[env_id].x;
-        // q_inner_force(env_id, 1) = gravities[env_id].y;
-        // q_inner_force(env_id, 2) = gravities[env_id].z;
-
-        // printf("Env: %d, q_inner_force: %f, %f, %f\n", env_id, q_inner_force(env_id, 0), q_inner_force(env_id, 1), q_inner_force(env_id, 2));
-
         const int num_bodies = rigid_body_system.batch_bodies[env_id];
         const Vec3f g = gravities[env_id];
 
@@ -946,6 +940,8 @@ namespace dyno
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
             return;
+        if(rigid_body_system.is_converged[env_id])
+            return;
 
         const int num_constraints = rigid_body_system.num_constraints[env_id];
         const int constraint_start = rigid_body_system.constraint_offset[env_id][2];
@@ -976,6 +972,8 @@ namespace dyno
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
             return;
+        if(rigid_body_system.is_converged[env_id])
+            return;
 
         const int num_nv = rigid_body_system.batch_nv[env_id];
         const int dof_idx = threadIdx.x;
@@ -996,6 +994,8 @@ namespace dyno
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
+            return;
+        if(rigid_body_system.is_converged[env_id])
             return;
 
         __shared__ Real sh_sum[256];
@@ -1027,6 +1027,8 @@ namespace dyno
     {
         const int env_id = blockIdx.x;
         if(env_id >= num_envs)
+            return;
+        if(rigid_body_system.is_converged[env_id])
             return;
 
         const int nv = rigid_body_system.batch_nv[env_id];
@@ -1067,6 +1069,8 @@ namespace dyno
         const int env_id = blockIdx.x;
         if(env_id >= num_envs)
             return;
+        if(rigid_body_system.is_converged[env_id])
+            return;
 
         const int dof_idx = threadIdx.x;
         const int nv = rigid_body_system.batch_nv[env_id];
@@ -1090,10 +1094,88 @@ namespace dyno
             + jt_f;
     }
 
-    
+    template<typename TDataType>
+    __global__ void ComputeScale(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
 
-    
 
+        int qidx = threadIdx.x;
+        int nv = rigid_body_system.batch_nv[env_id];
+        if(qidx >= nv)
+            return;
+
+        auto& qM_diag = rigid_body_system.batch_qM_diag_elem;
+        qM_diag(env_id, qidx) = rigid_body_system.batch_qM(env_id, qidx * nv + qidx);
+
+        __syncthreads();
+
+        if(qidx == 0)
+        {
+            Real sum_qM_diag = 0.f;
+            for(int i = 0; i < nv; i++)
+                sum_qM_diag += qM_diag(env_id, i);
+            rigid_body_system.batch_scale[env_id] = 1.f / sum_qM_diag;
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void BatchNewtonIterationKernel(RigidBody<TDataType> rigid_body_system, int num_envs, int max_iters)
+    {
+        int env_idx = blockIdx.x;
+        if(env_idx >= num_envs)
+            return;
+
+        __shared__ bool converged; 
+
+        int num_nv = rigid_body_system.batch_nv[env_idx];
+        int nc = rigid_body_system.num_constraints[env_idx];
+
+        int iter = 0;
+
+        while(iter < max_iters)
+        {
+            ;
+        }
+
+
+    }
+
+    // template<typename TDataType>
+    // __global__ void SearchAlphaKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    // {
+    //     int env_id = blockIdx.x;
+    //     if (env_id >= num_envs)
+    //         return;
+    //     if(rigid_body_system.is_converged[env_id])
+    //         return;
+
+
+    // }
+    
+    template<typename TDataType>
+    __global__ void CheckConvergenceKernel(RigidBody<TDataType> rigid_body_system, int num_envs, Real eps)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        if(rigid_body_system.is_converged[env_id])
+            return;
+
+        const auto& scale = rigid_body_system.batch_scale[env_id];
+        const auto& grad = rigid_body_system.batch_grad;
+
+        Real grad_square_sum = 0.f;
+
+        for(int i = 0; i < rigid_body_system.batch_nv[env_id]; i++)
+            grad_square_sum += scale * grad(env_id, i) * grad(env_id, i);
+
+        if(sqrt(grad_square_sum) < eps)
+            rigid_body_system.is_converged[env_id] = 1;
+    }
+ 
 }
 
 
@@ -1158,6 +1240,8 @@ namespace dyno
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM, num_envs, max_nv * max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM_inv, num_envs, max_nv * max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM_diag_elem, num_envs, max_nv);
+        INIT_DYNO_ARRAY(rigid_body_system->batch_scale, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_cdof, num_envs, max_nv * 6);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_cdofdot, num_envs, max_nv * 6);
 
@@ -1173,6 +1257,9 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_dof_weight_inv, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_dA, num_envs, num_max_constraints);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_D, num_envs, num_max_constraints);
+        INIT_DYNO_ARRAY(rigid_body_system->is_converged, num_envs);
+        INIT_DYNO_ARRAY(rigid_body_system->sys_alpha, num_envs);
+        
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_crb, num_envs, max_bodies * 10);
 
@@ -1255,6 +1342,11 @@ namespace dyno
     template<typename TDataType>
     void MujocoSolver<TDataType>::NewtonSolver()
     {
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+        rigid_body_system->is_converged.reset();
+
         MakeJacobian();
 
         ComputeAref();
@@ -1267,25 +1359,45 @@ namespace dyno
         UpdateGradient();
         SolveSystem();
 
-        // TODO:
-            // 计算惯性缩放因子 scale
-            // inertia_sum = sum of diagonal elements of qM
-            // scale = 1 / inertia_sum
+        ComputeScale<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        
+        // rigid_body_system->sys_alpha.reset();
 
         // TODO: iterate more times
         int iter = 0;
-        auto& env_infos = this->env_infos;
-        auto& rigid_body_system = this->rigid_body;
-        const int num_envs = env_infos->num_envs;
-
-        while(iter < 1)
+        while(iter < 10)
         {
-            // todo: line search
+            // TODO: line search
 
-            // Newton step for minimization: qacc <- qacc - dx, where H * dx = grad.
+
+            // Update qacc      qacc += α * dx
             SumArray2D<<<32, 128>>>(rigid_body_system->batch_qacc, rigid_body_system->batch_dx,
-                rigid_body_system->batch_qacc, num_envs, rigid_body_system->batch_nv);
+                rigid_body_system->batch_qacc, num_envs, rigid_body_system->batch_nv, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
+
+            // Update Ma        Ma += α * qM * dx
+            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_dx, rigid_body_system->batch_Ma,
+                rigid_body_system->batch_nv, rigid_body_system->batch_nv, num_envs, true, rigid_body_system->is_converged);
+            cudaDeviceSynchronize();
+            // Update Jaref     Jaref += α * J * dx
+            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref,
+                rigid_body_system->num_constraints, rigid_body_system->batch_nv, num_envs, true, rigid_body_system->is_converged);
+            cudaDeviceSynchronize();
+
+
+            ComputeEnergy();
+            UpdateGradient();
+
+            CheckConvergenceKernel<<<32, 128>>>(*rigid_body_system, num_envs, 1e-8f);
+            cudaDeviceSynchronize();
+            Reduction<int> reduce_converged;
+            int total_converged = reduce_converged.accumulate(rigid_body_system->is_converged.begin(), num_envs);
+            spdlog::info("[MujocoSolver Solver] Iteration {}, converged environments: {}/{}", iter, total_converged, num_envs);
+            if(total_converged == num_envs)
+                break;
+
+            BuildHessian();
+            SolveSystem();
 
             iter++;
         }
@@ -1544,7 +1656,7 @@ namespace dyno
         auto& x = rigid_body_system->batch_dx; // reuse qacc as solution
 
         
-        BatchCholeskySolveVarSizeKernel<<<num_envs, 1>>>(H, grad, x, rigid_body_system->batch_nv, rigid_body_system->max_bodies * 6, num_envs);
+        BatchCholeskySolveVarSizeKernel<<<num_envs, 1>>>(H, grad, x, rigid_body_system->batch_nv, rigid_body_system->max_bodies * 6, num_envs, rigid_body_system->is_converged);
         cudaDeviceSynchronize();
 
         printf("dx (solution):\n");

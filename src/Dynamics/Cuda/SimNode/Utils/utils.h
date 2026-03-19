@@ -98,7 +98,8 @@ namespace dyno
     }
 
     template<typename T>
-    __global__ void BatchDenseMatrixVectorMul(DArray2D<T> mat, DArray2D<T> vec, DArray2D<T> out, DArray<int> rows, DArray<int> cols, int num_sys);
+    __global__ void BatchDenseMatrixVectorMul(DArray2D<T> mat, DArray2D<T> vec, DArray2D<T> out, 
+        DArray<int> rows, DArray<int> cols, int num_sys, bool is_incremental=false, DArray<int> skip_flag = DArray<int>());
 
     template<typename T>
     __device__ void DenseAnyMatrixMatrixMul(const DArray2D<T>& matA, const DArray2D<T>& matB, DArray2D<T>& mat_out, 
@@ -250,6 +251,24 @@ namespace dyno
         }
     }
 
+    template<typename T>
+    __global__ void SumArray2D(DArray2D<T> arr_src1, DArray2D<T> arr_src2, DArray2D<T> arr_dst, int sys_num, DArray<int> lengths, DArray<int> skip_flag, bool is_sum=true)
+    {
+        int sys_id = blockIdx.x;
+        if(sys_id >= sys_num)
+            return;
+        if(skip_flag[sys_id])
+            return;
+
+        int len = lengths[sys_id];
+        for(int i = threadIdx.x; i < len; i += blockDim.x)
+        {
+            T a = arr_src1(sys_id, i);
+            T b = arr_src2(sys_id, i);
+            arr_dst(sys_id, i) = is_sum ? (a + b) : (a - b);
+        }
+    }
+
     // Variable-size batched Cholesky solve for packed row-major storage.
     // DArray2D index meaning here:
     // - first index: system/environment id
@@ -263,5 +282,5 @@ namespace dyno
         DArray2D<Real> x_packed,         // [sys, leading_dim]
         const DArray<int> n_list,        // [env], actual n for each environment
         int leading_dim,
-        int num_envs);
+        int num_envs, DArray<int> is_converged);
 }

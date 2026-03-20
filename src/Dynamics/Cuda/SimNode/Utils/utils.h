@@ -220,7 +220,7 @@ namespace dyno
         printf("PrintVector[%d]: ", sys_id);
         for(int i = 0; i < length; i++)
             printf("%f\t", vec(sys_id, i));
-        printf("\n");
+        printf("\n\n");
     }
 
     template<typename T>
@@ -282,5 +282,5 @@ namespace dyno
         DArray2D<Real> x_packed,         // [sys, leading_dim]
         const DArray<int> n_list,        // [env], actual n for each environment
         int leading_dim,
-        int num_envs, DArray<int> is_converged);
+        int num_envs, DArray<int> skip_flag=DArray<int>());
 }

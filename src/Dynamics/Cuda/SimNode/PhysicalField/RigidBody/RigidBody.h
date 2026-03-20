@@ -39,6 +39,7 @@ namespace dyno {
 
         int                 max_bodies;
         DArray2D<int>       is_static;      // [env_id, body_id] whether the rigid body is static or dynamic
+        DArray2D<int>       is_isolated;    // [env_id, body_id] whether the rigid body is isolated (not in contact with any other body)
 
         DArray<int>         batch_bodies;  // [env_id] num of rigid bodies in each environment
         DArray<int>         batch_body_offset; // [env_id] flattened rigid body offset in topo position/rotation arrays
@@ -67,6 +68,7 @@ namespace dyno {
         
         DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
         DArray2D<Real>      batch_qM_inv;
+        // DArray2D<Real>      batch_qM_L;     // [env_id, dof_idx] lower triangular matrix L in the LDL^T decomposition of the mass matrix
         DArray2D<Real>      batch_qM_diag_elem;
         DArray<Real>        batch_scale;
         DArray2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
@@ -121,6 +123,12 @@ namespace dyno {
         CollisionConstraintParas     collision_paras;
         BatchCollisionConstraints    collision_constraints;
         
+
+        // For joint
+        DArray2D<int>           joint_type;     // [env_id, body_id] type of joint (0: none, 1: hinge, 2: slide, 3: ball)
+        DArray2D<Real>          joint_qpos;
+        DArray2D<int>           joint_qpos_offset;
+
 
         // Shape information for rendering and collision handling
         DArray2D<int>           shape_type;    // [body_id] type

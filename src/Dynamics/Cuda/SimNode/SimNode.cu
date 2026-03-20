@@ -43,8 +43,8 @@ namespace dyno
             render_boxes[render_idx].center = boxes(env_id, local_sid).center;
             render_boxes[render_idx].extent = boxes(env_id, local_sid).halfLength;
 
-            Mat3f rot = boxes(env_id, local_sid).rot.toMatrix3x3();
-
+            Mat3f rot = boxes(env_id, local_sid).rot.toMatrix3x3(); 
+            
             render_boxes[render_idx].u = rot * Vec3f(1.f, 0.f, 0.f);
             render_boxes[render_idx].v = rot * Vec3f(0.f, 1.f, 0.f);
             render_boxes[render_idx].w = rot * Vec3f(0.f, 0.f, 1.f);
@@ -413,9 +413,12 @@ namespace dyno
             shape_idx_host(0, 0) = 0;
 
             boxes_host(0, 0).center = Vec3f(0.f, 0.f, 0.0f);
-            boxes_host(0, 0).halfLength = Vec3f(0.4f, 0.4f, 0.4f);
+            boxes_host(0, 0).halfLength = Vec3f(0.2f, 0.1f, 0.1f);
+            // boxes_host(0, 0).rot = Quat<Real>(-0.545f, -0.635f, -0.313f, 0.449f);
 
-            body_pos_host(0, 0) = Vec3f(0.f, 5.f, 0.0f);
+            body_pos_host(0, 0) = Vec3f(0.f, 1.f, 0.0f);
+            batch_quat_host(0, 0) = Quat<Real>(-0.545f, -0.635f, -0.313f, 0.449f);
+            body_rot_host(0, 0) = batch_quat_host(0, 0).toMatrix3x3();
 
             // 1) Count shapes in each environment.
             for (int eid = 0; eid < envs; ++eid)
@@ -527,7 +530,7 @@ namespace dyno
 
             // Mass
             CArray2D<Real> mass_host(envs, bodies_per_env);
-            mass_host(0, 0) = 1.0f;
+            mass_host(0, 0) = 1000.0f;
             rigid_bodies.batch_mass.assign(mass_host);
             
             for(int i = 0; i < total_render_shapes; i++)

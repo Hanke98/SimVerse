@@ -40,13 +40,14 @@ namespace dyno
         const DArray<int> n_list,
         int leading_dim,
         int num_envs,
-        DArray<int> is_converged)
+        DArray<int> skip_flag)
     {
         const int env_id = blockIdx.x;
         if(env_id >= num_envs)
             return;
-        if(is_converged[env_id])
-            return;
+        if(skip_flag.size() > 0)
+            if(skip_flag[env_id])
+                return;
 
         if(threadIdx.x != 0)
             return;

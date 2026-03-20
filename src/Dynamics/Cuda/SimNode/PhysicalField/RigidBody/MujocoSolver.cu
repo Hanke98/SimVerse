@@ -56,9 +56,14 @@ namespace dyno
 
 
             auto& pos = rigid_body_system.batch_pos;
+            auto& quat = rigid_body_system.batch_quat;
+            auto& rot_mat = rigid_body_system.batch_rot;
             pos(env_id, bid).x = qpos(env_id, qpos_start); 
             pos(env_id, bid).y = qpos(env_id, qpos_start + 1);
             pos(env_id, bid).z = qpos(env_id, qpos_start + 2);
+            quat(env_id, bid) = Quat<Real>(qpos(env_id, qpos_start + 3), qpos(env_id, qpos_start + 4), qpos(env_id, qpos_start + 5), qpos(env_id, qpos_start + 6));
+            rot_mat(env_id, bid) = quat(env_id, bid).toMatrix3x3();
+
             printf("Env %d, Body %d, Position: (%f, %f, %f)\n", 
                 env_id, bid, pos(env_id, bid).x, pos(env_id, bid).y, pos(env_id, bid).z);
         }
@@ -90,6 +95,7 @@ namespace dyno
         {
             const int parent_idx = rigid_body_system.parent_idx(env_id, bid);
             const int is_static = rigid_body_system.is_static(env_id, bid);
+            auto& is_isolated = rigid_body_system.is_isolated;
 
             if (parent_idx == -1)
             {
@@ -102,10 +108,32 @@ namespace dyno
                 qpos_num(env_id, bid) = 7;
                 nv += 6;
                 nqpos += 7;
+                is_isolated(env_id, bid) = 1;
             }
             else
             {
-                // TODO: For articulated bodies
+                is_isolated(env_id, parent_idx) = 0;    // parent is not isolated if it has children
+                is_isolated(env_id, bid) = 0;           // non-root body is not isolated
+
+                const int& joint_type = rigid_body_system.joint_type(env_id, bid);
+                if(joint_type < 3)  // hinge or slide
+                {
+                    q_index(env_id, bid) = nv;
+                    q_num(env_id, bid) = 1;
+                    qpos_index(env_id, bid) = nqpos;
+                    qpos_num(env_id, bid) = 1;
+                    nv += 1;
+                    nqpos += 1;
+                }
+                else
+                {
+                    q_index(env_id, bid) = nv;
+                    q_num(env_id, bid) = 3;
+                    qpos_index(env_id, bid) = nqpos;
+                    qpos_num(env_id, bid) = 4;
+                    nv += 3;
+                    nqpos += 4;
+                }
             }
             printf("Env %d, Body %d, NV: %d\n", env_id, bid, nv);
             printf("Env %d, Body %d, Nqpos: %d\n", env_id, bid, nqpos);
@@ -152,7 +180,13 @@ namespace dyno
             }
             else
             {
-
+                const auto& joint_qpos = rigid_body_system.joint_qpos;
+                const auto& joint_qpos_start = rigid_body_system.joint_qpos_offset(env_id, bid);
+                if(rigid_body_system.joint_type(env_id, bid) < 3)
+                    qpos(env_id, qpos_start) = joint_qpos(env_id, joint_qpos_start);
+                else
+                    for(int i = 0; i < 4; i++)
+                        qpos(env_id, qpos_start + i) = joint_qpos(env_id, joint_qpos_start + i);
             }
             
             printf("Env %d, Body %d, q_pos: %f %f %f %f %f %f %f\n", env_id, bid, qpos(env_id, qpos_start), qpos(env_id, qpos_start + 1), qpos(env_id, qpos_start + 2), qpos(env_id, qpos_start + 3), qpos(env_id, qpos_start + 4), qpos(env_id, qpos_start + 5), qpos(env_id, qpos_start + 6));
@@ -248,7 +282,11 @@ namespace dyno
         }
 
         for(int bidx = 0; bidx < num_bodies; bidx++)
+        {
             subtree_com(env_id, bidx) /= subtree_mass(env_id, bidx);
+            printf("Env %d, Body %d, Subtree COM: (%f, %f, %f)\n", env_id, bidx, subtree_com(env_id, bidx).x, subtree_com(env_id, bidx).y, subtree_com(env_id, bidx).z);
+        }
+            
 
     }
 
@@ -298,12 +336,12 @@ namespace dyno
                     cdof(env_id, (q_start + i + 3) * 6 + j) = rot_axis[j];
                 }
             }
-            // printf("Env %d, Body %d, cdof:\n", env_id, bid);
-            // for(int i = 0; i < 6; i++)
-            //     printf("  cdof[%d]: %f %f, %f %f, %f %f\n", i, cdof(env_id, (q_start + i) * 6 + 0),
-            //         cdof(env_id, (q_start + i) * 6 + 1), cdof(env_id, (q_start + i) * 6 + 2),
-            //         cdof(env_id, (q_start + i) * 6 + 3), cdof(env_id, (q_start + i) * 6 + 4), 
-            //         cdof(env_id, (q_start + i) * 6 + 5));
+            printf("Env %d, Body %d, cdof:\n", env_id, bid);
+            for(int i = 0; i < 6; i++)
+                printf("  cdof[%d]: %f %f, %f %f, %f %f\n", i, cdof(env_id, (q_start + i) * 6 + 0),
+                    cdof(env_id, (q_start + i) * 6 + 1), cdof(env_id, (q_start + i) * 6 + 2),
+                    cdof(env_id, (q_start + i) * 6 + 3), cdof(env_id, (q_start + i) * 6 + 4), 
+                    cdof(env_id, (q_start + i) * 6 + 5));
             
         }
     }
@@ -336,6 +374,10 @@ namespace dyno
         const int q_start = rigid_body_system.q_offset(env_id, bid);
         const int nv = rigid_body_system.batch_nv[env_id];
 
+        Real height = rigid_body_system.boxes(env_id, bid).halfLength.y * 2.f;
+        Real width = rigid_body_system.boxes(env_id, bid).halfLength.z * 2.f;
+        Real depth = rigid_body_system.boxes(env_id, bid).halfLength.x * 2.f;
+
         if(parent_idx != -1)
         {
             ;
@@ -351,9 +393,9 @@ namespace dyno
             batch_qM(env_id, (q_start + 1) * nv + (q_start + 1)) = mass;
             batch_qM(env_id, (q_start + 2) * nv + (q_start + 2)) = mass;
 
-            batch_qM(env_id, (q_start + 3) * nv + (q_start + 3)) = mass * (0.8f * 0.8f + 0.8f * 0.8f) / 12.f;
-            batch_qM(env_id, (q_start + 4) * nv + (q_start + 4)) = mass * (0.8f * 0.8f + 0.8f * 0.8f) / 12.f;
-            batch_qM(env_id, (q_start + 5) * nv + (q_start + 5)) = mass * (0.8f * 0.8f + 0.8f * 0.8f) / 12.f;
+            batch_qM(env_id, (q_start + 3) * nv + (q_start + 3)) = mass * (height * height + width * width) / 12.f;
+            batch_qM(env_id, (q_start + 4) * nv + (q_start + 4)) = mass * (width * width + depth * depth) / 12.f;
+            batch_qM(env_id, (q_start + 5) * nv + (q_start + 5)) = mass * (depth * depth + height * height) / 12.f;
 
         }
 
@@ -397,36 +439,37 @@ namespace dyno
             q_inner_force(env_id, q_start + 0) = -mass * g.x;
             q_inner_force(env_id, q_start + 1) = -mass * g.y;
             q_inner_force(env_id, q_start + 2) = -mass * g.z;
+            
         }
     }
 
-    template<typename TDataType>    // only for test, only for all bodies without constraints 
-    __global__ void TrickMassMatInverse(RigidBody<TDataType> rigid_body_system, int num_envs)
-    {
-        int env_id = blockIdx.x;
-        if(env_id >= num_envs)
-            return;
+    // template<typename TDataType>    // only for test, only for all bodies without constraints 
+    // __global__ void TrickMassMatInverse(RigidBody<TDataType> rigid_body_system, int num_envs)
+    // {
+    //     int env_id = blockIdx.x;
+    //     if(env_id >= num_envs)
+    //         return;
         
-        int bid = threadIdx.x;
-        int env_self_bodies = rigid_body_system.batch_bodies[env_id];
-        if(bid >= env_self_bodies)
-            return;
+    //     int bid = threadIdx.x;
+    //     int env_self_bodies = rigid_body_system.batch_bodies[env_id];
+    //     if(bid >= env_self_bodies)
+    //         return;
 
-        auto& batch_qM = rigid_body_system.batch_qM;
-        auto& batch_qM_inv = rigid_body_system.batch_qM_inv;
-        const int q_start = rigid_body_system.q_offset(env_id, bid);
-        const int nv = rigid_body_system.batch_nv[env_id];
-        for(int i = 0; i < 6; i++)
-            for(int j = 0; j < 6; j++)
-            {
-                int idx = (q_start + i) * nv + (q_start + j);
-                if (i == j)
-                    batch_qM_inv(env_id, idx) = 1.f / batch_qM(env_id, idx);
-                else
-                    batch_qM_inv(env_id, idx) = 0.f;
+    //     auto& batch_qM = rigid_body_system.batch_qM;
+    //     auto& batch_qM_inv = rigid_body_system.batch_qM_inv;
+    //     const int q_start = rigid_body_system.q_offset(env_id, bid);
+    //     const int nv = rigid_body_system.batch_nv[env_id];
+    //     for(int i = 0; i < 6; i++)
+    //         for(int j = 0; j < 6; j++)
+    //         {
+    //             int idx = (q_start + i) * nv + (q_start + j);
+    //             if (i == j)
+    //                 batch_qM_inv(env_id, idx) = 1.f / batch_qM(env_id, idx);
+    //             else
+    //                 batch_qM_inv(env_id, idx) = 0.f;
 
-            }
-    }
+    //         }
+    // }
 
     template<typename TDataType>
     __global__ void UpdateGeneralizedVelKernel(RigidBody<TDataType> rigid_body_system, DArray<Real> timesteps, int num_envs)
@@ -445,8 +488,6 @@ namespace dyno
         const Real& dt = timesteps[env_id];
         auto& qvel = rigid_body_system.batch_qvel;
         const auto& qacc = rigid_body_system.batch_qacc;
-
-        printf("Env: %d, dof_idx: %d, qacc: %f\n", env_id, dof_idx, qacc(env_id, dof_idx));
 
         qvel(env_id, dof_idx) += qacc(env_id, dof_idx) * dt;
     }
@@ -838,19 +879,34 @@ namespace dyno
         ComputeJac(J_temp, pos, rigid_body_system, env_id, bid, bid);
         RotateJacobianRow(J_temp, J_temp2, bid, nv, env_id);    // J_temp2 now is jac
 
-        // J_temp(bid) = J_temp2(bid) * qM_inv, where shapes are (6 x nv) * (nv x nv).
+        // batch_qM_inv stores the in-place Cholesky factor L of qM from Step().
+        // For each Jacobian row j, solve qM * x = j^T via:
+        //   1) L * y = j^T (forward substitution)
+        //   2) L^T * x = y (back substitution)
+        // Then x^T equals j * qM^{-1}.
+        const auto& L = rigid_body_system.batch_qM_inv;
         for(int r = 0; r < 6; r++)
-            for(int c = 0; c < nv; c++)
+        {
+            for(int i = 0; i < nv; i++)
             {
-                Real sum = 0.f;
-                for(int k = 0; k < nv; k++)
-                {
-                    const Real a = MatrixAt(J_temp2, env_id, bid, r, k, Vec2i(6, nv));
-                    const Real b = MatrixAt(rigid_body_system.batch_qM_inv, env_id, k, c, Vec2i(nv, nv));
-                    sum += a * b;
-                }
-                MatrixAt(J_temp, env_id, bid, r, c, Vec2i(6, nv)) = sum;
+                Real sum = MatrixAt(J_temp2, env_id, bid, r, i, Vec2i(6, nv));
+                for(int k = 0; k < i; k++)
+                    sum -= MatrixAt(L, env_id, i, k, Vec2i(nv, nv)) * MatrixAt(J_temp, env_id, bid, r, k, Vec2i(6, nv));
+
+                const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                MatrixAt(J_temp, env_id, bid, r, i, Vec2i(6, nv)) = sum / lii;
             }
+
+            for(int i = nv - 1; i >= 0; i--)
+            {
+                Real sum = MatrixAt(J_temp, env_id, bid, r, i, Vec2i(6, nv));
+                for(int k = i + 1; k < nv; k++)
+                    sum -= MatrixAt(L, env_id, k, i, Vec2i(nv, nv)) * MatrixAt(J_temp, env_id, bid, r, k, Vec2i(6, nv));
+
+                const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                MatrixAt(J_temp, env_id, bid, r, i, Vec2i(6, nv)) = sum / lii;
+            }
+        }
 
         Real a00 = 0.f;
         Real a11 = 0.f;
@@ -1186,6 +1242,8 @@ namespace dyno
     {
         spdlog::info("[MujocoSolver Solver] Starting initialization.");
 
+        const int max_joint_qpos = 128;
+
         auto& collision_paras = this->rigid_body->collision_paras;
         collision_paras.time_const = 0.02f;
         collision_paras.damp_ratio = 1.f;
@@ -1210,7 +1268,7 @@ namespace dyno
 
 
         INIT_DYNO_ARRAY(rigid_body_system->batch_nv, num_envs);
-
+        INIT_DYNO_ARRAY2D(rigid_body_system->is_isolated, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->q_lengths, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->q_offset, num_envs, max_bodies);
 
@@ -1280,6 +1338,9 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->Mat_temp1, num_envs, num_max_constraints * max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->Mat_temp2, num_envs, num_max_constraints * max_nv);
 
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_type, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_qpos, num_envs, max_joint_qpos);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_qpos_offset, num_envs, max_bodies);
 
         spdlog::info("[MujocoSolver Solver] Allocated solver state arrays based on DoF counts.");
         // 3. Initialize the qpos
@@ -1292,7 +1353,6 @@ namespace dyno
         cudaDeviceSynchronize();
 
         spdlog::info("[MujocoSolver Solver] Initialization complete. Number of environments: {}", env_infos->num_envs);
-
 
 
         spdlog::info("[MujocoSolver Solver] Finished initialization.");
@@ -1308,7 +1368,7 @@ namespace dyno
         rigid_body_system->batch_q_inner_force.reset();
         rigid_body_system->batch_q_ex_force.reset();
         rigid_body_system->batch_q_ex_acc.reset();
-
+        rigid_body_system->is_converged.reset();
         // Update forward kinematics and subtree com
         ForwardKinematics();
 
@@ -1326,11 +1386,18 @@ namespace dyno
             rigid_body_system->batch_q_ex_force, env_infos->num_envs, rigid_body_system->batch_nv, false);
         cudaDeviceSynchronize();
 
-        TrickMassMatInverse<TDataType><<<32, 512>>>(*rigid_body_system, env_infos->num_envs);
-        cudaDeviceSynchronize();
-
-        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM_inv, rigid_body_system->batch_q_ex_force,
-            rigid_body_system->batch_q_ex_acc, rigid_body_system->batch_nv, rigid_body_system->batch_nv, env_infos->num_envs);
+        // Solve qM * q_ex_acc = q_ex_force by Cholesky factorization instead of explicitly forming qM^{-1}.
+        // BatchCholeskySolveVarSizeKernel factorizes in-place, so copy qM to a temporary buffer first.
+        rigid_body_system->batch_qM_inv.assign(rigid_body_system->batch_qM);
+        
+        BatchCholeskySolveVarSizeKernel<<<env_infos->num_envs, 1>>>(
+            rigid_body_system->batch_qM_inv,
+            rigid_body_system->batch_q_ex_force,
+            rigid_body_system->batch_q_ex_acc,
+            rigid_body_system->batch_nv,
+            rigid_body_system->max_bodies * 6,
+            env_infos->num_envs,
+            rigid_body_system->is_converged);
         cudaDeviceSynchronize();
 
         rigid_body_system->batch_qacc.assign(rigid_body_system->batch_q_ex_acc);
@@ -1345,7 +1412,6 @@ namespace dyno
         auto& env_infos = this->env_infos;
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
-        rigid_body_system->is_converged.reset();
 
         MakeJacobian();
 
@@ -1365,7 +1431,7 @@ namespace dyno
 
         // TODO: iterate more times
         int iter = 0;
-        while(iter < 10)
+        while(iter < 1)
         {
             // TODO: line search
 
@@ -1515,9 +1581,10 @@ namespace dyno
 
         ComputeContactAref<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
-
-        // PrintVector<<<1, 1>>>(rigid_body_system->batch_aref, 0, 16);
-        // cudaDeviceSynchronize();
+        
+        printf("Aref:\n");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_aref, 0, 16);
+        cudaDeviceSynchronize();
 
 
         // Compute constraint residuals Jaref

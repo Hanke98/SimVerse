@@ -148,6 +148,7 @@ if("${PERIDYNO_GPU_BACKEND}" STREQUAL "CUDA")
 	add_subdirectory(external/glad-4.6)
 	add_subdirectory(external/imgui)
 	add_subdirectory(external/spdlog)
+	add_subdirectory(external/rapidobj)
 
 	#	newly add pybind11
 	add_subdirectory(external/pybind11)
@@ -362,6 +363,7 @@ else()
 	add_subdirectory(external/glad-4.6)
 	add_subdirectory(external/imgui)
 	add_subdirectory(external/spdlog)
+	add_subdirectory(external/rapidobj)
 
 	# Qt GUI support, off by default
 	option(PERIDYNO_QT_GUI "Enable building Qt-based applications" OFF)

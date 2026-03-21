@@ -160,7 +160,7 @@ namespace dyno
     {
         Real half_angle = angle * 0.5f;
         Real s = sin(half_angle);
-        return Quat<T>(cos(half_angle), axis.x * s, axis.y * s, axis.z * s);
+        return Quat<T>(axis.x * s, axis.y * s, axis.z * s, cos(half_angle));
     }
 
     template<typename T>    // 这个函数用来查batch matrix的元素, 相当于vector[sys_id][vec<mat1D>], sys_id是batch_id, mat_id表示第几个小矩阵，row col是小矩阵内的行列，submat_size是小矩阵的尺寸

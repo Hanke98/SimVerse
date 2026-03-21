@@ -37,10 +37,17 @@ namespace dyno
 
                 Vec3f w = Vec3f(qvel(env_id, q_start + 3), qvel(env_id, q_start + 4), qvel(env_id, q_start + 5));
                 Quat<Real> quat = Quat<Real>(qpos(env_id, qpos_start + 3), qpos(env_id, qpos_start + 4), qpos(env_id, qpos_start + 5), qpos(env_id, qpos_start + 6));
-                Real angle = w.norm();
-                Vec3f axis = w.normalize();
-                
-                Quat<Real> qrot = QuatFromAxisAngle<Real>(axis, angle);
+                Real w_norm = w.norm();
+                Quat<Real> qrot;
+
+                if (w_norm > 1e-8)
+                {
+                    Vec3f axis = w / w_norm;
+                    Real angle = w_norm * dt;
+                    qrot = QuatFromAxisAngle<Real>(axis, angle);
+                }
+                else
+                    qrot = Quat<Real>(0, 0, 0, 1);
                 
                 quat.normalize();
                 Quat<Real> quat_new = quat * qrot;
@@ -49,7 +56,7 @@ namespace dyno
                 qpos(env_id, qpos_start + 5) = quat_new.z;
                 qpos(env_id, qpos_start + 6) = quat_new.w;
             }
-            else
+            else    // TODO: handle joint
             {
                 ;
             }
@@ -676,7 +683,7 @@ namespace dyno
                     MatrixAt(Jac_temp2, env_id, cidx, i, j, Vec2i(6, num_nv)) = 0;
         }
 
-        int test_idx = 3;
+        int test_idx = 0;
         if(cidx == test_idx)
         {
             printf("collision point: (%f, %f, %f)\n", c_point.x, c_point.y, c_point.z);
@@ -1199,20 +1206,25 @@ namespace dyno
 
     }
 
-    // template<typename TDataType>
-    // __global__ void SearchAlphaKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
-    // {
-    //     int env_id = blockIdx.x;
-    //     if (env_id >= num_envs)
-    //         return;
-    //     if(rigid_body_system.is_converged[env_id])
-    //         return;
+    template<typename TDataType>
+    __global__ void SearchAlphaKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if (env_id >= num_envs)
+            return;
+        if(rigid_body_system.is_converged[env_id])
+            return;
+
+        auto& alpha = rigid_body_system.batch_alpha[env_id];
+        alpha = 1.f;
+
+        auto& dx = rigid_body_system.batch_dx;
 
 
-    // }
+    }
     
     template<typename TDataType>
-    __global__ void CheckConvergenceKernel(RigidBody<TDataType> rigid_body_system, int num_envs, Real eps)
+    __global__ void CheckConvergenceKernel(RigidBody<TDataType> rigid_body_system, int num_envs, Real impr, Real eps)
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
@@ -1224,11 +1236,13 @@ namespace dyno
         const auto& grad = rigid_body_system.batch_grad;
 
         Real grad_square_sum = 0.f;
-
         for(int i = 0; i < rigid_body_system.batch_nv[env_id]; i++)
-            grad_square_sum += scale * grad(env_id, i) * grad(env_id, i);
+            grad_square_sum += grad(env_id, i) * grad(env_id, i);
+        grad_square_sum = scale * sqrt(grad_square_sum);
 
-        if(sqrt(grad_square_sum) < eps)
+        Real improvment = scale * (rigid_body_system.batch_energy_ref[env_id] - rigid_body_system.batch_energy[env_id]); 
+
+        if(grad_square_sum < eps || improvment < impr)
             rigid_body_system.is_converged[env_id] = 1;
     }
  
@@ -1249,6 +1263,7 @@ namespace dyno
         collision_paras.damp_ratio = 1.f;
         collision_paras.dmax = 0.95f;
         collision_paras.dmin = 0.9f;
+        collision_paras.width = 0.001;
         collision_paras.midpoint = 0.5f;
         collision_paras.power = 2;
 
@@ -1291,6 +1306,7 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_imp, num_envs, num_max_constraints);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_Jaref, num_envs, num_max_constraints);
         INIT_DYNO_ARRAY(rigid_body_system->batch_energy, num_envs);
+        INIT_DYNO_ARRAY(rigid_body_system->batch_energy_ref, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_energy, num_envs, num_max_constraints);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_unquads, num_envs, num_max_constraints);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_H, num_envs, max_nv * max_nv);
@@ -1431,7 +1447,7 @@ namespace dyno
 
         // TODO: iterate more times
         int iter = 0;
-        while(iter < 1)
+        while(iter < 10)
         {
             // TODO: line search
 
@@ -1449,21 +1465,30 @@ namespace dyno
             BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref,
                 rigid_body_system->num_constraints, rigid_body_system->batch_nv, num_envs, true, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
+            spdlog::info("qacc in newton");
+            PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0, 6);
+            cuSynchronize();
+            spdlog::info("Ma in newton");
+            PrintVector<<<1, 1>>>(rigid_body_system->batch_Ma, 0, 6);
+            cuSynchronize();
+            spdlog::info("Jaref in newton");
+            PrintVector<<<1, 1>>>(rigid_body_system->batch_Jaref, 0, 4);
+            cuSynchronize();
 
-
+            rigid_body_system->batch_energy_ref.assign(rigid_body_system->batch_energy);
             ComputeEnergy();
+            BuildHessian();
             UpdateGradient();
+            SolveSystem();
+            
 
-            CheckConvergenceKernel<<<32, 128>>>(*rigid_body_system, num_envs, 1e-8f);
+            CheckConvergenceKernel<<<32, 128>>>(*rigid_body_system, num_envs, 1e-8f, 1e-8f);
             cudaDeviceSynchronize();
             Reduction<int> reduce_converged;
             int total_converged = reduce_converged.accumulate(rigid_body_system->is_converged.begin(), num_envs);
             spdlog::info("[MujocoSolver Solver] Iteration {}, converged environments: {}/{}", iter, total_converged, num_envs);
             if(total_converged == num_envs)
                 break;
-
-            BuildHessian();
-            SolveSystem();
 
             iter++;
         }
@@ -1482,6 +1507,14 @@ namespace dyno
 
         TimeIntegrationKernel<<<32, 512>>>(*rigid_body_system, env_infos->timesteps, env_infos->num_envs);
         cudaDeviceSynchronize();
+
+        spdlog::info("Qvel:");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_qvel, 0, 6);
+        cudaDeviceSynchronize();
+        spdlog::info("QPOS:");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_qpos, 0, 7);
+        cudaDeviceSynchronize();
+
     }
 
     template<typename TDataType>
@@ -1557,10 +1590,10 @@ namespace dyno
         ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, rigid_body_system->Mat_temp1, rigid_body_system->Mat_temp2);
         cudaDeviceSynchronize();
 
+        spdlog::info("Jacobian: ");
         PrintJacobian<TDataType><<<1, 1>>>(*rigid_body_system, 0);
         cudaDeviceSynchronize();
 
-        //
     }
 
     template<typename TDataType>
@@ -1630,9 +1663,14 @@ namespace dyno
         ComputeRKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
+        printf("R:\n");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0, 16);
+        cudaDeviceSynchronize();
+
         ComputeDKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
+        printf("D:\n");
         PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0, 16);
         cudaDeviceSynchronize();
 
@@ -1657,11 +1695,13 @@ namespace dyno
         ReduceConstraintEnergyKernel<TDataType><<<num_envs, 256>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
         
-        // // PrintVector<<<1, 1>>>(rigid_body_system->batch_constraint_force, 0, 16);
-        // cudaDeviceSynchronize();
+        spdlog::info("Constraint force:");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_constraint_force, 0, 16);
+        cudaDeviceSynchronize();
 
-        // PrintVector<<<1, 1>>>(rigid_body_system->batch_energy, 1);
-        // cudaDeviceSynchronize();
+        spdlog::info("s: ");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_energy, 1);
+        cudaDeviceSynchronize();
 
         InertialEnergyKernel<TDataType><<<num_envs, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();

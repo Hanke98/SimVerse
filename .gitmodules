@@ -31,3 +31,6 @@
 [submodule "external/spdlog"]
 	path = external/spdlog
 	url = https://github.com/gabime/spdlog.git
+[submodule "external/rapidobj"]
+	path = external/rapidobj
+	url = https://github.com/guybrush77/rapidobj.git

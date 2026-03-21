@@ -56,6 +56,7 @@ namespace dyno {
         DArray2D<Real>      batch_Jaref;   // J * qacc
         DArray2D<Real>      batch_imp;
         DArray<Real>        batch_energy;
+        DArray<Real>        batch_energy_ref;
         DArray2D<Real>      batch_constraint_energy;    
         DArray2D<int>       batch_unquads;   // [env_id, constraint_idx]
         DArray2D<Real>      batch_H;

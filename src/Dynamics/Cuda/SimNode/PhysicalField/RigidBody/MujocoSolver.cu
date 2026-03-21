@@ -44,7 +44,7 @@ namespace dyno
                 {
                     Vec3f axis = w / w_norm;
                     Real angle = w_norm * dt;
-                    qrot = QuatFromAxisAngle<Real>(axis, angle);
+                    qrot = QuatFromAxisAngle(axis, angle);
                 }
                 else
                     qrot = Quat<Real>(0, 0, 0, 1);
@@ -259,7 +259,53 @@ namespace dyno
             }
             else
             {
-                ;
+                const auto& parent_quat = quat_world(env_id, parent_idx);
+                const auto& parent_rot = rot_world(env_id, parent_idx);
+                const auto& local_axis = rigid_body_system.joint_axis_ref(env_id, bid);
+                const auto& local_anchor = rigid_body_system.joint_anchor_ref(env_id, bid);
+                const int& joint_type = rigid_body_system.joint_type(env_id, bid);
+                const auto& joint_qpos = rigid_body_system.joint_qpos;
+                const auto& joint_qpos0 = rigid_body_system.joint_qpos_ref;
+                const auto& joint_qpos_start = rigid_body_system.joint_qpos_offset(env_id, bid);
+                auto& pos = rigid_body_system.batch_pos;
+                
+
+                Quat<Real> xquat_p = parent_quat * rigid_body_system.joint_rel_quat(env_id, bid);
+                rigid_body_system.joint_axis(env_id, bid) = RotateVector(local_axis, xquat_p);
+                Vec3f xanchor = RotateVector(local_anchor, xquat_p);
+                Vec3f xpos = parent_rot * rigid_body_system.joint_rel_pos(env_id, bid) + pos(env_id, parent_idx);
+                xanchor += xpos;
+                rigid_body_system.joint_anchor(env_id, bid) = xanchor;
+
+
+                if(joint_type == 2)     // Slide
+                {
+                    quat_world(env_id, bid) = xquat_p;
+                    rot_world(env_id, bid) = xquat_p.toMatrix3x3();
+                    pos(env_id, bid) = xpos + (joint_qpos(env_id, joint_qpos_start) - joint_qpos0(env_id, joint_qpos_start)) * rigid_body_system.joint_axis(env_id, bid);
+                }
+                else
+                {
+                    Quat<Real> quat_local;
+                    if(joint_type == 1)     // Hinge
+                        quat_local = QuatFromAxisAngle(local_axis, joint_qpos(env_id, joint_qpos_start) - joint_qpos0(env_id, joint_qpos_start));
+                    else if (joint_type == 3)   // Ball
+                    {
+                        Quat<Real> ball_quat = Quat<Real>(
+                            joint_qpos(env_id, joint_qpos_start),
+                            joint_qpos(env_id, joint_qpos_start + 1),
+                            joint_qpos(env_id, joint_qpos_start + 2),
+                            joint_qpos(env_id, joint_qpos_start + 3));
+                        ball_quat.normalize();
+                        quat_local = ball_quat;
+                    }
+
+                    Quat<Real> xquat_c = xquat_p * quat_local;
+                    quat_world(env_id, bid) = xquat_c;
+                    rot_world(env_id, bid) = xquat_c.toMatrix3x3();
+                    xpos = RotateVector(local_anchor, quat_world(env_id, bid));
+                    pos(env_id, bid) = xanchor - xpos;
+                }
             }
         }
     }
@@ -320,7 +366,41 @@ namespace dyno
 
         if(parent_idx != -1)    // joint attached to parent
         {
+            Vec3f offset = rigid_body_system.subtree_com(env_id, rigid_body_system.root_idx(env_id, bid)) - rigid_body_system.joint_anchor(env_id, bid);
+            const int& joint_type = rigid_body_system.joint_type(env_id, bid);
 
+            const Vec3f& joint_axis = rigid_body_system.joint_axis(env_id, bid);
+
+            if(joint_type == 1)     // Hinge
+            {
+                Vec3f trans_part = cross(joint_axis, offset);
+                for(int i = 0; i < 3; i++)
+                {
+                    cdof(env_id, q_start * 6 + i) = joint_axis[i];
+                    cdof(env_id, q_start * 6 + 3 + i) = trans_part[i];
+                }
+            }
+            else if (joint_type == 2)   // Slide
+            {
+                for(int i = 0; i < 3; i++)
+                {
+                    cdof(env_id, q_start * 6 + i) = 0.f;
+                    cdof(env_id, q_start * 6 + 3 + i) = joint_axis[i];
+                }
+            }
+            else                    // Ball
+            {
+                for(int i = 0; i < 3; i++)
+                {
+                    Vec3f rot_axis = rot.col(i);
+                    Vec3f trans_part = cross(rot_axis, offset);
+                    for(int j = 0; j < 3; j++)
+                    {
+                        cdof(env_id, (q_start + i) * 6 + j) = rot_axis[j];
+                        cdof(env_id, (q_start + i) * 6 + 3 + j) = trans_part[j];
+                    }
+                }
+            }
         }
         else
         {
@@ -343,12 +423,12 @@ namespace dyno
                     cdof(env_id, (q_start + i + 3) * 6 + j) = rot_axis[j];
                 }
             }
-            printf("Env %d, Body %d, cdof:\n", env_id, bid);
-            for(int i = 0; i < 6; i++)
-                printf("  cdof[%d]: %f %f, %f %f, %f %f\n", i, cdof(env_id, (q_start + i) * 6 + 0),
-                    cdof(env_id, (q_start + i) * 6 + 1), cdof(env_id, (q_start + i) * 6 + 2),
-                    cdof(env_id, (q_start + i) * 6 + 3), cdof(env_id, (q_start + i) * 6 + 4), 
-                    cdof(env_id, (q_start + i) * 6 + 5));
+            // printf("Env %d, Body %d, cdof:\n", env_id, bid);
+            // for(int i = 0; i < 6; i++)
+            //     printf("  cdof[%d]: %f %f, %f %f, %f %f\n", i, cdof(env_id, (q_start + i) * 6 + 0),
+            //         cdof(env_id, (q_start + i) * 6 + 1), cdof(env_id, (q_start + i) * 6 + 2),
+            //         cdof(env_id, (q_start + i) * 6 + 3), cdof(env_id, (q_start + i) * 6 + 4), 
+            //         cdof(env_id, (q_start + i) * 6 + 5));
             
         }
     }
@@ -360,7 +440,7 @@ namespace dyno
     }
 
     template<typename TDataType>
-    __global__ void ComputeGeneralizedInertialMatrixKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    __global__ void UpdateGeneralizedInertialMatrixKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
@@ -416,6 +496,24 @@ namespace dyno
 
 
         
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeInertialOfSubtree(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int env_self_bodies = rigid_body_system.batch_bodies[env_id];
+        int bid = threadIdx.x;
+        if(bid >= env_self_bodies)
+            return;
+
+        const int& root_idx = rigid_body_system.root_idx(env_id, bid);
+        Vec3f offset = rigid_body_system.batch_pos(env_id, bid) - rigid_body_system.subtree_com(env_id, root_idx);
+        
+
     }
 
     template<typename TDataType>
@@ -1356,7 +1454,14 @@ namespace dyno
 
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_type, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_qpos, num_envs, max_joint_qpos);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_qpos_ref, num_envs, max_joint_qpos);
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_qpos_offset, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_rel_pos, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_rel_quat, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_axis, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_axis_ref, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_anchor, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->joint_anchor_ref, num_envs, max_bodies);
 
         spdlog::info("[MujocoSolver Solver] Allocated solver state arrays based on DoF counts.");
         // 3. Initialize the qpos
@@ -1545,7 +1650,7 @@ namespace dyno
 
         // 3. Construct the system inertia matrix in the generalized coordinate system.
         rigid_body_system->batch_qM.reset();
-        ComputeGeneralizedInertialMatrixKernel<TDataType><<<dim3(num_envs, 32), 512>>>(*rigid_body_system, num_envs);
+        UpdateGeneralizedInertialMatrixKernel<TDataType><<<dim3(num_envs, 32), 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
 

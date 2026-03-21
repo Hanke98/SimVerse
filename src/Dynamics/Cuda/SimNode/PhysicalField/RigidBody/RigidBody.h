@@ -128,7 +128,14 @@ namespace dyno {
         // For joint
         DArray2D<int>           joint_type;     // [env_id, body_id] type of joint (0: none, 1: hinge, 2: slide, 3: ball)
         DArray2D<Real>          joint_qpos;
+        DArray2D<Real>          joint_qpos_ref;
         DArray2D<int>           joint_qpos_offset;
+        DArray2D<Vec3f>         joint_rel_pos;
+        DArray2D<Quat<Real>>    joint_rel_quat;
+        DArray2D<Vec3f>         joint_axis;     // [env_id, body_id] joint axis for hinge and slide joint, or initial relative rotation axis for ball joint
+        DArray2D<Vec3f>         joint_axis_ref;
+        DArray2D<Vec3f>         joint_anchor;   // [env_id, body_id] joint anchor in the local frame of the body
+        DArray2D<Vec3f>         joint_anchor_ref;
 
 
         // Shape information for rendering and collision handling

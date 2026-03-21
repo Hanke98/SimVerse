@@ -156,11 +156,20 @@ namespace dyno
     }
 
     template<typename T>
-    inline __host__ __device__ Quat<T> QuatFromAxisAngle(const Vec3f& axis, Real angle)
+    inline __host__ __device__ Quat<T> QuatFromAxisAngle(const Vector<T, 3>& axis, T angle)
     {
-        Real half_angle = angle * 0.5f;
-        Real s = sin(half_angle);
+        T half_angle = angle * 0.5f;
+        T s = sin(half_angle);
         return Quat<T>(axis.x * s, axis.y * s, axis.z * s, cos(half_angle));
+    }
+
+    template<typename T>
+    inline __host__ __device__ Vec3f RotateVector(const Vec3f& v, const Quat<T>& q)
+    {
+        // Rotate vector v by quaternion q
+        Vec3f q_vec(q.x, q.y, q.z);
+        Vec3f t = 2.0f * q_vec.cross(v);
+        return v + q.w * t + q_vec.cross(t);
     }
 
     template<typename T>    // 这个函数用来查batch matrix的元素, 相当于vector[sys_id][vec<mat1D>], sys_id是batch_id, mat_id表示第几个小矩阵，row col是小矩阵内的行列，submat_size是小矩阵的尺寸

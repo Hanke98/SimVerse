@@ -433,73 +433,43 @@ namespace dyno
         }
     }
 
-    template<typename TDataType>
-    __global__ void SubTreeInertialKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    __device__ void SubtreeComInertia(DArray2D<Real>& com_inertia, const Vec3f& body_inertia, const Mat3f& rot_mat, const Vec3f& offset, Real mass, int env_id, int bid)
     {
+        Real tmp_0 = rot_mat(0, 0) * body_inertia.x;
+        Real tmp_1 = rot_mat(1, 0) * body_inertia.x;
+        Real tmp_2 = rot_mat(2, 0) * body_inertia.x;
+        
+        Real tmp_3 = rot_mat(0, 1) * body_inertia.y;
+        Real tmp_4 = rot_mat(1, 1) * body_inertia.y;
+        Real tmp_5 = rot_mat(2, 1) * body_inertia.y;
+        
+        Real tmp_6 = rot_mat(0, 2) * body_inertia.z;
+        Real tmp_7 = rot_mat(1, 2) * body_inertia.z;
+        Real tmp_8 = rot_mat(2, 2) * body_inertia.z;
 
+        com_inertia(env_id, bid * 10)     = rot_mat(0, 0) * tmp_0 + rot_mat(0, 1) * tmp_3 + rot_mat(0, 2) * tmp_6;
+        com_inertia(env_id, bid * 10 + 1) = rot_mat(1, 0) * tmp_1 + rot_mat(1, 1) * tmp_4 + rot_mat(1, 2) * tmp_7;
+        com_inertia(env_id, bid * 10 + 2) = rot_mat(2, 0) * tmp_2 + rot_mat(2, 1) * tmp_5 + rot_mat(2, 2) * tmp_8;
+        com_inertia(env_id, bid * 10 + 3) = rot_mat(0, 0) * tmp_1 + rot_mat(0, 1) * tmp_4 + rot_mat(0, 2) * tmp_7;
+        com_inertia(env_id, bid * 10 + 4) = rot_mat(0, 0) * tmp_2 + rot_mat(0, 1) * tmp_5 + rot_mat(0, 2) * tmp_8;
+        com_inertia(env_id, bid * 10 + 5) = rot_mat(1, 0) * tmp_2 + rot_mat(1, 1) * tmp_5 + rot_mat(1, 2) * tmp_8;
+        
+        com_inertia(env_id, bid * 10) += mass * (offset.y * offset.y + offset.z * offset.z);
+        com_inertia(env_id, bid * 10 + 1) += mass * (offset.x * offset.x + offset.z * offset.z);
+        com_inertia(env_id, bid * 10 + 2) += mass * (offset.x * offset.x + offset.y * offset.y);
+        com_inertia(env_id, bid * 10 + 3) -= mass * offset.x * offset.y;
+        com_inertia(env_id, bid * 10 + 4) -= mass * offset.x * offset.z;
+        com_inertia(env_id, bid * 10 + 5) -= mass * offset.y * offset.z;
+
+        com_inertia(env_id, bid * 10 + 6) = mass * offset.x;
+        com_inertia(env_id, bid * 10 + 7) = mass * offset.y;
+        com_inertia(env_id, bid * 10 + 8) = mass * offset.z;
+        com_inertia(env_id, bid * 10 + 9) = mass;
     }
 
-    template<typename TDataType>
-    __global__ void UpdateGeneralizedInertialMatrixKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
-    {
-        int env_id = blockIdx.x;
-        if(env_id >= num_envs)
-            return;
-
-        int env_self_bodies = rigid_body_system.batch_bodies[env_id];
-        int bid = blockDim.x * blockIdx.y + threadIdx.x;
-        if(bid >= env_self_bodies)
-            return;
-
-        const int is_static = rigid_body_system.is_static(env_id, bid);
-        if(is_static)
-            return;
-        
-        auto& batch_qM = rigid_body_system.batch_qM;
-        const auto& mass = rigid_body_system.batch_mass(env_id, bid);
-        const int parent_idx = rigid_body_system.parent_idx(env_id, bid);
-        const int q_start = rigid_body_system.q_offset(env_id, bid);
-        const int nv = rigid_body_system.batch_nv[env_id];
-
-        Real height = rigid_body_system.boxes(env_id, bid).halfLength.y * 2.f;
-        Real width = rigid_body_system.boxes(env_id, bid).halfLength.z * 2.f;
-        Real depth = rigid_body_system.boxes(env_id, bid).halfLength.x * 2.f;
-
-        if(parent_idx != -1)
-        {
-            ;
-        }
-        else
-        {
-            for(int i = 0; i < 6; i++)
-                for(int j = 0; j < 6; j++)
-                    batch_qM(env_id, (q_start + i) * nv + (q_start + j)) = 0.f;
-            
-            // Trick, cube
-            batch_qM(env_id, (q_start + 0) * nv + (q_start + 0)) = mass;
-            batch_qM(env_id, (q_start + 1) * nv + (q_start + 1)) = mass;
-            batch_qM(env_id, (q_start + 2) * nv + (q_start + 2)) = mass;
-
-            batch_qM(env_id, (q_start + 3) * nv + (q_start + 3)) = mass * (height * height + width * width) / 12.f;
-            batch_qM(env_id, (q_start + 4) * nv + (q_start + 4)) = mass * (width * width + depth * depth) / 12.f;
-            batch_qM(env_id, (q_start + 5) * nv + (q_start + 5)) = mass * (depth * depth + height * height) / 12.f;
-
-        }
-
-        printf("Env %d, Body %d, qM diagonal: %f %f %f %f %f %f\n", env_id, bid,
-            batch_qM(env_id, (q_start + 0) * nv + (q_start + 0)),
-            batch_qM(env_id, (q_start + 1) * nv + (q_start + 1)),
-            batch_qM(env_id, (q_start + 2) * nv + (q_start + 2)),
-            batch_qM(env_id, (q_start + 3) * nv + (q_start + 3)),
-            batch_qM(env_id, (q_start + 4) * nv + (q_start + 4)),
-            batch_qM(env_id, (q_start + 5) * nv + (q_start + 5)));
-
-
-        
-    }
 
     template<typename TDataType>
-    __global__ void ComputeInertialOfSubtree(RigidBody<TDataType> rigid_body_system, int num_envs)
+    __global__ void SubtreeInertialKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
@@ -513,7 +483,148 @@ namespace dyno
         const int& root_idx = rigid_body_system.root_idx(env_id, bid);
         Vec3f offset = rigid_body_system.batch_pos(env_id, bid) - rigid_body_system.subtree_com(env_id, root_idx);
         
+        const Vec3f& body_inertia = rigid_body_system.batch_inertia(env_id, bid);
+        SubtreeComInertia(rigid_body_system.subtree_inertia, body_inertia, rigid_body_system.batch_rot(env_id, bid), offset, rigid_body_system.batch_mass(env_id, bid), env_id, bid);
+        for(int i = 0; i < 10; i++)
+            rigid_body_system.batch_crb(env_id, bid * 10 + i) = rigid_body_system.subtree_inertia(env_id, bid * 10 + i);
+    }
 
+    template<typename TDataType>
+    __global__ void AccumulateSubtreeInertialKernel(RigidBody<TDataType> rigid_body_system, int num_env)
+    {
+        int env_id = blockDim.x * blockIdx.x + threadIdx.x;
+        if(env_id >= num_env)
+            return;
+
+        for(int bid = rigid_body_system.batch_bodies[env_id] - 1; bid >= 0; bid--)
+        {
+            const int& parent_idx = rigid_body_system.parent_idx(env_id, bid);
+            if(parent_idx != -1)
+                for(int i = 0; i < 10; i++)
+                    rigid_body_system.batch_crb(env_id, parent_idx * 10 + i) += rigid_body_system.batch_crb(env_id, bid * 10 + i);
+
+        }
+    }
+
+    __device__ void InertiaMultiVec(const DArray2D<Real>& inertia, const Real* vec, Real* res, int env_id, int bid)
+    {
+        const Real& inertia_0 = inertia(env_id, bid * 10);
+        const Real& inertia_1 = inertia(env_id, bid * 10 + 1);
+        const Real& inertia_2 = inertia(env_id, bid * 10 + 2);
+        const Real& inertia_3 = inertia(env_id, bid * 10 + 3);
+        const Real& inertia_4 = inertia(env_id, bid * 10 + 4);
+        const Real& inertia_5 = inertia(env_id, bid * 10 + 5);
+        const Real& inertia_6 = inertia(env_id, bid * 10 + 6);
+        const Real& inertia_7 = inertia(env_id, bid * 10 + 7);
+        const Real& inertia_8 = inertia(env_id, bid * 10 + 8);
+        const Real& inertia_9 = inertia(env_id, bid * 10 + 9);
+
+        res[0] = inertia_0 * vec[0] + inertia_3 * vec[1] + inertia_4 * vec[2] - inertia_8 * vec[4] + inertia_7 * vec[5];
+        res[1] = inertia_3 * vec[0] + inertia_1 * vec[1] + inertia_5 * vec[2] + inertia_8 * vec[3] - inertia_6 * vec[5];
+        res[2] = inertia_4 * vec[0] + inertia_5 * vec[1] + inertia_2 * vec[2] - inertia_7 * vec[3] + inertia_6 * vec[4];
+        res[3] = inertia_8 * vec[1] - inertia_7 * vec[2] + inertia_9 * vec[3];
+        res[4] = inertia_6 * vec[2] - inertia_8 * vec[0] + inertia_9 * vec[4];
+        res[5] = inertia_7 * vec[0] - inertia_6 * vec[1] + inertia_9 * vec[5];
+    }
+
+    template<typename TDataType>
+    __global__ void UpdateGeneralizedInertialMatrixKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int env_self_bodies = rigid_body_system.batch_bodies[env_id];    
+        auto& batch_qM = rigid_body_system.batch_qM;
+        const int nv = rigid_body_system.batch_nv[env_id];
+
+        for(int bid = 0; bid < env_self_bodies; bid++)
+        {
+            const int& is_isolated = rigid_body_system.is_isolated(env_id, bid);
+            const int is_static = rigid_body_system.is_static(env_id, bid);
+            if(is_static)
+                continue;
+
+            const int parent_idx = rigid_body_system.parent_idx(env_id, bid);
+            const int q_start = rigid_body_system.q_offset(env_id, bid);
+            const int q_num = rigid_body_system.q_offset(env_id, bid);
+
+            if(!is_isolated)
+            {
+                const auto& cdof = rigid_body_system.batch_cdof;
+                auto& q_chain = rigid_body_system.batch_q_chain;
+                Real tmp_dof[6];
+                Real Icdof[6];
+                for(int qidx = q_start; qidx < q_start + q_num; qidx++)
+                {
+                    for(int i = 0; i < 6; i++)  // tmp_dof ← cdof[q_index]
+                        tmp_dof[i] = cdof(env_id, qidx * 6 + i);
+
+                    InertiaMultiVec(rigid_body_system.batch_crb, tmp_dof, Icdof, env_id, bid); // Icdof ← inertia_multi_vec(tmp_crb, tmp_dof)
+                    
+                    int i = qidx;
+                    int j = bid;
+                    int q_chain_length = 0;
+                    while(j != -1)
+                    {
+                        int qidx_j = rigid_body_system.q_offset(env_id, j);
+                        for(int k = i; k >= qidx_j; k--)
+                        {
+                            q_chain(env_id, q_chain_length) = k;
+                            q_chain_length++;
+                        }
+
+                        j = rigid_body_system.parent_idx(env_id, j);
+                        if(j != -1)
+                            i = qidx_j + rigid_body_system.q_offset(env_id, j) - 1;
+                    }
+                    
+                    for(int m = 0; m < q_chain_length; m++)
+                    {
+                        int i1 = q_chain(env_id, m);
+                        Real val = 0.f;
+                        for(int n = 0; n < 6; n++)
+                            val += tmp_dof[n] * Icdof[n];
+
+                        batch_qM(env_id, qidx * nv + i1) = val;
+                        batch_qM(env_id, i1 * nv + qidx) = val;   // qM is symmetric
+                    }
+                }
+            }
+            else
+            {
+                const auto& mass = rigid_body_system.batch_mass(env_id, bid);
+                Real height = rigid_body_system.boxes(env_id, bid).halfLength.y * 2.f;
+                Real width = rigid_body_system.boxes(env_id, bid).halfLength.z * 2.f;
+                Real depth = rigid_body_system.boxes(env_id, bid).halfLength.x * 2.f;
+
+                for(int i = 0; i < 6; i++)
+                    for(int j = 0; j < 6; j++)
+                        batch_qM(env_id, (q_start + i) * nv + (q_start + j)) = 0.f;
+                
+                // Trick, cube
+                batch_qM(env_id, (q_start + 0) * nv + (q_start + 0)) = mass;
+                batch_qM(env_id, (q_start + 1) * nv + (q_start + 1)) = mass;
+                batch_qM(env_id, (q_start + 2) * nv + (q_start + 2)) = mass;
+
+                batch_qM(env_id, (q_start + 3) * nv + (q_start + 3)) = mass * (height * height + width * width) / 12.f;
+                batch_qM(env_id, (q_start + 4) * nv + (q_start + 4)) = mass * (width * width + depth * depth) / 12.f;
+                batch_qM(env_id, (q_start + 5) * nv + (q_start + 5)) = mass * (depth * depth + height * height) / 12.f;
+
+            }
+
+            printf("Env %d, Body %d, qM diagonal: %f %f %f %f %f %f\n", env_id, bid,
+                batch_qM(env_id, (q_start + 0) * nv + (q_start + 0)),
+                batch_qM(env_id, (q_start + 1) * nv + (q_start + 1)),
+                batch_qM(env_id, (q_start + 2) * nv + (q_start + 2)),
+                batch_qM(env_id, (q_start + 3) * nv + (q_start + 3)),
+                batch_qM(env_id, (q_start + 4) * nv + (q_start + 4)),
+                batch_qM(env_id, (q_start + 5) * nv + (q_start + 5)));
+        }
+        
+
+
+        
     }
 
     template<typename TDataType>
@@ -1343,7 +1454,276 @@ namespace dyno
         if(grad_square_sum < eps || improvment < impr)
             rigid_body_system.is_converged[env_id] = 1;
     }
- 
+
+    template<typename T>
+    __device__ void ComputeComVel(const DArray2D<T>& cdof, const DArray2D<T>& qvel, DArray2D<T>& com_vel,
+        int env_id, int bid, int q_start, int offset)
+    {
+        // com_vel = Mat(cdof)^T * qvel, [3 * 6]^T x [3 * 1]
+        
+        for(int r = 0; r < 6; r++)
+        {
+            T sum = T(0);
+            for(int c = 0; c < 3; c++)
+                sum += cdof(env_id, (q_start + offset + c) * 6 + r) * qvel(env_id, q_start + offset + c);
+
+            com_vel(env_id, bid * 6 + r) += sum; 
+        }
+    }
+
+    template<typename T>
+    __device__ void ComputeCVelCross(const DArray2D<T>& cdof, const DArray2D<T>& com_vel, DArray2D<T>& cdof_dot,
+        int env_id, int bid, int q_start, int offset)
+    {
+        const Real& cvel_0 = com_vel(env_id, bid * 6);
+        const Real& cvel_1 = com_vel(env_id, bid * 6 + 1);
+        const Real& cvel_2 = com_vel(env_id, bid * 6 + 2);
+        const Real& cvel_3 = com_vel(env_id, bid * 6 + 3);
+        const Real& cvel_4 = com_vel(env_id, bid * 6 + 4);
+        const Real& cvel_5 = com_vel(env_id, bid * 6 + 5);
+
+        int idx = (q_start + offset) * 6;
+        const Real& cdof_0 = cdof(env_id, idx);
+        const Real& cdof_1 = cdof(env_id, idx + 1);
+        const Real& cdof_2 = cdof(env_id, idx + 2);
+        const Real& cdof_3 = cdof(env_id, idx + 3);
+        const Real& cdof_4 = cdof(env_id, idx + 4);
+        const Real& cdof_5 = cdof(env_id, idx + 5);
+
+        cdof_dot(env_id, idx) = -cvel_2 * cdof_1 + cvel_1 * cdof_2;
+        cdof_dot(env_id, idx + 1) = cvel_2 * cdof_0 - cvel_0 * cdof_2;
+        cdof_dot(env_id, idx + 2) = -cvel_1 * cdof_0 + cvel_0 * cdof_1;
+        cdof_dot(env_id, idx + 3) = -cvel_2 * cdof_4 + cvel_1 * cdof_5 - cvel_5 * cdof_1 + cvel_4 * cdof_2;
+        cdof_dot(env_id, idx + 4) = cvel_2 + cdof_3 - cvel_0 * cdof_5 + cvel_5 * cdof_0 - cvel_3 * cdof_2;
+        cdof_dot(env_id, idx + 5) = -cvel_1 * cdof_3 + cvel_0 * cdof_4 - cvel_4 * cdof_0 + cvel_3 * cdof_1;
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeComVelKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int& num_bodies = rigid_body_system.batch_bodies[env_id];
+        const auto& cdof = rigid_body_system.batch_cdof;
+        const auto& qvel = rigid_body_system.batch_qvel;
+        auto& com_vel = rigid_body_system.subtree_com_vel;
+        auto& cdof_dot = rigid_body_system.batch_cdof_dot;
+
+        for(int bid = 0; bid < num_bodies; bid++)
+        {
+            const int& parent_idx = rigid_body_system.parent_idx(env_id, bid);
+            const int& q_start = rigid_body_system.q_offset(env_id, bid);
+            if(parent_idx != -1)
+            {
+                const int& parent_q_start = rigid_body_system.q_offset(env_id, parent_idx);
+                const int& joint_type = rigid_body_system.joint_type(env_id, bid);
+                if(joint_type < 3)      // Hinge or Slide
+                {
+                    for(int i = 0; i < 6; i++)
+                        com_vel(env_id, bid * 6 + i) = com_vel(env_id, parent_idx * 6 + i) 
+                                                     + qvel(env_id, q_start) * cdof(env_id, q_start * 6 + i); 
+                    
+                    ComputeCVelCross(cdof, com_vel, cdof_dot, env_id, bid, q_start, 0);
+                }
+                else                    // Ball
+                {
+                    for(int i = 0; i < 6; i++)
+                        com_vel(env_id, bid * 6 + i) = com_vel(env_id, parent_idx * 6 + i);
+                    
+                    for(int i = 0; i < 3; i++)
+                        ComputeCVelCross(cdof, com_vel, cdof_dot, env_id, bid, q_start, i);
+                    
+                    ComputeComVel(cdof, qvel, com_vel, env_id, bid, q_start, 0);
+                }
+            }
+            else
+            {
+                const int& is_static = rigid_body_system.is_static(env_id, bid);
+                if(is_static)
+                    continue;
+                
+                // convert linear vel to world frame 
+                ComputeComVel(cdof, qvel, com_vel, env_id, bid, q_start, 0);
+                
+                // compute cdof_dot
+                for(int i = 0; i < 3; i++)
+                    ComputeCVelCross(cdof, com_vel, cdof_dot, env_id, bid, q_start, 3 + i);
+
+                // convert angular vel to world frame
+                ComputeComVel(cdof, qvel, com_vel, env_id, bid, q_start, 3);
+            }
+        }
+
+    }
+    
+    template<typename T>
+    __device__ void ComputeCACC(const DArray2D<T>& cdof_dot, const DArray2D<T>& qvel, DArray2D<T>& cacc,
+        int env_id, int bid, int q_start, int q_length)
+    {
+        for(int r = 0; r < 6; r++)
+        {
+            T sum = T(0);
+            for(int c = 0; c < q_length; c++)
+                sum += cdof_dot(env_id, (q_start + c) * 6 + r) * qvel(env_id, q_start + c);
+            cacc(env_id, bid * 6 + r) += sum;
+        }
+    } 
+
+    template<typename T>
+    __device__ void ComputeCVelCrossDual(const DArray2D<T>& com_vel, const Real* Ivel, Real* res, int env_id, int bid)
+    {
+        const Real& cvel_0 = com_vel(env_id, bid * 6);
+        const Real& cvel_1 = com_vel(env_id, bid * 6 + 1);
+        const Real& cvel_2 = com_vel(env_id, bid * 6 + 2);
+        const Real& cvel_3 = com_vel(env_id, bid * 6 + 3);
+        const Real& cvel_4 = com_vel(env_id, bid * 6 + 4);
+        const Real& cvel_5 = com_vel(env_id, bid * 6 + 5);
+
+        const Real& vec_0 = Ivel[0];
+        const Real& vec_1 = Ivel[1];
+        const Real& vec_2 = Ivel[2];
+        const Real& vec_3 = Ivel[3];
+        const Real& vec_4 = Ivel[4];
+        const Real& vec_5 = Ivel[5];
+
+        res[0] = -cvel_2 * vec_1 + cvel_1 * vec_2 - cvel_5 * vec_4 + cvel_4 * vec_5;
+        res[1] = cvel_2 * vec_0 - cvel_0 * vec_2 + cvel_5 * vec_3 - cvel_3 * vec_5;
+        res[2] = -cvel_1 * vec_0 + cvel_0 * vec_1 - cvel_4 * vec_3 + cvel_3 * vec_4;
+        res[3] = -cvel_2 * vec_4 + cvel_1 * vec_5;
+        res[4] = cvel_2 * vec_3 - cvel_0 * vec_5;
+        res[5] = -cvel_1 * vec_3 + cvel_0 * vec_4;
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeRNEKernel(RigidBody<TDataType> rigid_body_system, const DArray<Vec3f> gravities, int num_envs)
+    {
+        int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int& num_bodies = rigid_body_system.batch_bodies[env_id];
+        const Vec3f& gravity = gravities[env_id];
+        
+        auto& cacc = rigid_body_system.batch_cacc;
+        auto& cforce = rigid_body_system.batch_cforce;
+        auto& q_inner_force = rigid_body_system.batch_q_inner_force;
+        const auto& cdof = rigid_body_system.batch_cdof;
+        const auto& cdof_dot = rigid_body_system.batch_cdof_dot;
+        const auto& qvel = rigid_body_system.batch_qvel;
+        const auto& q_start = rigid_body_system.q_offset;
+        const auto& com_inertia = rigid_body_system.subtree_inertia;
+        const auto& com_vel = rigid_body_system.subtree_com_vel;
+
+        Real Iacc[6];
+        Real Ivel[6];
+        Real vec6_buffer[6];
+
+        // Construct joint space offset acceleration cacc
+        for(int bid = 0; bid < num_bodies; bid++)
+        {
+            const int& parent_idx = rigid_body_system.parent_idx(env_id, bid);
+            if(parent_idx == -1)
+            {
+                for(int i = 0; i < 3; i++)
+                    cacc(env_id, bid * 6 + 3 + i ) = -gravity[i];
+                if(!rigid_body_system.is_static(env_id, bid))
+                    ComputeCACC(cdof_dot, qvel, cacc, env_id, bid, q_start(env_id, bid), 6);
+                
+            }
+            else
+            {
+                const int& joint_type = rigid_body_system.joint_type(env_id, bid);
+                for(int i = 0; i < 6; i++)
+                    cacc(env_id, bid * 6 + i) = cacc(env_id, parent_idx * 6 + i);
+                if(joint_type < 3)     // Hinge or Slide
+                {
+                    for(int i = 0; i < 6; i++)
+                        cacc(env_id, bid * 6 + i) += qvel(env_id, q_start(env_id, bid)) * cdof_dot(env_id, q_start(env_id, bid) * 6 + i);
+                }
+                else                   // Ball
+                    ComputeCACC(cdof_dot, qvel, cacc, env_id, bid, q_start(env_id, bid), 3);
+            }
+            
+            for(int i = 0; i < 6; i++)
+                vec6_buffer[i] = cacc(env_id, bid * 6 + i); // vec6_buffer = cacc_tmp
+            InertiaMultiVec(com_inertia, vec6_buffer, Iacc, env_id, bid);
+            for(int i = 0; i < 6; i++)
+                vec6_buffer[i] = com_vel(env_id, bid * 6 + i); // vec6_buffer = com_vel
+            InertiaMultiVec(com_inertia, vec6_buffer, Ivel, env_id, bid);
+            
+            ComputeCVelCrossDual(com_vel, Ivel, vec6_buffer, env_id, bid); // vec6_buffer = vIv
+
+            for(int i = 0; i < 6;i++)
+                cforce(env_id, bid * 6 + i) = Iacc[i] + vec6_buffer[i];
+        
+        }
+
+        // Accumulate cforce from children to parent
+        for(int bid = num_bodies - 1; bid >= 0; bid--)
+        {
+            const int& parent_idx = rigid_body_system.parent_idx(env_id, bid);
+            if(parent_idx == -1)
+                continue;
+
+            for(int i = 0; i < 6; i++)
+                cforce(env_id, parent_idx * 6 + i) += cforce(env_id, bid * 6 + i);
+        }
+
+        // compute q_inner_force 
+        for(int bid = 0; bid < num_bodies; bid++)
+        {
+            const int& parent_idx = rigid_body_system.parent_idx(env_id, bid);
+            const int& is_static = rigid_body_system.is_static(env_id, bid);
+            const int& joint_type = rigid_body_system.joint_type(env_id, bid);
+            const int& q_start = rigid_body_system.q_offset(env_id, bid);
+
+            if(is_static)
+                continue;
+
+            if(parent_idx == -1)
+            {
+                for(int i = 0; i < 6; i++)
+                {
+                    Real sum = 0.f;
+                    for(int j = 0; j < 6; j++)
+                        sum += cdof(env_id, (q_start + i) * 6 + j) * cforce(env_id, bid * 6 + j);
+
+                    q_inner_force(env_id, q_start + i) = sum;
+                }
+            }
+            else
+            {
+                if(joint_type < 3)      // Hinge or Slide
+                {
+                    Real sum = 0.f;
+                    for(int i = 0; i < 6; i++)
+                        sum += cdof(env_id, q_start * 6 + i) * cforce(env_id, bid * 6 + i);
+
+                    q_inner_force(env_id, q_start) = sum;
+                }
+                else                    // Ball
+                {
+                    for(int i = 0; i < 3; i++)
+                    {
+                        Real sum = 0.f;
+                        for(int j = 0; j < 6; j++)
+                            sum += cdof(env_id, (q_start + i) * 6 + j) * cforce(env_id, bid * 6 + j);
+
+                        q_inner_force(env_id, q_start + i) = sum;
+                    }
+                }
+            }
+
+            printf("env %d, body %d, q_inner_force: ", env_id, bid);
+            for(int i = 0; i < 6; i++)
+                printf("%f ", q_inner_force(env_id, q_start + i));
+            printf("\n");
+        }
+
+
+    }
 }
 
 
@@ -1391,6 +1771,8 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->root_idx, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->subtree_mass, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->subtree_com, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->subtree_inertia, num_envs, max_bodies * 10);
+        INIT_DYNO_ARRAY2D(rigid_body_system->subtree_com_vel, num_envs, max_bodies * 6);
 
 
         spdlog::info("[MujocoSolver Solver] Max number of bodies across environments: {}", rigid_body_system->max_bodies);
@@ -1413,9 +1795,11 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM, num_envs, max_nv * max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM_inv, num_envs, max_nv * max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM_diag_elem, num_envs, max_nv);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_inertia, num_envs, max_bodies);
         INIT_DYNO_ARRAY(rigid_body_system->batch_scale, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_cdof, num_envs, max_nv * 6);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_cdofdot, num_envs, max_nv * 6);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_cdof_dot, num_envs, max_nv * 6);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_chain, num_envs, max_nv * max_bodies);
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qpos, num_envs, max_bodies * 7);
         INIT_DYNO_ARRAY2D(rigid_body_system->dof_frictionloss, num_envs, max_nv);
@@ -1462,6 +1846,8 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_axis_ref, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_anchor, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_anchor_ref, num_envs, max_bodies);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_cacc, num_envs, max_bodies * 6);
+        INIT_DYNO_ARRAY2D(rigid_body_system->batch_cforce, num_envs, max_bodies * 6);
 
         spdlog::info("[MujocoSolver Solver] Allocated solver state arrays based on DoF counts.");
         // 3. Initialize the qpos
@@ -1495,12 +1881,11 @@ namespace dyno
 
         MakeConstraints();
 
-        // TODO: compute comvel
-        // TODO: compute RNE
+        
 
 
-        TrickAddGravityKernel<TDataType><<<32, 512>>>(*rigid_body_system, env_infos->gravities, env_infos->num_envs);
-        cudaDeviceSynchronize();
+        // TrickAddGravityKernel<TDataType><<<32, 512>>>(*rigid_body_system, env_infos->gravities, env_infos->num_envs);
+        // cudaDeviceSynchronize();
 
         // q_ex_force = -q_inner_force
         SumArray2D<<<32, 128>>>(rigid_body_system->batch_q_ex_force, rigid_body_system->batch_q_inner_force,
@@ -1643,16 +2028,28 @@ namespace dyno
         // Crb 
         rigid_body_system->batch_crb.reset();
         // 1. Calculate the global inertia matrix of each rigid body when the center of mass of the corresponding kinematic tree is taken as the reference point.
-        // TODO:  
+        SubtreeInertialKernel<<<32, 512>>>(*rigid_body_system, num_envs);
         // 2. Calculate the global inertia matrix of each sub-tree.
-        // TODO:
+        cudaDeviceSynchronize();
+        AccumulateSubtreeInertialKernel<<<32, 128>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
 
 
         // 3. Construct the system inertia matrix in the generalized coordinate system.
         rigid_body_system->batch_qM.reset();
-        UpdateGeneralizedInertialMatrixKernel<TDataType><<<dim3(num_envs, 32), 512>>>(*rigid_body_system, num_envs);
+        auto& q_chain = rigid_body_system->batch_q_chain;
+        cudaMemset((void*)q_chain.begin(), -1, q_chain.pitch() * q_chain.ny());
+        UpdateGeneralizedInertialMatrixKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
+        rigid_body_system->subtree_com_vel.reset();
+        ComputeComVelKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+        // Compute RNE
+        rigid_body_system->batch_cacc.reset();
+        rigid_body_system->batch_cforce.reset();
+        ComputeRNEKernel<TDataType><<<32, 512>>>(*rigid_body_system, env_infos->gravities, num_envs);
+        cudaDeviceSynchronize();
 
         spdlog::info("[MujocoSolver Solver] Finished forward kinematics.");
     }

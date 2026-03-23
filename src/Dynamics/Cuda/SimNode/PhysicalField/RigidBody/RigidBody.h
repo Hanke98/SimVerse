@@ -68,13 +68,15 @@ namespace dyno {
         DArray2D<Real>      batch_qpos;     // [env_id, dof_idx] generalized position
         
         DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
+        DArray2D<Vec3f>     batch_inertia;
         DArray2D<Real>      batch_qM_inv;
         // DArray2D<Real>      batch_qM_L;     // [env_id, dof_idx] lower triangular matrix L in the LDL^T decomposition of the mass matrix
         DArray2D<Real>      batch_qM_diag_elem;
         DArray<Real>        batch_scale;
         DArray2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
-        DArray2D<Real>      batch_cdofdot; // [env_id, dof_idx] projection basis time derivative
+        DArray2D<Real>      batch_cdof_dot; // [env_id, dof_idx] projection basis time derivative
         DArray2D<Real>      batch_crb;     // dense vec num_bodies * 10
+        DArray2D<int>       batch_q_chain;
 
         DArray2D<Real>      dof_frictionloss;
 
@@ -92,7 +94,8 @@ namespace dyno {
         DArray2D<int>       root_idx;     // [env_id, body_id] root body index
         DArray2D<Real>      subtree_mass;   // [env_id, body_id] mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
         DArray2D<Vec3f>     subtree_com;    // [env_id, body_id] center of mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
-
+        DArray2D<Real>      subtree_inertia;
+        DArray2D<Real>      subtree_com_vel;
 
         // solving cache
         DArray2D<Real>      batch_q_inner_force;
@@ -136,6 +139,8 @@ namespace dyno {
         DArray2D<Vec3f>         joint_axis_ref;
         DArray2D<Vec3f>         joint_anchor;   // [env_id, body_id] joint anchor in the local frame of the body
         DArray2D<Vec3f>         joint_anchor_ref;
+        DArray2D<Real>          batch_cacc;
+        DArray2D<Real>          batch_cforce;
 
 
         // Shape information for rendering and collision handling

@@ -15,11 +15,6 @@ namespace dyno
     #define INIT_DYNO_ARRAY2D(arr, num_1d, max_length)    \
         arr.resize(num_1d, max_length); \
         arr.reset();
-    
-
-    // rigid_body_system->batch_nv.resize(num_envs);
-        // rigid_body_system->batch_nv.reset();
-
 
     template<typename T>
     void FlattenArray2D(const DArray2D<T>& src,  DArray<T>& dst, int total_count,
@@ -292,4 +287,5 @@ namespace dyno
         const DArray<int> n_list,        // [env], actual n for each environment
         int leading_dim,
         int num_envs, DArray<int> skip_flag=DArray<int>());
+    
 }

@@ -87,7 +87,7 @@ namespace dyno {
                     auto pos = rb_json.at("pos").get<std::vector<float>>();
                     body_pos_host(eid, bid) = Vec3f(pos[0], pos[1], pos[2]);
                     auto quat = rb_json.at("quat").get<std::vector<float>>();
-                    batch_quat_host(eid, bid) = Quat<Real>(quat[1], quat[2], quat[3], quat[0]);
+                    batch_quat_host(eid, bid) = Quat<Real>(quat[0], quat[1], quat[2], quat[3]);
                     body_rot_host(eid, bid) = batch_quat_host(eid, bid).toMatrix3x3();
 
                     mass_host(eid, bid) = rb_json["mass"];

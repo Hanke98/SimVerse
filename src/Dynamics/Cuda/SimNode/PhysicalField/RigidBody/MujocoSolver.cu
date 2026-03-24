@@ -206,7 +206,6 @@ namespace dyno
                 }
                 default: ;
             }
-
         }
     }
 

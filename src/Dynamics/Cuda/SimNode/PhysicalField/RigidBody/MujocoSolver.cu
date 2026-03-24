@@ -155,6 +155,69 @@ namespace dyno
     }
 
     template<typename TDataType>
+    __global__ void InitQmassMatrixKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int env_self_bodies = rigid_body_system.batch_bodies[env_id];
+        auto& qm = rigid_body_system.batch_qm;
+        const auto& shape_type = rigid_body_system.shape_type;
+        const auto& shape_idx = rigid_body_system.shape_idx;
+        const auto& mass = rigid_body_system.batch_mass;
+        const auto& q_lenghts = rigid_body_system.q_lengths;
+        const auto& q_offset = rigid_body_system.q_offset;
+        const auto& spheres = rigid_body_system.spheres;
+        const auto& boxes = rigid_body_system.boxes;
+        const auto& capsules = rigid_body_system.capsules;
+
+        for(int bid = 0; bid < env_self_bodies; bid++) {
+            int q_start = rigid_body_system.q_offset(env_id, bid);
+            Real body_mass = mass(env_id, bid);
+
+            qm(env_id, q_start) = body_mass;
+            qm(env_id, q_start + 1) = body_mass;
+            qm(env_id, q_start + 2) = body_mass;
+
+            switch(shape_type(env_id, bid)) {
+                case 0: {
+                    Real radius = spheres(env_id, shape_idx(env_id, bid)).radius;
+                    Real I = (2.0f / 5.0f) * body_mass * radius * radius;
+                    qm(env_id, q_start + 3) = I;
+                    qm(env_id, q_start + 4) = I;
+                    qm(env_id, q_start + 5) = I;
+                    break;
+                }
+
+                case 1: {
+                    Vec3f halfSize = boxes(env_id, shape_idx(env_id, bid)).halfLength;
+                    qm(env_id, q_start + 3) = (body_mass / 3.f) * (halfSize.y * halfSize.y + halfSize.z * halfSize.z);
+                    qm(env_id, q_start + 4) = (body_mass / 3.f) * (halfSize.x * halfSize.x + halfSize.z * halfSize.z);
+                    qm(env_id, q_start + 5) = (body_mass / 3.f) * (halfSize.x * halfSize.x + halfSize.y * halfSize.y);
+                    break;
+                }
+
+                case 2: {
+                    Real radius = capsules(env_id, shape_idx(env_id, bid)).radius;
+                    Real halfLength = capsules(env_id, shape_idx(env_id, bid)).halfLength;
+                    Real sphere_mass = 4.f * body_mass * radius / (4.f * radius + 6.f * halfLength);
+                    Real cylinder_mass = body_mass - sphere_mass;
+                    Real sphere_inertia = 2.f / 5.f * sphere_mass * radius * radius;
+
+                    qm(env_id, q_start + 3) = cylinder_mass * (3.f * radius * radius + 4.f * halfLength * halfLength) / 12.f
+                                                + sphere_inertia + sphere_mass * halfLength * (3.f * radius + 4.f * halfLength) / 4.f;
+                    qm(env_id, q_start + 4) = qm(env_id, q_start + 3);
+                    qm(env_id, q_start + 5) = cylinder_mass * radius * radius / 2.f + sphere_inertia;
+                    break;
+                }
+                default: ;
+            }
+
+        }
+    }
+
+    template<typename TDataType>
     __global__ void InitQposKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1873,6 +1936,9 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_cforce, num_envs, max_bodies * 6);
 
         spdlog::info("[MujocoSolver Solver] Allocated solver state arrays based on DoF counts.");
+        // Initialize mass matrix for isolated bodies
+        InitQmassMatrixKernel<<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
         // 3. Initialize the qpos
         InitQposKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();

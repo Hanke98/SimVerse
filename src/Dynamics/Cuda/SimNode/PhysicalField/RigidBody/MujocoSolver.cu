@@ -659,34 +659,6 @@ namespace dyno
         }
     }
 
-    // template<typename TDataType>    // only for test, only for all bodies without constraints 
-    // __global__ void TrickMassMatInverse(RigidBody<TDataType> rigid_body_system, int num_envs)
-    // {
-    //     int env_id = blockIdx.x;
-    //     if(env_id >= num_envs)
-    //         return;
-        
-    //     int bid = threadIdx.x;
-    //     int env_self_bodies = rigid_body_system.batch_bodies[env_id];
-    //     if(bid >= env_self_bodies)
-    //         return;
-
-    //     auto& batch_qM = rigid_body_system.batch_qM;
-    //     auto& batch_qM_inv = rigid_body_system.batch_qM_inv;
-    //     const int q_start = rigid_body_system.q_offset(env_id, bid);
-    //     const int nv = rigid_body_system.batch_nv[env_id];
-    //     for(int i = 0; i < 6; i++)
-    //         for(int j = 0; j < 6; j++)
-    //         {
-    //             int idx = (q_start + i) * nv + (q_start + j);
-    //             if (i == j)
-    //                 batch_qM_inv(env_id, idx) = 1.f / batch_qM(env_id, idx);
-    //             else
-    //                 batch_qM_inv(env_id, idx) = 0.f;
-
-    //         }
-    // }
-
     template<typename TDataType>
     __global__ void UpdateGeneralizedVelKernel(RigidBody<TDataType> rigid_body_system, DArray<Real> timesteps, int num_envs)
     {
@@ -945,6 +917,79 @@ namespace dyno
             MatrixAt(J, env_id, row0 + 2, 0, i, Vec2i(1, num_nv)) = jn + mu * jt2;
             MatrixAt(J, env_id, row0 + 3, 0, i, Vec2i(1, num_nv)) = jn - mu * jt2;
         }
+        
+    }
+
+    template<typename TDataType>
+    __global__ void AnchorConstraintJacobianKernel(RigidBody<TDataType> rigid_body_system, int num_envs, DArray2D<Real> Jac_temp1, DArray2D<Real> Jac_temp2)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int cidx = threadIdx.x;
+        const auto& batch_anchor = rigid_body_system.anchor_constraints;
+        const int& anchor_nums = batch_anchor.anchor_nums[env_id];
+        if(cidx >= anchor_nums)
+            return;
+
+        const int& c_start = rigid_body_system.constraint_offset[env_id][0];
+        const int& a_idx = batch_anchor.body_idxs(env_id, cidx).first;
+        const int& b_idx = batch_anchor.body_idxs(env_id, cidx).second;
+        const Vec3f& anchor_A_global = batch_anchor.anchor_A_world(env_id, cidx);
+        const Vec3f& anchor_B_global = batch_anchor.anchor_B_world(env_id, cidx);
+        const int& nv = rigid_body_system.batch_nv[env_id];
+        
+        auto& J = rigid_body_system.batch_J;
+
+        ComputeJac(Jac_temp1, anchor_A_global, rigid_body_system, env_id, a_idx, cidx);
+        ComputeJac(Jac_temp2, anchor_B_global, rigid_body_system, env_id, b_idx, cidx);
+
+        for(int i = 0; i < 3; i++)
+            for(int j = 0; j < nv; j++)
+            {
+                int row = c_start + cidx * 3 + i;
+                J(env_id, row * nv + j) = MatrixAt(Jac_temp1, env_id, cidx, i + 3, j, Vec2i(6, nv)) - MatrixAt(Jac_temp2, env_id, cidx, i + 3, j, Vec2i(6, nv));
+            }
+    }
+
+    template<typename TDataType>
+    __global__ void FrictionLossJacobianKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int cidx = threadIdx.x;
+
+        const int& constraint_num = rigid_body_system.num_each_constraint[env_id][1];
+        if(cidx >= constraint_num)
+            return;
+        
+        const int& constraint_start = rigid_body_system.constraint_offset[env_id][1];
+        const int& nv = rigid_body_system.batch_nv[env_id];
+        auto& batch_J = rigid_body_system.batch_J;
+
+        const int& nv_idx = rigid_body_system.friction_loss_constraints.dof_frictionloss(env_id, cidx);
+        
+        batch_J(env_id, (constraint_start + cidx) * nv + nv_idx) = 1.f;
+
+
+    }
+
+    template<typename TDataType>
+    __global__ void JointLimitJacobianKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int cidx = threadIdx.x;
+
+        const int& constraint_num = rigid_body_system.num_each_constraint[env_id][2];
+        if(cidx >= constraint_num)
+            return;
+        
         
     }
 
@@ -1394,28 +1439,6 @@ namespace dyno
     }
 
     template<typename TDataType>
-    __global__ void BatchNewtonIterationKernel(RigidBody<TDataType> rigid_body_system, int num_envs, int max_iters)
-    {
-        int env_idx = blockIdx.x;
-        if(env_idx >= num_envs)
-            return;
-
-        __shared__ bool converged; 
-
-        int num_nv = rigid_body_system.batch_nv[env_idx];
-        int nc = rigid_body_system.num_constraints[env_idx];
-
-        int iter = 0;
-
-        while(iter < max_iters)
-        {
-            ;
-        }
-
-
-    }
-
-    template<typename TDataType>
     __global__ void SearchAlphaKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1802,8 +1825,6 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_chain, num_envs, max_nv * max_bodies);
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_qpos, num_envs, max_bodies * 7);
-        INIT_DYNO_ARRAY2D(rigid_body_system->dof_frictionloss, num_envs, max_nv);
-
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_inner_force, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_ex_force, num_envs, max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_ex_acc, num_envs, max_nv);
@@ -1833,6 +1854,8 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.point, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.mu, num_envs, 1024);
 
+        INIT_DYNO_ARRAY(rigid_body_system->anchor_constraints.anchor_nums, num_envs);
+
         INIT_DYNO_ARRAY2D(rigid_body_system->Mat_temp1, num_envs, num_max_constraints * max_nv);
         INIT_DYNO_ARRAY2D(rigid_body_system->Mat_temp2, num_envs, num_max_constraints * max_nv);
 
@@ -1858,6 +1881,8 @@ namespace dyno
         cudaDeviceSynchronize();
         CalculateSubtreeMassKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
+
+        // TODO: init constraint data
 
         spdlog::info("[MujocoSolver Solver] Initialization complete. Number of environments: {}", env_infos->num_envs);
 
@@ -2079,18 +2104,25 @@ namespace dyno
         auto& env_infos = this->env_infos;
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
-
-        // 碰撞检测已完成
         
+        // Collision
         CountConstraintNums<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
-        // Function2Pt::plus(rigid_body_system->num_constraints, rigid_body_system->num_topo_invariant_constraints, rigid_body_system->collision_constraints.collision_nums);
-        
         rigid_body_system->batch_J.reset();
-
         ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, rigid_body_system->Mat_temp1, rigid_body_system->Mat_temp2);
         cudaDeviceSynchronize();
+
+        // Anchor constraints
+        AnchorConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, rigid_body_system->Mat_temp1, rigid_body_system->Mat_temp2);
+        cudaDeviceSynchronize();
+
+        // Friction loss constraints
+        FrictionLossJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
+
+
+        
 
         spdlog::info("Jacobian: ");
         PrintJacobian<TDataType><<<1, 1>>>(*rigid_body_system, 0);

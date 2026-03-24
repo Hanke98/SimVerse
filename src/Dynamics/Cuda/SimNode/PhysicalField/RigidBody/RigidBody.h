@@ -78,9 +78,6 @@ namespace dyno {
         DArray2D<Real>      batch_crb;     // dense vec num_bodies * 10
         DArray2D<int>       batch_q_chain;
 
-        DArray2D<Real>      dof_frictionloss;
-
-
         DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body
         DArray2D<Mat3f>     batch_rot;     // [env_id, body_id] world rotation of rigid body (as rotation matrix)
         DArray2D<Quat<Real>> batch_quat;    // [env_id, body_id] world rotation of rigid body (as quaternion)
@@ -114,18 +111,18 @@ namespace dyno {
         DArray2D<Real>      Mat_temp2;
 
         // For constraints
-        DArray2D<Real>               batch_J;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints
+        DArray2D<Real>               batch_J;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints   nc * nv
         DArray<int>                  num_constraints;   // [env_id] number of constraints in each environment = num_collision_constraints + num_topo_invariant_constraints
-        DArray<Vec4i>                num_each_constraint; // [env_id] num of each type of constraint (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
+        DArray<Vec4i>                num_each_constraint; // [env_id] num of each type of constraint (Vec4i: [0] anchor, [1] friction loss, [2] joint limit, [3] collision_constraints)
         DArray<Vec4i>                constraint_offset;   // [env_id] offset of each type of constraint in the batch_J (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
         DArray2D<Real>               batch_constraint_vel;
         DArray2D<Real>               batch_constraint_force;
 
-
-        BatchConstraintParas         constraint_paras;
-        // Collision
-        CollisionConstraintParas     collision_paras;
-        BatchCollisionConstraints    collision_constraints;
+        BatchAnchorConstraints          anchor_constraints;
+        BatchFrictionLossConstraints    friction_loss_constraints;
+        BatchJointLimitConstraints      joint_limit_constraints;
+        CollisionConstraintParas        collision_paras;
+        BatchCollisionConstraints       collision_constraints;
         
 
         // For joint

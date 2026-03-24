@@ -40,5 +40,34 @@ namespace dyno
         DArray2D<Real>              mu;                // [env_id, constraint_id] friction coefficient of the constraint
     };
 
+    struct BatchFrictionLossConstraints : public BatchConstraintParas
+    {
+        DArray2D<Real>             dof_frictionloss;
+    };
+
+    struct BatchAnchorConstraints: public BatchConstraintParas
+    {
+        DArray<int>                anchor_nums;
+        DArray2D<Pair<int, int>>   body_idxs;         // [env_id, constraint_id] pair of body indices involved in the constraint
+        DArray2D<Vec3f>            anchor_A_local;    // [env_id, constraint_id] anchor point in local frame of body A
+        DArray2D<Vec3f>            anchor_B_local;    // [env_id, constraint_id] anchor point in local frame of body B
+        DArray2D<Vec3f>            anchor_A_world;    // [env_id, constraint_id] anchor point in world frame of body A
+        DArray2D<Vec3f>            anchor_B_world;    // [env_id, constraint_id] anchor point in world frame of body B
+        DArray2D<Vec3f>            anchor_error;      // [env_id, constraint_id] anchor error (world_A - world_B)
+    };
+
+    struct BatchJointLimitConstraints : public BatchConstraintParas
+    {
+        DArray<int>             ref_nums;
+        DArray<int>             active_nums;
+        DArray2D<int>           dof_idx_ref;      // ref_nums * 3
+        DArray2D<int>           dof_idx_active;   // active_nums * 3
+        DArray2D<Real>          lower;            // ref nums
+        DArray2D<Real>          upper;            // ref nums
+        DArray2D<Real>          limit_error;      // active_nums
+        DArray2D<Vec3f>         limit_extern;     // active nums
+    };
+
+
     // TODO: Other constraint types
 }

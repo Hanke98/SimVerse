@@ -107,6 +107,7 @@ namespace dyno {
                                 spheres_host(eid, sphere_num).center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
                                 spheres_host(eid, sphere_num).radius = halfLength[0];
+                                boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
                                 sphere_num++;
 
@@ -123,6 +124,7 @@ namespace dyno {
                                 boxes_host(eid, box_num).center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
                                 boxes_host(eid, box_num).halfLength = Vec3f(halfLength[0], halfLength[1], halfLength[2]);
+                                boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
                                 box_num++;
                                 break;
@@ -135,6 +137,7 @@ namespace dyno {
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
                                 capsules_host(eid, capsule_num).radius= halfLength[0];
                                 capsules_host(eid, capsule_num).halfLength= halfLength[1];
+                                boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
                                 capsule_num++;
                                 break;

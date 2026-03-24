@@ -24,10 +24,13 @@
 
 #include "PhysicalField/RigidBody/RigidBody.h"
 #include "Utils/type.h"
+#include "Utils/json.hpp"
 
 #include <vector>
 #include <iostream>
 #include <spdlog/spdlog.h>
+
+using json = nlohmann::json;
 
 namespace dyno
 {
@@ -61,6 +64,15 @@ namespace dyno
 
     protected:
         void Init();
+        void Init(const std::string &root_dir);
+
+        void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num);
+
+        void ParseEnv(const json& envs_json);
+
+        void ParseJson(const std::string& file_path);
+
+        void LoadAssets(const std::string &root_dir);
 
         void InitRigidBody(int num_env, int num_bodies);    // TEST;
 

@@ -1,4 +1,5 @@
 #include "SimNode.h"
+#include "Utils/config_utils.h"
 #include <GLWireframeVisualModule.h>
 
 
@@ -16,7 +17,8 @@ namespace dyno {
         this->setName(name);
         spdlog::info("SimNode constructor called for node: {}", name);
 
-        Init();
+        // Init();
+        Init("assets");
         // BuildAxes();
         PlotWorldAxes();
     }
@@ -52,6 +54,19 @@ namespace dyno {
 
         BindRenderingSurface(env_infos.num_envs);
         
+    }
+
+    template<typename TDataType>
+    void SimNode<TDataType>::Init(const std::string &root_dir)
+    {
+        this->statetopology()->setDataPtr(std::make_shared<DiscreteElements<TDataType>>());
+
+        LoadAssets(root_dir);
+
+        auto env_infos = var_env_infos.getValue();
+
+        BindRenderingSurface(env_infos.num_envs);
+
     }
 
     template<typename TDataType>

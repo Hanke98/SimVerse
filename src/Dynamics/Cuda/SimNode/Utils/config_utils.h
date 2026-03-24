@@ -43,6 +43,15 @@ namespace dyno {
         CArray2D<Mat3f>     body_rot_host(env_num, body_max_num);
         CArray2D<Quat<Real>> batch_quat_host(env_num, body_max_num);
 
+        CArray2D<int>           joint_type_host(env_num, body_max_num);
+        CArray2D<Real>          joint_qpos_host(env_num, body_max_num * 6);
+        CArray2D<Real>          joint_qpos_ref_host(env_num, body_max_num * 6);
+        CArray2D<int>           joint_qpos_offset_host(env_num, body_max_num);
+        CArray2D<Vec3f>         joint_rel_pos_host(env_num, body_max_num);
+        CArray2D<Quat<Real>>    joint_rel_quat_host(env_num, body_max_num);
+        CArray2D<Vec3f>         joint_axis_ref_host(env_num, body_max_num);
+        CArray2D<Vec3f>         joint_anchor_ref_host(env_num, body_max_num);
+
         std::vector<Vec3i>  rendering_idx_2_rigid_body_mapping_host;
         CArray2D<int>       rigid_body_2_rendering_idx_mapping_host(env_num, body_max_num);
 
@@ -64,6 +73,8 @@ namespace dyno {
                 rigid_body_2_rendering_idx_mapping_host(eid, bid) = -1;
                 body_rot_host(eid, bid) = Mat3f::identityMatrix();
                 batch_quat_host(eid, bid) = Quat<Real>::identity();
+
+                joint_type_host(eid, bid) = 0;
             }
         }
 
@@ -81,6 +92,7 @@ namespace dyno {
                 int sphere_num = 0;
                 int box_num = 0;
                 int capsule_num = 0;
+                int joint_qpos_offset = 0;
 
                 for (const auto& rb_json : env_json["rigid_body"]) {
 
@@ -145,8 +157,77 @@ namespace dyno {
                             }
                             default: ;
                         }
-                        bid++;
                     }
+
+                    if (rb_json.contains("joint")) {
+                        auto joint_json = rb_json["joint"];
+                        parent_idx_host(eid, bid) = joint_json["parent"].get<int>();
+
+                        auto joint_anchor_ref = joint_json.at("anchor").get<std::vector<float>>();
+                        joint_anchor_ref_host(eid, bid) = Vec3f(joint_anchor_ref[0], joint_anchor_ref[1], joint_anchor_ref[2]);
+
+                        if (rb_json.contains("axis")) {
+                            auto joint_axis_ref = joint_json.at("axis").get<std::vector<float>>();
+                            joint_axis_ref_host(eid, bid) = Vec3f(joint_axis_ref[0], joint_axis_ref[1], joint_axis_ref[2]);
+                        }
+
+                        joint_rel_pos_host(eid, bid) = body_pos_host(eid, bid);
+                        joint_rel_quat_host(eid, bid) = batch_quat_host(eid, bid);
+
+                        int type = joint_json.at("type").get<int>();
+                        switch(type) {
+                            case 1: {
+                                joint_type_host(eid, bid) = 1;
+                                joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
+
+                                auto joint_qpos = joint_json.at("qpose").get<std::vector<float>>();
+                                joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
+
+                                auto joint_qpos_ref = joint_json.at("qpose_ref").get<std::vector<float>>();
+                                joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
+
+                                joint_qpos_offset++;
+                                break;
+                            }
+
+                            case 2: {
+                                joint_type_host(eid, bid) = 2;
+                                joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
+
+                                auto joint_qpos = joint_json.at("qpose").get<std::vector<float>>();
+                                joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
+
+                                auto joint_qpos_ref = joint_json.at("qpose_ref").get<std::vector<float>>();
+                                joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
+
+                                joint_qpos_offset++;
+                                break;
+                            }
+
+                            case 3: {
+                                joint_type_host(eid, bid) = 3;
+                                joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
+
+                                auto joint_qpos = joint_json.at("qpose").get<std::vector<float>>();
+                                joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
+                                joint_qpos_host(eid, joint_qpos_offset + 1) = joint_qpos[1];
+                                joint_qpos_host(eid, joint_qpos_offset + 2) = joint_qpos[2];
+                                joint_qpos_host(eid, joint_qpos_offset + 3) = joint_qpos[3];
+
+                                auto joint_qpos_ref = joint_json.at("qpose_ref").get<std::vector<float>>();
+                                joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
+                                joint_qpos_ref_host(eid, joint_qpos_offset + 1) = joint_qpos_ref[1];
+                                joint_qpos_ref_host(eid, joint_qpos_offset + 2) = joint_qpos_ref[2];
+                                joint_qpos_ref_host(eid, joint_qpos_offset + 3) = joint_qpos_ref[3];
+
+                                joint_qpos_offset += 4;
+                                break;
+                            }
+                            default: ;
+                        }
+                    }
+
+                    bid++;
                 }
 
                 batch_bodies_host[eid] = bid;
@@ -231,6 +312,15 @@ namespace dyno {
         rigid_bodies.is_static.assign(is_static_host);
         rigid_bodies.batch_mass.assign(mass_host);
 
+        rigid_bodies.joint_type.assign(joint_type_host);
+        rigid_bodies.joint_qpos.assign(joint_qpos_host);
+        rigid_bodies.joint_qpos_ref.assign(joint_qpos_ref_host);
+        rigid_bodies.joint_qpos_offset.assign(joint_qpos_offset_host);
+        rigid_bodies.joint_anchor_ref.assign(joint_anchor_ref_host);
+        rigid_bodies.joint_axis_ref.assign(joint_axis_ref_host);
+        rigid_bodies.joint_rel_pos.assign(joint_rel_pos_host);
+        rigid_bodies.joint_rel_quat.assign(joint_rel_quat_host);
+
         var_rigid_body.setValue(rigid_bodies);
 
         spdlog::info("Finished initializing rigid body state variables.");
@@ -301,6 +391,7 @@ namespace dyno {
         std::vector<int> primitive_max_num{sphere_num_max, box_num_max, capsule_num_max};
 
         // std::cout << "env_num: " << env_infos.num_envs << " body_num: " << body_num_max << std::endl;
+
         ParseRigidBody(envs_arr, body_num_max, primitive_max_num);
     }
 

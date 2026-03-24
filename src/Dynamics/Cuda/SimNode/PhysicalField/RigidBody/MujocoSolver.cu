@@ -5,6 +5,8 @@
 #include "Algorithm.h"
 #include <Eigen/Dense>
 
+#define NV_TMP 256
+
 namespace dyno
 {
     template<typename TDataType>
@@ -604,7 +606,7 @@ namespace dyno
 
             const int parent_idx = rigid_body_system.parent_idx(env_id, bid);
             const int q_start = rigid_body_system.q_offset(env_id, bid);
-            const int q_num = rigid_body_system.q_offset(env_id, bid);
+            const int q_num = rigid_body_system.q_lengths(env_id, bid);
 
             if(!is_isolated)
             {
@@ -840,44 +842,46 @@ namespace dyno
     }
 
     template<typename TDataType>
-    __device__ void ComputeJac(DArray2D<Real>& dst_jac, const Vec3f& c_point, const RigidBody<TDataType>& rigid_body_system, int env_id, int bid, int cidx)
+    __device__ void ComputeJac(Real* dst_jac, const Vec3f& c_point, const RigidBody<TDataType>& rigid_body_system, int env_id, int bid, int cidx)
     {
         const int root_idx = rigid_body_system.root_idx(env_id, bid);
         Vec3f offset = c_point - rigid_body_system.subtree_com(env_id, root_idx);
 
-        const auto& q_offset = rigid_body_system.q_offset(env_id, bid);
         const auto& cdof = rigid_body_system.batch_cdof;
-        const int num_nv = rigid_body_system.batch_nv[env_id];
-        const int jac_offset = cidx * 6;
+        // const int jac_offset = cidx * 6;
         const int nv = rigid_body_system.batch_nv[env_id];
+
+        // Always clear the local Jacobian buffer first. ComputeJac only writes
+        // a kinematic chain subset of columns, so untouched columns must be zero.
+        for(int i = 0; i < 6 * nv; i++)
+            dst_jac[i] = 0.f;
+
+        
         if(rigid_body_system.is_static(env_id, bid))
             return;
+            
+        int j = bid;
+        while(j != -1)
+        {
+            int q_start = rigid_body_system.q_offset(env_id, j);
+            int q_num = rigid_body_system.q_lengths(env_id, j);
 
-        const int parent_idx = rigid_body_system.parent_idx(env_id, bid);
-        if(parent_idx == -1)
-        {
-            for(int i = 0; i < 6; i++)
+            for(int k = q_num - 1; k >= 0; k--)
             {
-                Vec3f cdof_angular = Vec3f(cdof(env_id, (q_offset + i) * 6 + 0), cdof(env_id, (q_offset + i) * 6 + 1), cdof(env_id, (q_offset + i) * 6 + 2));
+                int q_idx = q_start + k;
+                Vec3f cdof_angular = Vec3f(cdof(env_id, q_idx * 6), cdof(env_id, q_idx * 6 + 1), cdof(env_id, q_idx * 6 + 2));
                 Vec3f d = cross(cdof_angular, offset);
-                MatrixAt(dst_jac, env_id, cidx, 0, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 0);
-                MatrixAt(dst_jac, env_id, cidx, 1, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 1);
-                MatrixAt(dst_jac, env_id, cidx, 2, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 2);
-                
-                MatrixAt(dst_jac, env_id, cidx, 3, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 3) + d.x;
-                MatrixAt(dst_jac, env_id, cidx, 4, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 4) + d.y;
-                MatrixAt(dst_jac, env_id, cidx, 5, q_offset + i, Vec2i(6, nv)) = cdof(env_id, (q_offset + i) * 6 + 5) + d.z;
-                
+                for(int i = 0; i < 6; i++)
+                    dst_jac[i * nv + q_idx] = cdof(env_id, q_idx * 6 + i);
+                for(int i = 3; i < 6; i++)
+                    dst_jac[i * nv + q_idx] += d[i - 3];
             }
-        }
-        else
-        {
-            ;
+            j = rigid_body_system.parent_idx(env_id, j);
         }
     }
 
     template<typename TDataType>
-    __global__ void ContactConstraintJacobianKernel(RigidBody<TDataType> rigid_body_system, int num_envs, DArray2D<Real> Jac_temp1, DArray2D<Real> Jac_temp2)
+    __global__ void ContactConstraintJacobianKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
@@ -908,14 +912,16 @@ namespace dyno
         c_basis.setCol(2, z);
 
 
-        ComputeJac(Jac_temp1, c_point, rigid_body_system, env_id, a_idx, cidx);
+        Real jacA[6 * NV_TMP];
+        Real jacB[6 * NV_TMP];
+
+        ComputeJac(jacA, c_point, rigid_body_system, env_id, a_idx, cidx);
         if(b_idx != -1)
-            ComputeJac(Jac_temp2, c_point, rigid_body_system, env_id, b_idx, cidx);
+            ComputeJac(jacB, c_point, rigid_body_system, env_id, b_idx, cidx);
         else
         {
-            for(int i = 0; i < 6; i++)
-                for(int j = 0; j < num_nv; j++)
-                    MatrixAt(Jac_temp2, env_id, cidx, i, j, Vec2i(6, num_nv)) = 0;
+            for(int i = 0; i < 6 * num_nv; i++)
+                jacB[i] = 0.f;
         }
 
         int test_idx = 0;
@@ -926,25 +932,26 @@ namespace dyno
             {
                 printf("JacA: ");
                 for(int j = 0; j < num_nv; j++)
-                    printf("%f\t", Jac_temp1(env_id, (cidx * 6 + i) * num_nv + j));
+                    printf("%f\t", jacA[i * num_nv + j]);
                 printf("\n");
             }
         }
        
 
-        // 用jacA的buffer来放jacp, 用jacB的buffer来放jacdif
-
+        // compute relative linear jacobian: J = JacA_linear - JacB_linear
         for(int j = 0; j < 3; j++)
             for(int k = 0; k < num_nv; k++)
-                MatrixAt(Jac_temp1, env_id, cidx, j, k, Vec2i(3, num_nv)) = MatrixAt(Jac_temp1, env_id, cidx, j + 3, k, Vec2i(6, num_nv)) - MatrixAt(Jac_temp2, env_id, cidx, j + 3, k, Vec2i(6, num_nv));
+                jacA[j * num_nv + k] = jacA[(j + 3) * num_nv + k] - jacB[(j + 3) * num_nv + k];     // now, jacA top 3-rows js jacp
+
+        // convert to contact frame
 
         for(int i = 0; i < 3; i++)
             for(int j = 0; j < num_nv; j++)
             {
                 Real sum = 0;
                 for(int k = 0; k < 3; k++)
-                    sum += c_basis(k, i) * MatrixAt(Jac_temp1, env_id, cidx, k, j, Vec2i(3, num_nv));
-                MatrixAt(Jac_temp2, env_id, cidx, i, j, Vec2i(3, num_nv)) = sum;
+                    sum += c_basis(k, i) * jacA[k * num_nv + j];
+                jacB[i * num_nv + j] = sum;
             }
 
         if(cidx == test_idx)
@@ -953,29 +960,29 @@ namespace dyno
             {
                 printf("JacDif: ");
                 for(int j = 0; j < num_nv; j++)
-                    printf("%f\t", Jac_temp2(env_id, (cidx * 3 + i) * num_nv + j));
+                    printf("%f\t", jacB[i * num_nv + j]);
                 printf("\n");
             }
         }
 
         const Real mu = collisions.mu(env_id, cidx);
-        const int row0 = 4 * cidx;
+        const int row0 = rigid_body_system.constraint_offset[env_id][3] + 4 * cidx;
         for(int i = 0; i < num_nv; i++)
         {
-            const Real jn = MatrixAt(Jac_temp2, env_id, cidx, 0, i, Vec2i(3, num_nv));
-            const Real jt1 = MatrixAt(Jac_temp2, env_id, cidx, 1, i, Vec2i(3, num_nv));
-            const Real jt2 = MatrixAt(Jac_temp2, env_id, cidx, 2, i, Vec2i(3, num_nv));
+            const Real j0j = jacB[i];
+            const Real j1j = jacB[num_nv + i];
+            const Real j2j = jacB[2 * num_nv + i];
 
-            MatrixAt(J, env_id, row0 + 0, 0, i, Vec2i(1, num_nv)) = jn + mu * jt1;
-            MatrixAt(J, env_id, row0 + 1, 0, i, Vec2i(1, num_nv)) = jn - mu * jt1;
-            MatrixAt(J, env_id, row0 + 2, 0, i, Vec2i(1, num_nv)) = jn + mu * jt2;
-            MatrixAt(J, env_id, row0 + 3, 0, i, Vec2i(1, num_nv)) = jn - mu * jt2;
+            MatrixAt(J, env_id, row0 + 0, 0, i, Vec2i(1, num_nv)) = j0j + mu * j1j;
+            MatrixAt(J, env_id, row0 + 1, 0, i, Vec2i(1, num_nv)) = j0j - mu * j1j;
+            MatrixAt(J, env_id, row0 + 2, 0, i, Vec2i(1, num_nv)) = j0j + mu * j2j;
+            MatrixAt(J, env_id, row0 + 3, 0, i, Vec2i(1, num_nv)) = j0j - mu * j2j;
         }
         
     }
 
     template<typename TDataType>
-    __global__ void AnchorConstraintJacobianKernel(RigidBody<TDataType> rigid_body_system, int num_envs, DArray2D<Real> Jac_temp1, DArray2D<Real> Jac_temp2)
+    __global__ void AnchorConstraintJacobianKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
@@ -996,14 +1003,16 @@ namespace dyno
         
         auto& J = rigid_body_system.batch_J;
 
-        ComputeJac(Jac_temp1, anchor_A_global, rigid_body_system, env_id, a_idx, cidx);
-        ComputeJac(Jac_temp2, anchor_B_global, rigid_body_system, env_id, b_idx, cidx);
+        Real jacA[6 * NV_TMP];
+        Real jacB[6 * NV_TMP];
+        ComputeJac(jacA, anchor_A_global, rigid_body_system, env_id, a_idx, cidx);
+        ComputeJac(jacB, anchor_B_global, rigid_body_system, env_id, b_idx, cidx);
 
         for(int i = 0; i < 3; i++)
             for(int j = 0; j < nv; j++)
             {
                 int row = c_start + cidx * 3 + i;
-                J(env_id, row * nv + j) = MatrixAt(Jac_temp1, env_id, cidx, i + 3, j, Vec2i(6, nv)) - MatrixAt(Jac_temp2, env_id, cidx, i + 3, j, Vec2i(6, nv));
+                J(env_id, row * nv + j) = jacA[(i + 3) * nv + j] - jacB[(i + 3) * nv + j];
             }
     }
 
@@ -1145,20 +1154,20 @@ namespace dyno
         }
     }
 
-    __device__ void RotateJacobianRow(DArray2D<Real>& jac_src, DArray2D<Real>& jac_dst, int mat_idx, int num_cols, int sys_id)
+    __device__ void RotateJacobianRow(Real* jac_src, Real* jac_dst, int num_cols)
     {
         for(int i = 0; i < num_cols; i++)
         {
             for(int j = 0; j < 3; j++)
             {
-                MatrixAt(jac_dst, sys_id, mat_idx, j, i, Vec2i(6, num_cols)) = MatrixAt(jac_src, sys_id, mat_idx, j + 3, i, Vec2i(6, num_cols));
-                MatrixAt(jac_dst, sys_id, mat_idx, j + 3, i, Vec2i(6, num_cols)) = MatrixAt(jac_src, sys_id, mat_idx, j, i, Vec2i(6, num_cols));
+                jac_dst[j * num_cols + i] = jac_src[(j + 3) * num_cols + i];
+                jac_dst[(j + 3) * num_cols + i] = jac_src[j * num_cols + i];
             }
         }
     }
 
     template<typename TDataType>
-    __global__ void ComputeDiagJMinvJT(RigidBody<TDataType> rigid_body_system, int num_envs, DArray2D<Real> J_temp, DArray2D<Real> J_temp2)
+    __global__ void ComputeDiagJMinvJT(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
@@ -1183,16 +1192,11 @@ namespace dyno
             return;
         }
 
-        for(int r = 0; r < 6; r++)
-            for(int c = 0; c < nv; c++)
-            {
-                MatrixAt(J_temp, env_id, bid, r, c, Vec2i(6, nv)) = 0.f;
-                MatrixAt(J_temp2, env_id, bid, r, c, Vec2i(6, nv)) = 0.f;
-            }
-
+        Real jac[6 * NV_TMP];
+        Real j_tmp[6 * NV_TMP];
         const auto& pos = rigid_body_system.batch_pos(env_id, bid);
-        ComputeJac(J_temp, pos, rigid_body_system, env_id, bid, bid);
-        RotateJacobianRow(J_temp, J_temp2, bid, nv, env_id);    // J_temp2 now is jac
+        ComputeJac(j_tmp, pos, rigid_body_system, env_id, bid, bid);
+        RotateJacobianRow(j_tmp, jac, nv);
 
         // batch_qM_inv stores the in-place Cholesky factor L of qM from Step().
         // For each Jacobian row j, solve qM * x = j^T via:
@@ -1204,22 +1208,22 @@ namespace dyno
         {
             for(int i = 0; i < nv; i++)
             {
-                Real sum = MatrixAt(J_temp2, env_id, bid, r, i, Vec2i(6, nv));
+                Real sum = jac[r * nv + i];
                 for(int k = 0; k < i; k++)
-                    sum -= MatrixAt(L, env_id, i, k, Vec2i(nv, nv)) * MatrixAt(J_temp, env_id, bid, r, k, Vec2i(6, nv));
+                    sum -= MatrixAt(L, env_id, i, k, Vec2i(nv, nv)) * j_tmp[r * nv + k];
 
                 const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
-                MatrixAt(J_temp, env_id, bid, r, i, Vec2i(6, nv)) = sum / lii;
+                j_tmp[r * nv + i] = sum / lii;
             }
 
             for(int i = nv - 1; i >= 0; i--)
             {
-                Real sum = MatrixAt(J_temp, env_id, bid, r, i, Vec2i(6, nv));
+                Real sum = j_tmp[r * nv + i];
                 for(int k = i + 1; k < nv; k++)
-                    sum -= MatrixAt(L, env_id, k, i, Vec2i(nv, nv)) * MatrixAt(J_temp, env_id, bid, r, k, Vec2i(6, nv));
+                    sum -= MatrixAt(L, env_id, k, i, Vec2i(nv, nv)) * j_tmp[r * nv + k];
 
                 const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
-                MatrixAt(J_temp, env_id, bid, r, i, Vec2i(6, nv)) = sum / lii;
+                j_tmp[r * nv + i] = sum / lii;
             }
         }
 
@@ -1228,9 +1232,9 @@ namespace dyno
         Real a22 = 0.f;
         for(int k = 0; k < nv; k++)
         {
-            a00 += MatrixAt(J_temp2, env_id, bid, 0, k, Vec2i(6, nv)) * MatrixAt(J_temp, env_id, bid, 0, k, Vec2i(6, nv));
-            a11 += MatrixAt(J_temp2, env_id, bid, 1, k, Vec2i(6, nv)) * MatrixAt(J_temp, env_id, bid, 1, k, Vec2i(6, nv));
-            a22 += MatrixAt(J_temp2, env_id, bid, 2, k, Vec2i(6, nv)) * MatrixAt(J_temp, env_id, bid, 2, k, Vec2i(6, nv));
+            a00 += jac[0 * nv + k] * j_tmp[0 * nv + k];
+            a11 += jac[1 * nv + k] * j_tmp[1 * nv + k];
+            a22 += jac[2 * nv + k] * j_tmp[2 * nv + k];
         }
 
         rigid_body_system.batch_weight_inv(env_id, bid) = (a00 + a11 + a22) / 3.f;
@@ -1571,7 +1575,7 @@ namespace dyno
         cdof_dot(env_id, idx + 1) = cvel_2 * cdof_0 - cvel_0 * cdof_2;
         cdof_dot(env_id, idx + 2) = -cvel_1 * cdof_0 + cvel_0 * cdof_1;
         cdof_dot(env_id, idx + 3) = -cvel_2 * cdof_4 + cvel_1 * cdof_5 - cvel_5 * cdof_1 + cvel_4 * cdof_2;
-        cdof_dot(env_id, idx + 4) = cvel_2 + cdof_3 - cvel_0 * cdof_5 + cvel_5 * cdof_0 - cvel_3 * cdof_2;
+        cdof_dot(env_id, idx + 4) = cvel_2 * cdof_3 - cvel_0 * cdof_5 + cvel_5 * cdof_0 - cvel_3 * cdof_2;
         cdof_dot(env_id, idx + 5) = -cvel_1 * cdof_3 + cvel_0 * cdof_4 - cvel_4 * cdof_0 + cvel_3 * cdof_1;
     }
 
@@ -1910,9 +1914,6 @@ namespace dyno
 
         INIT_DYNO_ARRAY(rigid_body_system->anchor_constraints.anchor_nums, num_envs);
 
-        INIT_DYNO_ARRAY2D(rigid_body_system->Mat_temp1, num_envs, num_max_constraints * max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->Mat_temp2, num_envs, num_max_constraints * max_nv);
-
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_type, num_envs, max_bodies);
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_qpos, num_envs, max_joint_qpos);
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_qpos_ref, num_envs, max_joint_qpos);
@@ -2104,6 +2105,7 @@ namespace dyno
         SubtreeComKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
+        // rigid_body_system->batch_cdof.reset();
         ComputeCdofKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
@@ -2125,6 +2127,7 @@ namespace dyno
         cudaDeviceSynchronize();
 
         rigid_body_system->subtree_com_vel.reset();
+        // rigid_body_system->batch_cdof_dot.reset();
         ComputeComVelKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
         // Compute RNE
@@ -2167,11 +2170,11 @@ namespace dyno
         cudaDeviceSynchronize();
 
         rigid_body_system->batch_J.reset();
-        ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, rigid_body_system->Mat_temp1, rigid_body_system->Mat_temp2);
+        ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
         // Anchor constraints
-        AnchorConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, rigid_body_system->Mat_temp1, rigid_body_system->Mat_temp2);
+        AnchorConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
         // Friction loss constraints
@@ -2238,7 +2241,7 @@ namespace dyno
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
     
-        ComputeDiagJMinvJT<TDataType><<<32, 512>>>(*rigid_body_system, num_envs, rigid_body_system->Mat_temp1, rigid_body_system->Mat_temp2);
+        ComputeDiagJMinvJT<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
         // TODO: compute diag(JM^(-1)J^T) for joints

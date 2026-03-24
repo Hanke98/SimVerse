@@ -107,9 +107,6 @@ namespace dyno {
         DArray<int>         is_converged;
         DArray<Real>        sys_alpha;
 
-        DArray2D<Real>      Mat_temp1;
-        DArray2D<Real>      Mat_temp2;
-
         // For constraints
         DArray2D<Real>               batch_J;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints   nc * nv
         DArray<int>                  num_constraints;   // [env_id] number of constraints in each environment = num_collision_constraints + num_topo_invariant_constraints

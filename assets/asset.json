@@ -1,0 +1,31 @@
+{
+  "envs": [
+    {
+      "env_id": 0,
+      "time_step": 0.006,
+      "gravity": [0, -9.81, 0],
+      "rigid_body": [
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.2, 0.1, 0.1],
+          "mass": 1000,
+          "friction": 0.6,
+          "pos": [-0.4, 1, 0],
+          "quat": [-0.545, -0.635, -0.313, 0.449]
+        },
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.1, 0.15, 0.2],
+          "mass": 800,
+          "friction": 0.6,
+          "pos": [0.4, 1, 0],
+          "quat": [0.2588, 0.7520, 0.5284, 0.2887]
+        }
+      ]
+    }
+  ]
+}

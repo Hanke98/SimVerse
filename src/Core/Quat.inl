@@ -143,6 +143,29 @@ namespace dyno
 	}
 
 	template <typename Real>
+	DYN_FUNC Vec3f Quat<Real>::operator * (const Vec3f& vec) const {
+		Vec3f res;
+		if (vec[0] == 0 && vec[1] == 0 && vec[2] == 0) {
+			res = Vec3f(0);
+		} else if (w == 1 && x == 0 && y == 0 && z == 0) {
+			res = vec;
+		} else {
+			// tmp = q_w * v + cross(q_xyz, v)
+			std::vector<double> tmp = {
+				w * vec[0] + y * vec[2] - z * vec[1],
+				w * vec[1] + z * vec[0] - x * vec[2],
+				w * vec[2] + x * vec[1] - y * vec[0]
+			  };
+
+			// res = v + 2 * cross(q_xyz, t)
+			res[0] = vec[0] + 2 * (y * tmp[2] - z * tmp[1]);
+			res[1] = vec[1] + 2 * (z * tmp[0] - x * tmp[2]);
+			res[2] = vec[2] + 2 * (x * tmp[1] - y * tmp[0]);
+		}
+		return res;
+	}
+
+	template <typename Real>
 	DYN_FUNC Quat<Real>  Quat<Real>::operator / (const Real& scale) const
 	{
 		return Quat(x / scale, y / scale, z / scale, w / scale);
@@ -224,6 +247,23 @@ namespace dyno
 		Real siny_cosp = 2 * (w * z + x * y);
 		Real cosy_cosp = 1 - 2 * (y * y + z * z);
 		yaw = atan2(siny_cosp, cosy_cosp);
+	}
+
+	template <typename Real>
+	DYN_FUNC void Quat<Real>::fromAxisAngle(const Vec3f& axis, const Real& angle)
+	{
+		if (angle == 0) {
+			w = 1;
+			x = 0;
+			y = 0;
+			z = 0;
+		} else {
+			double s = sin(angle * 0.5);
+			w = cos(angle * 0.5);
+			x = axis[0] * s;
+			y = axis[1] * s;
+			z = axis[2] * s;
+		}
 	}
 
 

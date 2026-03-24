@@ -1,5 +1,4 @@
 #include "SimNode.h"
-#include "Utils/config_utils.h"
 #include <GLWireframeVisualModule.h>
 
 

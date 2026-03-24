@@ -96,6 +96,8 @@ namespace dyno
 
 		DYN_FUNC void toEulerAngle(Real& yaw, Real& pitch, Real& roll) const;
 
+		DYN_FUNC void fromAxisAngle(const Vec3f& axis, const Real& angle);
+
 		DYN_FUNC SquareMatrix<Real, 3> toMatrix3x3() const;                    //return 3x3matrix format
 		DYN_FUNC SquareMatrix<Real, 4> toMatrix4x4() const;                    //return 4x4matrix with a identity transform.
 
@@ -106,6 +108,7 @@ namespace dyno
 		DYN_FUNC Quat<Real> operator + (const Quat<Real>&) const;
 		DYN_FUNC Quat<Real> operator * (const Quat<Real>&) const;
 		DYN_FUNC Quat<Real> operator * (const Real&) const;
+		DYN_FUNC Vec3f operator * (const Vec3f&) const;
 		DYN_FUNC Quat<Real> operator / (const Real&) const;
 		DYN_FUNC bool operator == (const Quat<Real>&) const;
 		DYN_FUNC bool operator != (const Quat<Real>&) const;

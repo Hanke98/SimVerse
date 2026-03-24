@@ -1,10 +1,7 @@
-#pragma once
-
 #include <string>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
-
 #include "SimNode/SimNode.h"
 
 
@@ -282,7 +279,50 @@ namespace dyno {
             }
         }
 
-        // std::cout << "write back" << std::endl;
+        for (eid = 0; eid < env_num; ++eid) {
+            for (int bid = 0; bid < batch_bodies_host[eid]; ++bid) {
+                const int pid = parent_idx_host(eid, bid);
+                if (pid != -1) {
+                    const auto& parent_quat = batch_quat_host(eid, pid);
+                    const auto& parent_rot = body_rot_host(eid, pid);
+                    const int& joint_type = joint_type_host(eid, bid);
+                    const auto& joint_qpos_start = joint_qpos_offset_host(eid, bid);
+                    const auto& local_axis = joint_axis_ref_host(eid, bid);
+                    const auto& local_anchor = joint_anchor_ref_host(eid, bid);
+
+                    Quat<Real> xquat_p = parent_quat * joint_rel_quat_host(eid, bid);
+                    Vec3f joint_axis = xquat_p * local_axis;
+                    Vec3f xanchor = xquat_p * local_anchor;
+                    Vec3f xpos = parent_rot * joint_rel_pos_host(eid, bid) + body_pos_host(eid, pid);
+                    xanchor += xpos;
+
+                    if (joint_type == 2) {
+                        batch_quat_host(eid, bid) = xquat_p;
+                        body_rot_host(eid, bid) = xquat_p.toMatrix3x3();
+                        body_pos_host(eid, bid) = xpos + (joint_qpos_host(eid, joint_qpos_start) - joint_qpos_ref_host(eid, joint_qpos_start)) * joint_axis;
+                    } else {
+                        Quat<Real> quat_local;
+                        if (joint_type == 1)
+                            quat_local.fromAxisAngle(local_axis, joint_qpos_host(eid, joint_qpos_start) - joint_qpos_ref_host(eid, joint_qpos_start));
+                        else if (joint_type == 3) {
+                            Quat<Real> ball_quat = Quat<Real>(
+                                joint_qpos_host(eid, joint_qpos_start),
+                                joint_qpos_host(eid, joint_qpos_start + 1),
+                                joint_qpos_host(eid, joint_qpos_start + 2),
+                                joint_qpos_host(eid, joint_qpos_start + 3));
+                            ball_quat.normalize();
+                            quat_local = ball_quat;
+                        }
+
+                        Quat<Real> xquat_c = xquat_p * quat_local;
+                        batch_quat_host(eid, bid) = xquat_c;
+                        body_rot_host(eid, bid) = xquat_c.toMatrix3x3();
+                        xpos = xquat_c * local_anchor;
+                        body_pos_host(eid, bid) = xanchor - xpos;
+                    }
+                }
+            }
+        }
 
         rigid_bodies.shape_type.assign(shape_type_host);
         rigid_bodies.shape_idx.assign(shape_idx_host);
@@ -442,4 +482,8 @@ namespace dyno {
             std::cerr << "Error: " << e.what() << std::endl;
         }
     }
+
+    template class SimNode<
+    DataTypes<float, Vector<float,3>, SquareMatrix<float,3>, Rigid<float,3>>
+>;
 }

@@ -88,6 +88,7 @@ namespace dyno {
                     body_pos_host(eid, bid) = Vec3f(pos[0], pos[1], pos[2]);
                     auto quat = rb_json.at("quat").get<std::vector<float>>();
                     batch_quat_host(eid, bid) = Quat<Real>(quat[1], quat[2], quat[3], quat[0]);
+                    body_rot_host(eid, bid) = batch_quat_host(eid, bid).toMatrix3x3();
 
                     mass_host(eid, bid) = rb_json["mass"];
                     bool is_static = rb_json["is_static"];
@@ -107,7 +108,7 @@ namespace dyno {
                                 spheres_host(eid, sphere_num).center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
                                 spheres_host(eid, sphere_num).radius = halfLength[0];
-                                spheres_host(eid, sphere_num).rot = batch_quat_host(eid, bid);
+                                // spheres_host(eid, sphere_num).rot = batch_quat_host(eid, bid);
 
                                 sphere_num++;
 
@@ -124,7 +125,7 @@ namespace dyno {
                                 boxes_host(eid, box_num).center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
                                 boxes_host(eid, box_num).halfLength = Vec3f(halfLength[0], halfLength[1], halfLength[2]);
-                                boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
+                                // boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
                                 box_num++;
                                 break;
@@ -137,7 +138,7 @@ namespace dyno {
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
                                 capsules_host(eid, capsule_num).radius= halfLength[0];
                                 capsules_host(eid, capsule_num).halfLength= halfLength[1];
-                                capsules_host(eid, capsule_num).rot = batch_quat_host(eid, bid);
+                                // capsules_host(eid, capsule_num).rot = batch_quat_host(eid, bid);
 
                                 capsule_num++;
                                 break;
@@ -291,6 +292,9 @@ namespace dyno {
 
             env_idx++;
         }
+
+        env_infos.gravities.assign(gravities);
+        env_infos.timesteps.assign(timesteps);
 
         var_env_infos.setValue(env_infos);
 

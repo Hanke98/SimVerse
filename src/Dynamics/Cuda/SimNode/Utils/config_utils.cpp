@@ -156,16 +156,19 @@ namespace dyno {
                         }
                     }
 
-                    if (rb_json.contains("joint")) {
+                    if (rb_json.contains("joint"))
+                    {
                         auto joint_json = rb_json["joint"];
                         parent_idx_host(eid, bid) = joint_json["parent"].get<int>();
 
                         auto joint_anchor_ref = joint_json.at("anchor").get<std::vector<float>>();
                         joint_anchor_ref_host(eid, bid) = Vec3f(joint_anchor_ref[0], joint_anchor_ref[1], joint_anchor_ref[2]);
 
-                        if (rb_json.contains("axis")) {
+                        if (joint_json.contains("axis"))
+                        {
                             auto joint_axis_ref = joint_json.at("axis").get<std::vector<float>>();
                             joint_axis_ref_host(eid, bid) = Vec3f(joint_axis_ref[0], joint_axis_ref[1], joint_axis_ref[2]);
+                            spdlog::info("Joint axis for env {}, body {}: ({}, {}, {})", eid, bid, joint_axis_ref_host(eid, bid).x, joint_axis_ref_host(eid, bid).y, joint_axis_ref_host(eid, bid).z);
                         }
 
                         joint_rel_pos_host(eid, bid) = body_pos_host(eid, bid);

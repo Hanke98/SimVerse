@@ -158,13 +158,15 @@ namespace dyno
         return Quat<T>(axis.x * s, axis.y * s, axis.z * s, cos(half_angle));
     }
 
-    template<typename T>
-    inline __host__ __device__ Vec3f RotateVector(const Vec3f& v, const Quat<T>& q)
+    inline __host__ __device__ Vec3f RotateVector(const Vec3f& v, const Quat<Real>& q)
     {
         // Rotate vector v by quaternion q
-        Vec3f q_vec(q.x, q.y, q.z);
-        Vec3f t = 2.0f * q_vec.cross(v);
-        return v + q.w * t + q_vec.cross(t);
+        Vec3f tmp = Vec3f(q.w * v.x + q.y * v.z - q.z * v.y,
+                          q.w * v.y + q.z * v.x - q.x * v.z,
+                          q.w * v.z + q.x * v.y - q.y * v.x);
+        return v + 2.f * Vec3f(q.y * tmp.z - q.z * tmp.y,
+                               q.z * tmp.x - q.x * tmp.z,
+                               q.x * tmp.y - q.y * tmp.x);
     }
 
     template<typename T>    // 这个函数用来查batch matrix的元素, 相当于vector[sys_id][vec<mat1D>], sys_id是batch_id, mat_id表示第几个小矩阵，row col是小矩阵内的行列，submat_size是小矩阵的尺寸
@@ -273,19 +275,19 @@ namespace dyno
         }
     }
 
-    // Variable-size batched Cholesky solve for packed row-major storage.
+    // Variable-size batched Cholesky solve for compact row-major storage.
     // DArray2D index meaning here:
     // - first index: system/environment id
     // - second index: flattened row-major data of that system
-    // A(sys, i * leading_dim + j) corresponds to A_ij of that system.
+    // A(sys, i * n + j) corresponds to A_ij of that system, where n = n_list[sys].
     // b(sys, i) and x(sys, i) are packed vectors per system.
     // NOTE: This kernel factorizes A in-place (A becomes its lower-triangular Cholesky factor L).
+    // leading_dim is kept as an upper-bound guard for compatibility.
     __global__ void BatchCholeskySolveVarSizeKernel(
         DArray2D<Real> A_packed,         // [sys, leading_dim * leading_dim], row-major, overwritten by L
         const DArray2D<Real> b_packed,   // [sys, leading_dim]
         DArray2D<Real> x_packed,         // [sys, leading_dim]
         const DArray<int> n_list,        // [env], actual n for each environment
-        int leading_dim,
         int num_envs, DArray<int> skip_flag=DArray<int>());
     
 }

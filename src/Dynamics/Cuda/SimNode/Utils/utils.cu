@@ -38,7 +38,6 @@ namespace dyno
         const DArray2D<Real> b_packed,
         DArray2D<Real> x_packed,
         const DArray<int> n_list,
-        int leading_dim,
         int num_envs,
         DArray<int> skip_flag)
     {
@@ -53,8 +52,10 @@ namespace dyno
             return;
 
         const int n = n_list[env_id];
-        if(n <= 0 || n > leading_dim)
-            return;
+
+        // Matrices in this solver path are stored compactly per-env using
+        // stride n (not padded by leading_dim).
+        const int lda = n;
 
         const Real eps = 1e-12f;
 
@@ -63,12 +64,12 @@ namespace dyno
         {
             for(int j = 0; j <= i; j++)
             {
-                const int ij = i * leading_dim + j;
+                const int ij = i * lda + j;
                 Real sum = A_packed(env_id, ij);
                 for(int k = 0; k < j; k++)
                 {
-                    const int ik = i * leading_dim + k;
-                    const int jk = j * leading_dim + k;
+                    const int ik = i * lda + k;
+                    const int jk = j * lda + k;
                     sum -= A_packed(env_id, ik) * A_packed(env_id, jk);
                 }
 
@@ -80,14 +81,14 @@ namespace dyno
                 }
                 else
                 {
-                    const int jj = j * leading_dim + j;
+                    const int jj = j * lda + j;
                     const Real d = A_packed(env_id, jj);
                     A_packed(env_id, ij) = (fabsf(d) > eps) ? (sum / d) : 0.f;
                 }
             }
 
             for(int j = i + 1; j < n; j++)
-                A_packed(env_id, i * leading_dim + j) = 0.f;
+                A_packed(env_id, i * lda + j) = 0.f;
         }
 
         // Forward solve: L y = b. Reuse x_packed as y workspace.
@@ -95,9 +96,9 @@ namespace dyno
         {
             Real sum = b_packed(env_id, i);
             for(int k = 0; k < i; k++)
-                sum -= A_packed(env_id, i * leading_dim + k) * x_packed(env_id, k);
+                sum -= A_packed(env_id, i * lda + k) * x_packed(env_id, k);
 
-            const Real lii = A_packed(env_id, i * leading_dim + i);
+            const Real lii = A_packed(env_id, i * lda + i);
             x_packed(env_id, i) = sum / lii;
         }
 
@@ -106,9 +107,9 @@ namespace dyno
         {
             Real sum = x_packed(env_id, i);
             for(int k = i + 1; k < n; k++)
-                sum -= A_packed(env_id, k * leading_dim + i) * x_packed(env_id, k);
+                sum -= A_packed(env_id, k * lda + i) * x_packed(env_id, k);
 
-            const Real lii = A_packed(env_id, i * leading_dim + i);
+            const Real lii = A_packed(env_id, i * lda + i);
             x_packed(env_id, i) = sum / lii;
         }
     }

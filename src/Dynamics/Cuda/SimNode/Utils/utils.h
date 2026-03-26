@@ -169,6 +169,20 @@ namespace dyno
                                q.x * tmp.y - q.y * tmp.x);
     }
 
+    inline __host__ __device__ void Quat2Vel(const Quat<Real>& quat, Real& speed, Vec3f& angle_vel, Real dt)
+    {
+        Vector<Real, 3> axis(quat.x, quat.y, quat.z);
+        Real sin_half_theta = axis.norm();
+        axis.normalize();
+
+        speed = 2.f * atan2(sin_half_theta, quat.w);
+        if(speed > M_PI)
+            speed -= 2.f * M_PI;
+
+        speed /= dt;
+        angle_vel = axis * speed;
+    }
+
     template<typename T>    // 这个函数用来查batch matrix的元素, 相当于vector[sys_id][vec<mat1D>], sys_id是batch_id, mat_id表示第几个小矩阵，row col是小矩阵内的行列，submat_size是小矩阵的尺寸
     inline __device__ T& MatrixAt(DArray2D<T>& mat, int sys_id, int mat_id, int row, int col, Vec2i submat_size)
     {

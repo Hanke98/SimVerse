@@ -70,7 +70,7 @@ namespace dyno {
         DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
         DArray2D<Vec3f>     batch_inertia;
         DArray2D<Real>      batch_qM_inv;
-        // DArray2D<Real>      batch_qM_L;     // [env_id, dof_idx] lower triangular matrix L in the LDL^T decomposition of the mass matrix
+
         DArray2D<Real>      batch_qM_diag_elem;
         DArray<Real>        batch_scale;
         DArray2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
@@ -118,8 +118,9 @@ namespace dyno {
         BatchAnchorConstraints          anchor_constraints;
         BatchFrictionLossConstraints    friction_loss_constraints;
         BatchJointLimitConstraints      joint_limit_constraints;
-        CollisionConstraintParas        collision_paras;
         BatchCollisionConstraints       collision_constraints;
+        DArray2D<Real>                  friction_mu;
+        DArray2D<Real>                  contact_weights;
         
 
         // For joint

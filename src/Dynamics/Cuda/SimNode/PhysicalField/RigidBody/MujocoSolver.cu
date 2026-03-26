@@ -299,6 +299,7 @@ namespace dyno
                 subtree_mass(env_id, parent_idx) += subtree_mass(env_id, bid);
             printf("Env %d, Body %d, Subtree Mass: %f\n", env_id, bid, subtree_mass(env_id, bid));
         }
+
     }
 
     template<typename TDataType>
@@ -789,7 +790,6 @@ namespace dyno
         qvel(env_id, dof_idx) += qacc(env_id, dof_idx) * dt;
     }
 
-
     __device__ void CubeCollitionWithGround(const Vec3f& pos, const Mat3f& rot, const BoxInfo& box,
         BatchCollisionConstraints& collision_constraints, int env_id, int bid)
     {
@@ -820,6 +820,101 @@ namespace dyno
     }
 
     template<typename TDataType>
+    __global__ void UpdateAnchorConstarints(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int anchor_idx = threadIdx.x;
+        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0])
+            return;
+        
+        auto& anchor_constraints = rigid_body_system.anchor_constraints;
+        const int& body_A_idx = anchor_constraints.body_idxs(env_id, anchor_idx).first;
+        const int& body_B_idx = anchor_constraints.body_idxs(env_id, anchor_idx).second;
+
+        const Mat3f& rot_A = rigid_body_system.batch_rot(env_id, body_A_idx);
+        const Mat3f& rot_B = rigid_body_system.batch_rot(env_id, body_B_idx);
+
+        const Vec3f& local_anchor_A = anchor_constraints.anchor_A_local(env_id, anchor_idx);
+        const Vec3f& local_anchor_B = anchor_constraints.anchor_B_local(env_id, anchor_idx);
+        const Vec3f& pos_A = rigid_body_system.batch_pos(env_id, body_A_idx);
+        const Vec3f& pos_B = rigid_body_system.batch_pos(env_id, body_B_idx);
+        Vec3f& global_anchor_A = anchor_constraints.anchor_A_world(env_id, anchor_idx);
+        Vec3f& global_anchor_B = anchor_constraints.anchor_B_world(env_id, anchor_idx);
+        Vec3f& pos_err = anchor_constraints.anchor_error(env_id, anchor_idx);
+
+        global_anchor_A = rot_A * local_anchor_A + pos_A;
+        global_anchor_B = rot_B * local_anchor_B + pos_B;
+        pos_err = global_anchor_A - global_anchor_B;
+    }
+
+    template<typename TDataType>
+    __global__ void UpdateJointLimitConstraints(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int jl_idx = threadIdx.x;
+        auto& joint_limits = rigid_body_system.joint_limit_constraints;
+        if(jl_idx >= joint_limits.ref_nums[env_id])
+            return;
+
+        const int& bid = joint_limits.joint_idx(env_id, jl_idx);
+        const int& joint_type = rigid_body_system.joint_type(env_id, bid);
+        const int& is_upper = joint_limits.is_upper(env_id, jl_idx);
+        const int& qpos_idx = rigid_body_system.qpos_offset(env_id, bid);
+        const auto& qpos = rigid_body_system.batch_qpos;
+        const Real& limit = joint_limits.limit(env_id, jl_idx);
+        auto& limit_err = joint_limits.limit_error(env_id, jl_idx);
+        auto& is_active = joint_limits.is_active(env_id, jl_idx);
+        auto& limit_extern = joint_limits.limit_extern(env_id, jl_idx);
+        is_active = 0;
+
+        if(joint_type < 3)      // Hinge or Slide
+        {
+            if(is_upper)
+            {
+                Real dist = qpos(env_id, qpos_idx) - limit;
+                if(dist > 0.f)
+                {
+                    limit_err = dist;
+                    is_active = 1;
+                }
+            }
+            else
+            {
+                Real dist = qpos(env_id, qpos_idx) - limit;
+                if(dist < 0.f)
+                {
+                    limit_err = dist;
+                    is_active = 1;
+                }
+            }
+        }
+        else                    // Ball, upper only
+        {
+            Quat<Real> quat = Quat<Real>(qpos(env_id, qpos_idx), qpos(env_id, qpos_idx + 1), qpos(env_id, qpos_idx + 2), qpos(env_id, qpos_idx + 3));
+            quat.normalize();
+
+            Vec3f angle_vel;
+            Real angle;
+            Quat2Vel(quat, angle, angle_vel, 1.f);
+            Real dist = limit - angle;
+            if(dist < 0.f)
+            {
+                limit_err = dist;
+                is_active = 1;
+                limit_extern = angle_vel.normalize();
+            }
+        }
+
+        
+    }
+
+    template<typename TDataType>
     __global__ void CountConstraintNums(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockDim.x * blockIdx.x + threadIdx.x;
@@ -827,20 +922,36 @@ namespace dyno
             return;
 
         auto& num_each_constraint = rigid_body_system.num_each_constraint;
-        auto& constraints = rigid_body_system.collision_constraints;
+        
+        const auto& anchors = rigid_body_system.anchor_constraints;
+        const auto& friction_losses = rigid_body_system.friction_loss_constraints;
+        auto& joint_limits = rigid_body_system.joint_limit_constraints;
+        auto& collisions = rigid_body_system.collision_constraints;
 
-        const auto& collisions = rigid_body_system.collision_constraints;
 
-        num_each_constraint[env_id] = Vec4i(0, 0, 0, collisions.collision_nums[env_id] * 4);
+        // count joint limit constraints
+        int active_jl_num = 0;
+        for(int i = 0; i < joint_limits.ref_nums[env_id]; i++)
+        {
+            if(joint_limits.is_active(env_id, i))
+            {
+                joint_limits.active_mapping(env_id, active_jl_num) = i;
+                active_jl_num++;
+            }
+        }
+
+        num_each_constraint[env_id][2] = active_jl_num;
+        num_each_constraint[env_id][3] = collisions.collision_nums[env_id] * 4;
         
         auto& offsets = rigid_body_system.constraint_offset[env_id];
         auto& num_constraints = rigid_body_system.num_constraints[env_id];
 
-        offsets[0] = 0;
-        for(int i = 1; i < 4; i++)
+        num_constraints = num_each_constraint[env_id][0] + num_each_constraint[env_id][1];
+        for(int i = 2; i < 4; i++)
+        {
             offsets[i] = offsets[i - 1] + num_each_constraint[env_id][i - 1];
-
-        num_constraints = offsets[3] + num_each_constraint[env_id][3];
+            num_constraints += num_each_constraint[env_id][i];
+        }
 
 
         printf("Env: %d, Num constraints(total: %d): %d, %d, %d, %d\n", env_id, num_constraints, num_each_constraint[env_id].x, num_each_constraint[env_id].y, num_each_constraint[env_id].z, num_each_constraint[env_id].w);
@@ -855,7 +966,6 @@ namespace dyno
             return;
 
         auto& collision_constraints = rigid_body_system.collision_constraints;
-        const auto& collision_paras = rigid_body_system.collision_paras;
     
         const int num_bodies = rigid_body_system.batch_bodies[env_id];
 
@@ -1107,7 +1217,25 @@ namespace dyno
         if(cidx >= constraint_num)
             return;
         
-        
+        const auto& constraints = rigid_body_system.joint_limit_constraints;
+        const int& jl_cid = constraints.active_mapping(env_id, cidx);
+        const int& bid = constraints.joint_idx(env_id, jl_cid);
+        const int& q_start = rigid_body_system.q_offset(env_id, bid);
+        const int& joint_type = rigid_body_system.joint_type(env_id, bid);
+        const Real& pos_err = constraints.limit_error(env_id, jl_cid);
+        const int row_idx = rigid_body_system.constraint_offset[env_id][2] + cidx;
+        const int& nv = rigid_body_system.batch_nv[env_id];
+
+        auto& J = rigid_body_system.batch_J;
+
+        if(joint_type < 3)     // Hinge or Slide
+            J(env_id, row_idx * nv + q_start) = pos_err < 0.f ? 1.f : -1.f;
+        else                    // Ball
+        {
+            const Vec3f& axis = constraints.limit_extern(env_id, jl_cid);
+            for(int i = 0; i < 3; i++)
+                J(env_id, row_idx * nv + q_start + i) = axis[i];
+        }
     }
 
     template<typename TDataType>
@@ -1127,16 +1255,9 @@ namespace dyno
         }
     }
 
-    __device__ Vec4f ComputeKBIP(Real error, const CollisionConstraintParas& collision_paras)
+    __device__ Vec4f ComputeKBIP(Real error, Real dmax, Real dmin, Real time_const, 
+        Real damp_ratio, Real midpoint, Real width, Real power)
     {
-        const Real& dmax = collision_paras.dmax;
-        const Real& dmin = collision_paras.dmin;
-        const Real& time_const = collision_paras.time_const;
-        const Real& damp_ratio = collision_paras.damp_ratio;
-        const Real& midpoint = collision_paras.midpoint;
-        const Real& width = collision_paras.width;
-        const Real& power = collision_paras.power;
-
         Real K = 1.f / (dmax * dmax * time_const * time_const * damp_ratio * damp_ratio);
         Real B = 2.f / (dmax * time_const);
 
@@ -1171,6 +1292,155 @@ namespace dyno
     }
 
     template<typename TDataType>
+    __global__ void ComputeAnchorAref(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+    
+        int anchor_idx = threadIdx.x;
+        const auto& anchor_constraints = rigid_body_system.anchor_constraints;
+        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0])
+            return;
+
+        const auto& dmax = anchor_constraints.dmax(env_id, anchor_idx);
+        const auto& dmin = anchor_constraints.dmin(env_id, anchor_idx);
+        const auto& time_const = anchor_constraints.time_const(env_id, anchor_idx);
+        const auto& damp_ratio = anchor_constraints.damp_ratio(env_id, anchor_idx);
+        const auto& midpoint = anchor_constraints.midpoint(env_id, anchor_idx);
+        const auto& width = anchor_constraints.width(env_id, anchor_idx);
+        const auto& power = anchor_constraints.power(env_id, anchor_idx);
+        const auto& constraint_vels = rigid_body_system.batch_constraint_vel;
+
+        auto& aref = rigid_body_system.batch_aref;
+        auto& imp = rigid_body_system.batch_imp;
+
+        Real pos_err_norm = anchor_constraints.anchor_error(env_id, anchor_idx).norm();
+        Vec4f KBIP = ComputeKBIP(pos_err_norm, dmax, dmin, time_const, damp_ratio, midpoint, width, power);
+        Real K = KBIP[0];
+        Real B = KBIP[1];
+        Real I = KBIP[2];
+        for(int i = 0; i < 3; i++)
+        {
+            imp(env_id, anchor_idx * 3 + i) = I;
+            aref(env_id, anchor_idx * 3 + i) = -B * constraint_vels(env_id, anchor_idx * 3 + i) - K * I * pos_err_norm;
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeFrictionLossAref(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int fidx = threadIdx.x;
+        const auto& friction_loss_constraints = rigid_body_system.friction_loss_constraints;
+        if(fidx >= rigid_body_system.num_each_constraint[env_id][1])
+            return;
+
+        const int& c_offset = rigid_body_system.constraint_offset[env_id][1];
+        const auto& dmax = friction_loss_constraints.dmax(env_id, fidx);
+        const auto& dmin = friction_loss_constraints.dmin(env_id, fidx);
+        const auto& time_const = friction_loss_constraints.time_const(env_id, fidx);
+        const auto& damp_ratio = friction_loss_constraints.damp_ratio(env_id, fidx);
+        const auto& midpoint = friction_loss_constraints.midpoint(env_id, fidx);
+        const auto& width = friction_loss_constraints.width(env_id, fidx);
+        const auto& power = friction_loss_constraints.power(env_id, fidx);
+
+        auto& imp = rigid_body_system.batch_imp;
+        auto& aref = rigid_body_system.batch_aref;
+        const auto& constraint_vels = rigid_body_system.batch_constraint_vel;
+        Vec4f KBIP = ComputeKBIP(0.f, dmax, dmin, time_const, damp_ratio, midpoint, width, power);
+        imp(env_id, c_offset + fidx) = KBIP[2];
+        aref(env_id, c_offset + fidx) = -KBIP[1] * constraint_vels(env_id, c_offset + fidx);
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeJointLimitAref(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+    
+        int cidx = threadIdx.x;
+        const auto& joint_limit_constraints = rigid_body_system.joint_limit_constraints;
+        if(cidx >= rigid_body_system.num_each_constraint[env_id][2])
+            return;
+
+        const int& c_offset = rigid_body_system.constraint_offset[env_id][2];
+        const int& jl_cidx = joint_limit_constraints.active_mapping(env_id, cidx);
+
+        const auto& dmax = joint_limit_constraints.dmax(env_id, jl_cidx);
+        const auto& dmin = joint_limit_constraints.dmin(env_id, jl_cidx);
+        const auto& time_const = joint_limit_constraints.time_const(env_id, jl_cidx);
+        const auto& damp_ratio = joint_limit_constraints.damp_ratio(env_id, jl_cidx);
+        const auto& midpoint = joint_limit_constraints.midpoint(env_id, jl_cidx);
+        const auto& width = joint_limit_constraints.width(env_id, jl_cidx);
+        const auto& power = joint_limit_constraints.power(env_id, jl_cidx);
+        const auto& constraint_vels = rigid_body_system.batch_constraint_vel;
+        const auto& pos_err = joint_limit_constraints.limit_error(env_id, jl_cidx);
+
+        auto& imp = rigid_body_system.batch_imp;
+        auto& aref = rigid_body_system.batch_aref;
+
+        Vec4f KBIP = ComputeKBIP(pos_err, dmax, dmin, time_const, damp_ratio, midpoint, width, power);
+        Real K = KBIP[0];
+        Real B = KBIP[1];
+        Real I = KBIP[2];
+        imp(env_id, c_offset + cidx) = I;
+        aref(env_id, c_offset + cidx) = -B * constraint_vels(env_id, c_offset + cidx) + K * I * pos_err;
+    }
+
+    template<typename T>
+    __device__ void ComputeContactParas(const BatchCollisionConstraints& sys_contact_paras, const Pair<int, int>& body_idxs, int env_id, const T& wa, const T& wb,
+        T& time_const, T& damp_ratio, T& dmax, T& dmin, T& midpoint, T& width, T& power)
+    {
+        int a_idx = body_idxs.first;
+        int b_idx = body_idxs.second;
+
+        const Real& a_time_const = sys_contact_paras.time_const(env_id, a_idx);
+        const Real& a_damp_ratio = sys_contact_paras.damp_ratio(env_id, a_idx);
+        const Real& a_dmax = sys_contact_paras.dmax(env_id, a_idx);
+        const Real& a_dmin = sys_contact_paras.dmin(env_id, a_idx);
+        const Real& a_midpoint = sys_contact_paras.midpoint(env_id, a_idx);
+        const Real& a_width = sys_contact_paras.width(env_id, a_idx);
+        const Real& a_power = sys_contact_paras.power(env_id, a_idx);
+
+        if(b_idx != -1)
+        {
+            const Real& b_time_const = sys_contact_paras.time_const(env_id, b_idx);
+            const Real& b_damp_ratio = sys_contact_paras.damp_ratio(env_id, b_idx);
+            const Real& b_dmax = sys_contact_paras.dmax(env_id, b_idx);
+            const Real& b_dmin = sys_contact_paras.dmin(env_id, b_idx);
+            const Real& b_midpoint = sys_contact_paras.midpoint(env_id, b_idx);
+            const Real& b_width = sys_contact_paras.width(env_id, b_idx);
+            const Real& b_power = sys_contact_paras.power(env_id, b_idx);
+
+            Real w_a = wa / (wa + wb);
+            Real w_b = wb / (wa + wb);
+
+            time_const = w_a * a_time_const + w_b * b_time_const;
+            damp_ratio = w_a * a_damp_ratio + w_b * b_damp_ratio;
+            dmax = w_a * a_dmax + w_b * b_dmax;
+            dmin = w_a * a_dmin + w_b * b_dmin;
+            midpoint = w_a * a_midpoint + w_b * b_midpoint;
+            width = w_a * a_width + w_b * b_width;
+            power = w_a * a_power + w_b * b_power;
+        }
+        else
+        {
+            time_const = a_time_const;
+            damp_ratio = a_damp_ratio;
+            dmax = a_dmax;
+            dmin = a_dmin;
+            midpoint = a_midpoint;
+            width = a_width;
+            power = a_power;
+        }
+    }
+
+    template<typename TDataType>
     __global__ void ComputeContactAref(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1189,9 +1459,19 @@ namespace dyno
         const auto& collision_constraints = rigid_body_system.collision_constraints;
         const auto& depth = collision_constraints.depth(env_id, contact_idx);
         const auto& constraint_vels = rigid_body_system.batch_constraint_vel;
+        const auto& body_idxs = collision_constraints.body_idxs(env_id, contact_idx);
 
-        Vec4f KBIP = ComputeKBIP(depth, rigid_body_system.collision_paras);
-        
+        const int a_idx = body_idxs.first;
+        const int b_idx = body_idxs.second;
+
+        const Real& wa = rigid_body_system.contact_weights(env_id, a_idx);
+        Real wb = b_idx == -1 ? 0.f : rigid_body_system.contact_weights(env_id, b_idx);
+
+        Real time_const, damp_ratio, dmax, dmin, midpoint, width, power;
+        ComputeContactParas(collision_constraints, body_idxs, env_id, wa, wb, time_const, damp_ratio, dmax, dmin, midpoint, width, power);
+
+        Vec4f KBIP = ComputeKBIP(depth, dmax, dmin, time_const, damp_ratio, midpoint, width, power);
+
         auto& imp = rigid_body_system.batch_imp;
         auto& aref = rigid_body_system.batch_aref;
 
@@ -1221,7 +1501,7 @@ namespace dyno
     }
 
     template<typename TDataType>
-    __global__ void ComputeDiagJMinvJT(RigidBody<TDataType> rigid_body_system, int num_envs)
+    __global__ void ComputeDiagJMinvJTForBodies(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
@@ -1297,6 +1577,159 @@ namespace dyno
     }
 
     template<typename TDataType>
+    __global__ void ComputeDiagJMinvJTForJoints(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int bid = threadIdx.x;
+        int num_bodies = rigid_body_system.batch_bodies[env_id];
+        if(bid >= num_bodies)
+            return;
+
+        const int nv = rigid_body_system.batch_nv[env_id];
+        const int q_start = rigid_body_system.q_offset(env_id, bid);
+        const int q_num = rigid_body_system.q_lengths(env_id, bid);
+        auto& dof_weight_inv = rigid_body_system.batch_dof_weight_inv;
+
+        const int& joint_type = rigid_body_system.joint_type(env_id, bid);
+        if(joint_type == 0)     // free
+            return;
+
+        const auto& L = rigid_body_system.batch_qM_inv;
+        
+        if(joint_type < 3)      // Hinge or Slide
+        {
+
+            Real x[NV_TMP];
+            for(int i = 0; i < nv; i++)
+                x[i] = (i == q_start) ? 1.f : 0.f;
+
+            for(int i = 0; i < nv; i++)
+            {
+                Real sum = x[i];
+                for(int k = 0; k < i; k++)
+                    sum -= MatrixAt(L, env_id, i, k, Vec2i(nv, nv)) * x[k];
+
+                const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                x[i] = sum / lii;
+            }
+
+            for(int i = nv - 1; i >= 0; i--)
+            {
+                Real sum = x[i];
+                for(int k = i + 1; k < nv; k++)
+                    sum -= MatrixAt(L, env_id, k, i, Vec2i(nv, nv)) * x[k];
+
+                const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                x[i] = sum / lii;
+            }
+
+            dof_weight_inv(env_id, q_start) = x[q_start];
+        }
+        else                    // Ball
+        {
+            Real w_sum = 0.f;
+            for(int axis = 0; axis < 3; axis++)
+            {
+                const int qidx = q_start + axis;
+                Real x[NV_TMP];
+                for(int i = 0; i < nv; i++)
+                    x[i] = (i == qidx) ? 1.f : 0.f;
+
+                for(int i = 0; i < nv; i++)
+                {
+                    Real sum = x[i];
+                    for(int k = 0; k < i; k++)
+                        sum -= MatrixAt(L, env_id, i, k, Vec2i(nv, nv)) * x[k];
+
+                    const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                    x[i] = sum / lii;
+                }
+
+                for(int i = nv - 1; i >= 0; i--)
+                {
+                    Real sum = x[i];
+                    for(int k = i + 1; k < nv; k++)
+                        sum -= MatrixAt(L, env_id, k, i, Vec2i(nv, nv)) * x[k];
+
+                    const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                    x[i] = sum / lii;
+                }
+
+                w_sum += x[qidx];
+            }
+
+            const Real w = w_sum / 3.f;
+            dof_weight_inv(env_id, q_start + 0) = w;
+            dof_weight_inv(env_id, q_start + 1) = w;
+            dof_weight_inv(env_id, q_start + 2) = w;
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeAnchor_dAKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        int anchor_idx = threadIdx.x;
+        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0])
+            return;
+
+        const auto& anchor_constraints = rigid_body_system.anchor_constraints;
+
+        const int& body_A_idx = anchor_constraints.body_idxs(env_id, anchor_idx).first;
+        const int& body_B_idx = anchor_constraints.body_idxs(env_id, anchor_idx).second;
+        Real w = rigid_body_system.batch_weight_inv(env_id, body_A_idx) + rigid_body_system.batch_weight_inv(env_id, body_B_idx);
+
+        auto& dA = rigid_body_system.batch_dA;
+        for(int i = 0; i < 3; i++)
+            dA(env_id, anchor_idx * 3 + i) = w;
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeFrictionLoss_dAKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        int fidx = threadIdx.x;
+        if(fidx >= rigid_body_system.num_each_constraint[env_id][1])
+            return;
+
+        const auto& friction_loss_constraints = rigid_body_system.friction_loss_constraints;
+
+        const int& dof_idx = friction_loss_constraints.dof_frictionloss(env_id, fidx);
+        const int& c_offset = rigid_body_system.constraint_offset[env_id][1];
+        Real w = rigid_body_system.batch_dof_weight_inv(env_id, dof_idx);
+        rigid_body_system.batch_dA(env_id, c_offset + fidx) = w;
+    }
+
+    template<typename TDataType>
+    __global__ void ComputeJointLimit_dAKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        int jidx = threadIdx.x;
+        if(jidx >= rigid_body_system.num_each_constraint[env_id][2])
+            return;
+
+        const auto& joint_limit_constraints = rigid_body_system.joint_limit_constraints;
+        auto& dA = rigid_body_system.batch_dA;
+
+        const int& jl_cidx = joint_limit_constraints.active_mapping(env_id, jidx);
+        const int& body_idx = joint_limit_constraints.joint_idx(env_id, jl_cidx);
+        const int& q_start = rigid_body_system.q_offset(env_id, body_idx);
+        const int& c_offset = rigid_body_system.constraint_offset[env_id][2];
+        
+        dA(env_id, c_offset + jidx) = rigid_body_system.batch_dof_weight_inv(env_id, q_start);
+    }
+
+    template<typename TDataType>
     __global__ void ComputeContact_dAKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1332,16 +1765,16 @@ namespace dyno
         if(cidx >= num_constraints)
             return;
 
-        const int collition_offset = rigid_body_system.constraint_offset[env_id][3];
+        const int collision_offset = rigid_body_system.constraint_offset[env_id][3];
         auto& R = rigid_body_system.batch_D;
         const auto& imp = rigid_body_system.batch_imp;
         const auto& dA = rigid_body_system.batch_dA;
 
         
         R(env_id, cidx) = (1.f - imp(env_id, cidx)) * dA(env_id, cidx) / imp(env_id, cidx);
-        if(cidx >= collition_offset)
+        if(cidx >= collision_offset)
         {
-            const Real mu = rigid_body_system.collision_constraints.mu(env_id, (cidx - collition_offset) / 4);
+            const Real mu = rigid_body_system.collision_constraints.mu(env_id, (cidx - collision_offset) / 4);
             R(env_id, cidx) *= 2.f * mu * mu;
         }
     }
@@ -1361,6 +1794,72 @@ namespace dyno
         // auto& D = ri
         auto& D = rigid_body_system.batch_D;
         D(env_id, cidx) = 1.f / D(env_id, cidx);
+    }
+
+    template<typename TDataType>
+    __global__ void AnchorEnergyKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        if(rigid_body_system.is_converged[env_id])
+            return;
+
+        const int anchor_num = rigid_body_system.num_each_constraint[env_id][0];
+
+        int cidx = threadIdx.x;
+        if(cidx >= anchor_num)
+            return ;
+
+        auto& constraint_force = rigid_body_system.batch_constraint_force;
+        auto& energy = rigid_body_system.batch_constraint_energy;
+        const auto& D = rigid_body_system.batch_D(env_id, cidx);
+        const Real& Jaref = rigid_body_system.batch_Jaref(env_id, cidx);
+
+        constraint_force(env_id, cidx) = - D * Jaref;
+        energy(env_id, cidx) = 0.5f * D * Jaref * Jaref;
+    }
+
+    template<typename TDataType>
+    __global__ void FrictionLossEnergyKernel(RigidBody<TDataType> rigid_body_system, int num_envs)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        if(rigid_body_system.is_converged[env_id])
+            return;
+
+        const int& c_num = rigid_body_system.num_each_constraint[env_id][1];
+        int cidx = threadIdx.x;
+        if(cidx >= c_num)
+            return;
+
+        const int& c_offset = rigid_body_system.constraint_offset[env_id][1];
+        auto& constraint_force = rigid_body_system.batch_constraint_force(env_id, c_offset + cidx);
+        auto& energy = rigid_body_system.batch_constraint_energy(env_id, c_offset + cidx);
+        const auto& D = rigid_body_system.batch_D(env_id, c_offset + cidx);
+        const Real& Jaref = rigid_body_system.batch_Jaref(env_id, c_offset + cidx);
+        const Real& dof_frictionloss = rigid_body_system.friction_loss_constraints.dof_frictionloss(env_id, cidx);
+        auto& unquads = rigid_body_system.batch_unquads(env_id, c_offset + cidx);
+
+        constraint_force = - D * Jaref;
+
+        Real R_dof_fl = dof_frictionloss / D;
+        
+        if(Jaref <= -R_dof_fl)
+        {
+            energy = -0.5f * R_dof_fl * dof_frictionloss - dof_frictionloss * Jaref;
+            constraint_force = dof_frictionloss;
+            unquads = 1;
+        }
+        else if(Jaref >= R_dof_fl)
+        {
+            energy = -0.5f * R_dof_fl * dof_frictionloss + dof_frictionloss * Jaref;
+            constraint_force = -dof_frictionloss;
+            unquads = 1;
+        }
+        else
+            energy = 0.5f * D * Jaref * Jaref;
     }
 
     template<typename TDataType>
@@ -1385,14 +1884,13 @@ namespace dyno
         const Real& D_cidx = rigid_body_system.batch_D(env_id, cidx);
 
         constraint_force(env_id, cidx) = - D_cidx * Jaref_cidx;
-        rigid_body_system.batch_unquads(env_id, cidx) = 0;
         if(Jaref_cidx > 0)
         {
             constraint_force(env_id, cidx) = 0.f;
             rigid_body_system.batch_unquads(env_id, cidx) = 1;
         }
         else
-            constraint_energy(env_id, cidx) += 0.5f * D_cidx * Jaref_cidx * Jaref_cidx;
+            constraint_energy(env_id, cidx) = 0.5f * D_cidx * Jaref_cidx * Jaref_cidx;
     }
 
     template<typename TDataType>
@@ -1973,16 +2471,6 @@ namespace dyno
 
         const int max_joint_qpos = 128;
 
-        auto& collision_paras = this->rigid_body->collision_paras;
-        collision_paras.time_const = 0.02f;
-        collision_paras.damp_ratio = 1.f;
-        collision_paras.dmax = 0.95f;
-        collision_paras.dmin = 0.9f;
-        collision_paras.width = 0.001;
-        collision_paras.midpoint = 0.5f;
-        collision_paras.power = 2;
-
-
         const auto& env_infos = this->env_infos;
         const auto& rigid_body_system = this->rigid_body;
 
@@ -1996,6 +2484,38 @@ namespace dyno
 
         env_num_bodies.assign(rigid_body_system->batch_bodies);
 
+        auto& joint_limits = this->rigid_body->joint_limit_constraints;
+        INIT_DYNO_ARRAY(joint_limits.ref_nums, this->env_infos->num_envs);
+
+        auto& collision_constraints = this->rigid_body->collision_constraints;
+        CArray2D<Real> time_const_host(num_envs, max_bodies);
+        CArray2D<Real> damp_ratio_host(num_envs, max_bodies);
+        CArray2D<Real> dmax_host(num_envs, max_bodies);
+        CArray2D<Real> dmin_host(num_envs, max_bodies);
+        CArray2D<Real> width_host(num_envs, max_bodies);
+        CArray2D<Real> midpoint_host(num_envs, max_bodies);
+        CArray2D<int> power_host(num_envs, max_bodies);
+        CArray2D<Real> contact_weights_host(num_envs, max_bodies);
+        for(int i = 0; i < max_bodies; i++)
+        {
+            time_const_host(0, i) = 0.02f;
+            damp_ratio_host(0, i) = 1.f;
+            dmax_host(0, i) = 0.95f;
+            dmin_host(0, i) = 0.9f;
+            width_host(0, i) = 0.001f;
+            midpoint_host(0, i) = 0.5f;
+            power_host(0, i) = 2;
+            contact_weights_host(0, i) = 1.f;
+        }
+        collision_constraints.time_const.assign(time_const_host);
+        collision_constraints.damp_ratio.assign(damp_ratio_host);
+        collision_constraints.dmax.assign(dmax_host);
+        collision_constraints.dmin.assign(dmin_host);
+        collision_constraints.width.assign(width_host);
+        collision_constraints.midpoint.assign(midpoint_host);
+        collision_constraints.power.assign(power_host);
+        rigid_body_system->contact_weights.assign(contact_weights_host);
+        
 
         INIT_DYNO_ARRAY(rigid_body_system->batch_nv, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->is_isolated, num_envs, max_bodies);
@@ -2069,6 +2589,7 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.mu, num_envs, 1024);
 
         INIT_DYNO_ARRAY(rigid_body_system->anchor_constraints.anchor_nums, num_envs);
+        INIT_DYNO_ARRAY2D(rigid_body_system->friction_mu, num_envs, max_bodies);
 
 
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_axis, num_envs, max_bodies);
@@ -2307,12 +2828,15 @@ namespace dyno
         // 1. collision constraints
         auto& collision_constraints = rigid_body_system->collision_constraints;
         collision_constraints.collision_nums.reset();
-        const auto& collision_paras = rigid_body_system->collision_paras;
-
 
         CollisonDetectionKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        UpdateAnchorConstarints<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        UpdateJointLimitConstraints<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
-        
+
+
+        CountConstraintNums<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
     }
 
     template<typename TDataType>
@@ -2321,10 +2845,6 @@ namespace dyno
         auto& env_infos = this->env_infos;
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
-        
-        // Collision
-        CountConstraintNums<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
-        cudaDeviceSynchronize();
 
         rigid_body_system->batch_J.reset();
         ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
@@ -2338,7 +2858,9 @@ namespace dyno
         FrictionLossJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
-
+        // Joint limit constraints
+        JointLimitJacobianKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
         
 
         spdlog::info("Jacobian: ");
@@ -2359,10 +2881,9 @@ namespace dyno
             rigid_body_system->num_constraints, rigid_body_system->batch_nv, num_envs);
         cudaDeviceSynchronize();
 
-        // TODO: 等式约束
-        // TODO: 摩擦损失约束
-        // TODO: 关节限位约束
-
+        ComputeAnchorAref<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        ComputeFrictionLossAref<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        ComputeJointLimitAref<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         ComputeContactAref<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
         
@@ -2405,16 +2926,17 @@ namespace dyno
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
     
-        ComputeDiagJMinvJT<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        ComputeDiagJMinvJTForBodies<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
-        // TODO: compute diag(JM^(-1)J^T) for joints
+        ComputeDiagJMinvJTForJoints<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        cudaDeviceSynchronize();
 
         rigid_body_system->batch_dA.reset();
 
-        // TODO: handling equality constraints
-        // TODO: handling friction loss constraints
-        // TODO: handling joint limit constraints
+        ComputeAnchor_dAKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        ComputeFrictionLoss_dAKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        ComputeJointLimit_dAKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         ComputeContact_dAKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
@@ -2443,10 +2965,10 @@ namespace dyno
         
         rigid_body_system->batch_energy.reset();
         rigid_body_system->batch_constraint_energy.reset();
-        // 1. equality constraint energy
-        // 2. friction loss constraint energy
+        rigid_body_system->batch_unquads.reset();
 
-        // 3. contact constraint energy and joint limit constraint energy
+        AnchorEnergyKernel<TDataType><<<num_envs, 512>>>(*rigid_body_system, num_envs);
+        FrictionLossEnergyKernel<TDataType><<<num_envs, 512>>>(*rigid_body_system, num_envs);
         ContactAndJointLimitEnergyKernel<TDataType><<<num_envs, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 

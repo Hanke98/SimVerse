@@ -66,8 +66,6 @@ namespace dyno
         void Init();
         void Init(const std::string &root_dir);
 
-        void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num);
-
         void ParseEnv(const json& envs_json);
 
         void ParseJson(const std::string& file_path);

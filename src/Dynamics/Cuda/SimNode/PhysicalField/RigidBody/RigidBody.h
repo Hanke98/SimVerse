@@ -257,7 +257,7 @@ namespace dyno {
                     batch_quat_host(eid, bid) = Quat<Real>(quat[0], quat[1], quat[2], quat[3]);
                     body_rot_host(eid, bid) = batch_quat_host(eid, bid).toMatrix3x3();
 
-                    mass_host(eid, bid) = rb_json["mass"];
+                    Real density = rb_json["density"];
                     bool is_static = rb_json["is_static"];
                     is_static_host(eid, bid) = is_static ? 1 : 0;
 
@@ -277,6 +277,8 @@ namespace dyno {
                                 spheres_host(eid, sphere_num).radius = halfLength[0];
                                 // spheres_host(eid, sphere_num).rot = batch_quat_host(eid, bid);
 
+                                mass_host(eid, bid) = density * 4. / 3. * M_PI * pow(halfLength[0], 3);
+
                                 sphere_num++;
 
 
@@ -294,6 +296,9 @@ namespace dyno {
                                 boxes_host(eid, box_num).halfLength = Vec3f(halfLength[0], halfLength[1], halfLength[2]);
                                 // boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
+                                mass_host(eid, bid) = 8 * density * halfLength[0] * halfLength[1] * halfLength[2];
+                                printf("mass_host: %f", mass_host(eid, bid));
+
                                 box_num++;
                                 break;
                             }
@@ -306,6 +311,8 @@ namespace dyno {
                                 capsules_host(eid, capsule_num).radius= halfLength[0];
                                 capsules_host(eid, capsule_num).halfLength= halfLength[1];
                                 // capsules_host(eid, capsule_num).rot = batch_quat_host(eid, bid);
+
+                                mass_host(eid, bid) = density * (2 * M_PI * halfLength[1] * halfLength[0] * halfLength[0] + 4. / 3. * M_PI * pow(halfLength[0], 3));
 
                                 capsule_num++;
                                 break;

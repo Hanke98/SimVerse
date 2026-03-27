@@ -59,6 +59,4 @@ namespace dyno
         DArray2D<Vec3f>         limit_extern;     
     };
 
-
-    // TODO: Other constraint types
 }

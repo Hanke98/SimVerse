@@ -1,0 +1,39 @@
+{
+  "envs": [
+    {
+      "env_id": 0,
+      "time_step": 0.006,
+      "gravity": [0, -9.81, 0],
+      "rigid_body": [
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.2, 0.1, 0.1],
+          "density": 1000,
+          "friction": 0.6,
+          "pos": [-0.2, 0.6, 0],
+          "quat": [0, 0, 0, 1]
+        },
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.2, 0.1, 0.1],
+          "density": 1200,
+          "friction": 0.7,
+          "pos": [0.2, 0.6, 0],
+          "quat": [0, 0, 0, 1]
+        }
+      ],
+      "connect": [
+        {
+          "bodyA": 0,
+          "bodyB": 1,
+          "anchorA": [0.2, -0.1, 0],
+          "anchorB": [-0.2, -0.1, 0]
+        }
+      ]
+    }
+  ]
+}

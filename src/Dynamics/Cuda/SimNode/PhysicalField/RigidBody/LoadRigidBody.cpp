@@ -6,10 +6,11 @@
 namespace dyno
 {
     template<typename TDataType>
-    void RigidBody<TDataType>::ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num, int joint_limit_max)
+    void RigidBody<TDataType>::ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num,
+        int joint_limit_max, int connect_max)
     {
         spdlog::info("Start initializing rigid body state variables.");
-        // std::cout << "primitive max_num: " << primitive_max_num[0] << primitive_max_num[1] << prim
+        // printf("connect_num: %d", connect_max);
         int env_num = envs_json.size();
 
         CArray2D<int> shape_type_host(env_num, body_max_num);
@@ -61,6 +62,19 @@ namespace dyno
         CArray2D<Real>          jl_midpoint_host(env_num, joint_limit_max);
         CArray2D<int>           jl_power_host(env_num, joint_limit_max);
 
+        std::vector<int>                connect_anchor_nums_host(env_num, 0);
+        CArray2D<Pair<int, int>>        connect_body_idxs_host(env_num, connect_max);
+        CArray2D<Vec3f>                 connect_anchor_A_local_host(env_num, connect_max);
+        CArray2D<Vec3f>                 connect_anchor_B_local_host(env_num, connect_max);
+
+        CArray2D<Real>          connect_tc_host(env_num, connect_max);
+        CArray2D<Real>          connect_dr_host(env_num, connect_max);
+        CArray2D<Real>          connect_dmax_host(env_num, connect_max);
+        CArray2D<Real>          connect_dmin_host(env_num, connect_max);
+        CArray2D<Real>          connect_width_host(env_num, connect_max);
+        CArray2D<Real>          connect_midpoint_host(env_num, connect_max);
+        CArray2D<int>           connect_power_host(env_num, connect_max);
+
         std::vector<Vec3i>  rendering_idx_2_rigid_body_mapping_host;
         CArray2D<int>       rigid_body_2_rendering_idx_mapping_host(env_num, body_max_num);
 
@@ -95,6 +109,16 @@ namespace dyno
                 jl_tc_host(eid, jl_id) = 0.02;
                 jl_dr_host(eid, jl_id) = 1.;
                 jl_power_host(eid, jl_id) = 2;
+            }
+
+            for (int connect_id = 0; connect_id < connect_max; connect_id++) {
+                connect_dmax_host(eid, connect_id) = 0.95;
+                connect_dmin_host(eid, connect_id) = 0.9;
+                connect_width_host(eid, connect_id) = 0.001;
+                connect_midpoint_host(eid, connect_id) = 0.5;
+                connect_tc_host(eid, connect_id) = 0.02;
+                connect_dr_host(eid, connect_id) = 1.;
+                connect_power_host(eid, connect_id) = 2;
             }
         }
 
@@ -286,6 +310,17 @@ namespace dyno
                     bid++;
                 }
 
+                int connect_num = 0;
+                connect_anchor_nums_host[eid] = static_cast<int>(env_json["connect"].size());
+                for (const auto& connect_json : env_json["connect"]) {
+                    connect_body_idxs_host(eid, connect_num) = Pair<int, int>(connect_json.at("bodyA").get<int>(), connect_json.at("bodyB").get<int>());
+                    auto localA = connect_json.at("anchorA").get<std::vector<float>>();
+                    connect_anchor_A_local_host(eid, connect_num) = Vec3f{localA[0], localA[1], localA[2]};
+                    auto localB = connect_json.at("anchorB").get<std::vector<float>>();
+                    connect_anchor_B_local_host(eid, connect_num) = Vec3f{localB[0], localB[1], localB[2]};
+                    connect_num++;
+                }
+
                 batch_bodies_host[eid] = bid;
                 env_num_spheres_host[eid] = sphere_num;
                 env_num_boxes_host[eid] = box_num;
@@ -383,6 +418,14 @@ namespace dyno
             }
         }
 
+        for (eid = 0; eid < env_num; ++eid) {
+            for (int i = 0; i < connect_anchor_nums_host[eid]; i++)
+                printf("anchor_id: %d, bodyA_id: %d, bodyB_id: %d, anchorA: %f %f %f, anchorB: %f %f %f\n",
+                    i, connect_body_idxs_host(eid, i).first, connect_body_idxs_host(eid, i).second,
+                    connect_anchor_A_local_host(eid, i).x, connect_anchor_A_local_host(eid, i).y, connect_anchor_A_local_host(eid, i).z,
+                    connect_anchor_B_local_host(eid, i).x, connect_anchor_B_local_host(eid, i).y, connect_anchor_B_local_host(eid, i).z);
+        }
+
         shape_type.assign(shape_type_host);
         shape_idx.assign(shape_idx_host);
         parent_idx.assign(parent_idx_host);
@@ -439,6 +482,22 @@ namespace dyno
         joint_limit_constraints.midpoint.assign(jl_midpoint_host);
         joint_limit_constraints.width.assign(jl_width_host);
         joint_limit_constraints.power.assign(jl_power_host);
+
+        anchor_constraints.anchor_nums.assign(connect_anchor_nums_host);
+        anchor_constraints.body_idxs.assign(connect_body_idxs_host);
+        anchor_constraints.anchor_A_local.assign(connect_anchor_A_local_host);
+        anchor_constraints.anchor_B_local.assign(connect_anchor_B_local_host);
+        INIT_DYNO_ARRAY2D(anchor_constraints.anchor_A_world, env_num, connect_max);
+        INIT_DYNO_ARRAY2D(anchor_constraints.anchor_B_world, env_num, connect_max);
+        INIT_DYNO_ARRAY2D(anchor_constraints.anchor_error, env_num, connect_max);
+
+        anchor_constraints.time_const.assign(connect_tc_host);
+        anchor_constraints.damp_ratio.assign(connect_dr_host);
+        anchor_constraints.dmax.assign(connect_dmax_host);
+        anchor_constraints.dmin.assign(connect_dmin_host);
+        anchor_constraints.midpoint.assign(connect_midpoint_host);
+        anchor_constraints.width.assign(connect_width_host);
+        anchor_constraints.power.assign(connect_power_host);
 
         spdlog::info("Finished initializing rigid body state variables.");
     }

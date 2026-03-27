@@ -2588,7 +2588,7 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.point, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.mu, num_envs, 1024);
 
-        INIT_DYNO_ARRAY(rigid_body_system->anchor_constraints.anchor_nums, num_envs);
+        // INIT_DYNO_ARRAY(rigid_body_system->anchor_constraints.anchor_nums, num_envs);
 
 
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_axis, num_envs, max_bodies);

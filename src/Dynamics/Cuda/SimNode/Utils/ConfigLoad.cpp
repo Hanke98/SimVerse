@@ -24,7 +24,7 @@ namespace dyno {
 
         for (const auto& env_json : envs_arr) {
             if (env_json.contains("time_step")) {
-                timesteps[env_idx] = env_json["time_step"];
+                timesteps[env_idx] = env_json["time_step"].get<float>();
             }
 
             if (env_json.contains("gravity")) {

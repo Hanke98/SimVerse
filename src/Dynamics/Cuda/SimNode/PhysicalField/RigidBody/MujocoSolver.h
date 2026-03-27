@@ -21,7 +21,6 @@ namespace dyno
 
         void Init() override;
         void Step() override;
-        void TimeIntegration() override;
     
     private:
         void ForwardKinematics();
@@ -36,6 +35,7 @@ namespace dyno
         void BuildHessian();
         void UpdateGradient();
         void SolveSystem();
+        void TimeIntegration();
     };
 }
 

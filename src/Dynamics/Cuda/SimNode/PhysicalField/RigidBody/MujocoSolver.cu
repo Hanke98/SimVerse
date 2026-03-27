@@ -1384,12 +1384,15 @@ namespace dyno
         auto& imp = rigid_body_system.batch_imp;
         auto& aref = rigid_body_system.batch_aref;
 
-        Vec4f KBIP = ComputeKBIP(pos_err, dmax, dmin, time_const, damp_ratio, midpoint, width, power);
+        Real pos_err_abs = abs(pos_err);
+
+        Vec4f KBIP = ComputeKBIP(pos_err_abs, dmax, dmin, time_const, damp_ratio, midpoint, width, power);
+
         Real K = KBIP[0];
         Real B = KBIP[1];
         Real I = KBIP[2];
         imp(env_id, c_offset + cidx) = I;
-        aref(env_id, c_offset + cidx) = -B * constraint_vels(env_id, c_offset + cidx) + K * I * pos_err;
+        aref(env_id, c_offset + cidx) = -B * constraint_vels(env_id, c_offset + cidx) + K * I * pos_err_abs;
     }
 
     template<typename T>
@@ -2481,11 +2484,7 @@ namespace dyno
         const int max_nv = max_bodies * 6;
 
         CArray<int> env_num_bodies(num_envs);
-
         env_num_bodies.assign(rigid_body_system->batch_bodies);
-
-        auto& joint_limits = this->rigid_body->joint_limit_constraints;
-        INIT_DYNO_ARRAY(joint_limits.ref_nums, this->env_infos->num_envs);
 
         auto& collision_constraints = this->rigid_body->collision_constraints;
         CArray2D<Real> time_const_host(num_envs, max_bodies);
@@ -2589,7 +2588,6 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.mu, num_envs, 1024);
 
         INIT_DYNO_ARRAY(rigid_body_system->anchor_constraints.anchor_nums, num_envs);
-        INIT_DYNO_ARRAY2D(rigid_body_system->friction_mu, num_envs, max_bodies);
 
 
         INIT_DYNO_ARRAY2D(rigid_body_system->joint_axis, num_envs, max_bodies);
@@ -2634,12 +2632,6 @@ namespace dyno
         ForwardKinematics();
 
         MakeConstraints();
-
-        
-
-
-        // TrickAddGravityKernel<TDataType><<<32, 512>>>(*rigid_body_system, env_infos->gravities, env_infos->num_envs);
-        // cudaDeviceSynchronize();
 
         // q_ex_force = -q_inner_force
         SumArray2D<<<32, 128>>>(rigid_body_system->batch_q_ex_force, rigid_body_system->batch_q_inner_force,
@@ -2890,7 +2882,6 @@ namespace dyno
         printf("Aref:\n");
         PrintVector<<<1, 1>>>(rigid_body_system->batch_aref, 0, 16);
         cudaDeviceSynchronize();
-
 
         // Compute constraint residuals Jaref
         BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_qacc,

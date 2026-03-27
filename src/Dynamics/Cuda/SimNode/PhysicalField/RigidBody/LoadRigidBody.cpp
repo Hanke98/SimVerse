@@ -1,6 +1,7 @@
 #include "RigidBody.h"
 #include "Object.h"
 #include "DataTypes.h"
+#include "../../Utils/utils.h"
 
 namespace dyno
 {
@@ -163,7 +164,7 @@ namespace dyno
                                 // boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
                                 mass_host(eid, bid) = 8 * density * halfLength[0] * halfLength[1] * halfLength[2];
-
+                                spdlog::info("box mass: {}, density: {}, size: {}", mass_host(eid, bid), density, halfLength[0] * 2 * halfLength[1] * 2 * halfLength[2] * 2);
                                 box_num++;
                                 break;
                             }
@@ -206,16 +207,16 @@ namespace dyno
                             jl_joint_idx_host(eid, jl_num) = bid;
                             jl_limit_host(eid, jl_num) = joint_json.at("upper").get<float>();
 
-                            // if (joint_json.contains("jl_paras")) {
-                            //     auto jl_paras = joint_json.at("jl_paras").get<std::vector<float>>();
-                            //     jl_tc_host(eid, jl_num) = jl_paras[0];
-                            //     jl_dr_host(eid, jl_num) = jl_paras[1];
-                            //     jl_dmax_host(eid, jl_num) = jl_paras[2];
-                            //     jl_dmin_host(eid, jl_num) = jl_paras[3];
-                            //     jl_width_host(eid, jl_num) = jl_paras[4];
-                            //     jl_midpoint_host(eid, jl_num) = jl_paras[5];
-                            //     jl_power_host(eid, jl_num) = static_cast<int>(jl_paras[6]);
-                            // }
+                            if (joint_json.contains("jl_paras")) {
+                                auto jl_paras = joint_json.at("jl_paras").get<std::vector<float>>();
+                                jl_tc_host(eid, jl_num) = jl_paras[0];
+                                jl_dr_host(eid, jl_num) = jl_paras[1];
+                                jl_dmax_host(eid, jl_num) = jl_paras[2];
+                                jl_dmin_host(eid, jl_num) = jl_paras[3];
+                                jl_width_host(eid, jl_num) = jl_paras[4];
+                                jl_midpoint_host(eid, jl_num) = jl_paras[5];
+                                jl_power_host(eid, jl_num) = static_cast<int>(jl_paras[6]);
+                            }
 
                             jl_num++;
                         }
@@ -423,9 +424,13 @@ namespace dyno
         contact_weights.assign(contact_weights_host);
 
         joint_limit_constraints.ref_nums.assign(jl_ref_num_host);
+        INIT_DYNO_ARRAY2D(joint_limit_constraints.active_mapping, env_num, joint_limit_max);
+        INIT_DYNO_ARRAY2D(joint_limit_constraints.is_active, env_num, joint_limit_max);
         joint_limit_constraints.joint_idx.assign(jl_joint_idx_host);
         joint_limit_constraints.is_upper.assign(jl_is_upper_host);
         joint_limit_constraints.limit.assign(jl_limit_host);
+        INIT_DYNO_ARRAY2D(joint_limit_constraints.limit_error, env_num, joint_limit_max);
+        INIT_DYNO_ARRAY2D(joint_limit_constraints.limit_extern, env_num, joint_limit_max);
 
         joint_limit_constraints.time_const.assign(jl_tc_host);
         joint_limit_constraints.damp_ratio.assign(jl_dr_host);

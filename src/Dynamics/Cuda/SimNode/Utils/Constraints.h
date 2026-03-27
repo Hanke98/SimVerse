@@ -42,6 +42,7 @@ namespace dyno
 
     struct BatchFrictionLossConstraints : public BatchConstraintParas
     {
+        DArray2D<int>              dof_idxs;
         DArray2D<Real>             dof_frictionloss;
     };
 
@@ -59,11 +60,12 @@ namespace dyno
     struct BatchJointLimitConstraints : public BatchConstraintParas
     {
         DArray<int>             ref_nums;
-        DArray<int>             active_nums;
-        DArray2D<int>           dof_idx_ref;      // ref_nums * 3
-        DArray2D<int>           dof_idx_active;   // active_nums * 3
-        DArray2D<Real>          lower;            // ref nums
-        DArray2D<Real>          upper;            // ref nums
+        DArray2D<int>           active_mapping;
+        DArray2D<int>           is_active;
+        DArray2D<int>           joint_idx;
+        DArray2D<int>           is_upper;
+        DArray2D<Real>          limit;
+
         DArray2D<Real>          limit_error;      // active_nums
         DArray2D<Vec3f>         limit_extern;     // active nums
     };

@@ -20,6 +20,7 @@ namespace dyno {
         int box_num_max = 0;
         int sphere_num_max = 0;
         int capsule_num_max = 0;
+        int joint_limit_max = 0;
 
         for (const auto& env_json : envs_arr) {
             if (env_json.contains("time_step")) {
@@ -38,6 +39,7 @@ namespace dyno {
                 int sphere_num = 0;
                 int box_num = 0;
                 int capsule_num = 0;
+                int joint_limit_num = 0;
                 for (const auto& rb_json : env_json["rigid_body"]) {
                     if (rb_json.at("type") == "primitive") {
                         int id = rb_json.at("ID").get<int>();
@@ -54,10 +56,18 @@ namespace dyno {
                             default: ;
                         }
                     }
+                    if (rb_json.contains("joint")) {
+                        auto joint_json = rb_json["joint"];
+                        if (joint_json.contains("lower"))
+                            joint_limit_num++;
+                        if (joint_json.contains("upper"))
+                            joint_limit_num++;
+                    }
                 }
                 if (sphere_num > sphere_num_max) {sphere_num_max = sphere_num;}
                 if (box_num > box_num_max) {box_num_max = box_num;}
                 if (capsule_num > capsule_num_max) {capsule_num_max = capsule_num;}
+                if (joint_limit_num > joint_limit_max) {joint_limit_max = joint_limit_num;}
             }
 
             env_idx++;
@@ -73,7 +83,7 @@ namespace dyno {
         // std::cout << "env_num: " << env_infos.num_envs << " body_num: " << body_num_max << std::endl;
 
         auto rigid_body = var_rigid_body.getValue();
-        rigid_body.ParseRigidBody(envs_arr, body_num_max, primitive_max_num);
+        rigid_body.ParseRigidBody(envs_arr, body_num_max, primitive_max_num, joint_limit_max);
         var_rigid_body.setValue(rigid_body);
     }
 

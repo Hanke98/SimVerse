@@ -127,6 +127,8 @@ namespace dyno {
         BatchJointLimitConstraints      joint_limit_constraints;
         CollisionConstraintParas        collision_paras;
         BatchCollisionConstraints       collision_constraints;
+        DArray2D<Real>                  friction_mu;
+        DArray2D<Real>                  contact_weights;
         
 
         // For joint
@@ -165,11 +167,11 @@ namespace dyno {
         DArray2D<int>           rigid_body_2_rendering_idx_mapping; // [env_id, body_id] -> idx of its pos in topo state
 
     public:
-        void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num);
+        void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num, int joint_limit_max);
     };
 
     template<typename TDataType>
-    void RigidBody<TDataType>::ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num) {
+    void RigidBody<TDataType>::ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num, int joint_limit_max) {
         spdlog::info("Start initializing rigid body state variables.");
         // std::cout << "primitive max_num: " << primitive_max_num[0] << primitive_max_num[1] << prim
         int env_num = envs_json.size();
@@ -207,6 +209,22 @@ namespace dyno {
         CArray2D<Vec3f>         joint_axis_ref_host(env_num, body_max_num);
         CArray2D<Vec3f>         joint_anchor_ref_host(env_num, body_max_num);
 
+        CArray2D<Real>            friction_mu_host(env_num, body_max_num);
+        CArray2D<Real>            contact_weights_host(env_num, body_max_num);
+
+        std::vector<int>         jl_ref_num_host(env_num, 0);
+        CArray2D<int>            jl_joint_idx_host(env_num, joint_limit_max);
+        CArray2D<int>            jl_is_upper_host(env_num, joint_limit_max);
+        CArray2D<Real>           jl_limit_host(env_num, joint_limit_max);
+
+        CArray2D<Real>          jl_tc_host(env_num, joint_limit_max);
+        CArray2D<Real>          jl_dr_host(env_num, joint_limit_max);
+        CArray2D<Real>          jl_dmax_host(env_num, joint_limit_max);
+        CArray2D<Real>          jl_dmin_host(env_num, joint_limit_max);
+        CArray2D<Real>          jl_width_host(env_num, joint_limit_max);
+        CArray2D<Real>          jl_midpoint_host(env_num, joint_limit_max);
+        CArray2D<int>           jl_power_host(env_num, joint_limit_max);
+
         std::vector<Vec3i>  rendering_idx_2_rigid_body_mapping_host;
         CArray2D<int>       rigid_body_2_rendering_idx_mapping_host(env_num, body_max_num);
 
@@ -230,6 +248,17 @@ namespace dyno {
                 batch_quat_host(eid, bid) = Quat<Real>::identity();
 
                 joint_type_host(eid, bid) = 0;
+                contact_weights_host(eid, bid) = 1;
+            }
+
+            for (int jl_id = 0; jl_id < joint_limit_max; jl_id++) {
+                jl_dmax_host(eid, jl_id) = 0.95;
+                jl_dmin_host(eid, jl_id) = 0.9;
+                jl_width_host(eid, jl_id) = 0.001;
+                jl_midpoint_host(eid, jl_id) = 0.5;
+                jl_tc_host(eid, jl_id) = 0.02;
+                jl_dr_host(eid, jl_id) = 1.;
+                jl_power_host(eid, jl_id) = 2;
             }
         }
 
@@ -248,6 +277,7 @@ namespace dyno {
                 int box_num = 0;
                 int capsule_num = 0;
                 int joint_qpos_offset = 0;
+                int jl_num = 0;
 
                 for (const auto& rb_json : env_json["rigid_body"]) {
 
@@ -258,6 +288,11 @@ namespace dyno {
                     body_rot_host(eid, bid) = batch_quat_host(eid, bid).toMatrix3x3();
 
                     Real density = rb_json["density"];
+
+                    friction_mu_host(eid, bid) = rb_json.at("friction").get<float>();
+                    if (rb_json.contains("contact_weight"))
+                        contact_weights_host(eid, bid) = rb_json.at("contact_weight").get<float>();
+
                     bool is_static = rb_json["is_static"];
                     is_static_host(eid, bid) = is_static ? 1 : 0;
 
@@ -280,10 +315,6 @@ namespace dyno {
                                 mass_host(eid, bid) = density * 4. / 3. * M_PI * pow(halfLength[0], 3);
 
                                 sphere_num++;
-
-
-                                // std::cout << "eid: " << eid << " bid: " << bid << std::endl;
-
                                 break;
                             }
                             case 1: {
@@ -297,7 +328,6 @@ namespace dyno {
                                 // boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
                                 mass_host(eid, bid) = 8 * density * halfLength[0] * halfLength[1] * halfLength[2];
-                                printf("mass_host: %f", mass_host(eid, bid));
 
                                 box_num++;
                                 break;
@@ -336,16 +366,44 @@ namespace dyno {
                         joint_rel_pos_host(eid, bid) = body_pos_host(eid, bid);
                         joint_rel_quat_host(eid, bid) = batch_quat_host(eid, bid);
 
+                        if (joint_json.contains("upper")) {
+                            jl_is_upper_host(eid, jl_num) = 1;
+                            jl_joint_idx_host(eid, jl_num) = bid;
+                            jl_limit_host(eid, jl_num) = joint_json.at("upper").get<float>();
+
+                            if (joint_json.contains("jl_paras")) {
+                                auto jl_paras = joint_json.at("jl_paras").get<std::vector<float>>();
+                                jl_tc_host(eid, jl_num) = jl_paras[0];
+                                jl_dr_host(eid, jl_num) = jl_paras[1];
+                                jl_dmax_host(eid, jl_num) = jl_paras[2];
+                                jl_dmin_host(eid, jl_num) = jl_paras[3];
+                                jl_width_host(eid, jl_num) = jl_paras[4];
+                                jl_midpoint_host(eid, jl_num) = jl_paras[5];
+                                jl_power_host(eid, jl_num) = static_cast<int>(jl_paras[6]);
+                            }
+
+                            jl_num++;
+                        }
+
+                        if (joint_json.contains("lower")) {
+                            jl_is_upper_host(eid, jl_num) = 0;
+                            jl_joint_idx_host(eid, jl_num) = bid;
+                            jl_limit_host(eid, jl_num) = joint_json.at("lower").get<float>();
+                            jl_num++;
+                        }
+
+                        jl_ref_num_host[eid] = jl_num;
+
                         int type = joint_json.at("type").get<int>();
                         switch(type) {
                             case 1: {
                                 joint_type_host(eid, bid) = 1;
                                 joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
 
-                                auto joint_qpos = joint_json.at("qpose").get<std::vector<float>>();
+                                auto joint_qpos = joint_json.at("angle").get<std::vector<float>>();
                                 joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
 
-                                auto joint_qpos_ref = joint_json.at("qpose_ref").get<std::vector<float>>();
+                                auto joint_qpos_ref = joint_json.at("angle_ref").get<std::vector<float>>();
                                 joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
 
                                 joint_qpos_offset++;
@@ -356,10 +414,10 @@ namespace dyno {
                                 joint_type_host(eid, bid) = 2;
                                 joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
 
-                                auto joint_qpos = joint_json.at("qpose").get<std::vector<float>>();
+                                auto joint_qpos = joint_json.at("displacement").get<std::vector<float>>();
                                 joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
 
-                                auto joint_qpos_ref = joint_json.at("qpose_ref").get<std::vector<float>>();
+                                auto joint_qpos_ref = joint_json.at("displacement_ref").get<std::vector<float>>();
                                 joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
 
                                 joint_qpos_offset++;
@@ -370,13 +428,13 @@ namespace dyno {
                                 joint_type_host(eid, bid) = 3;
                                 joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
 
-                                auto joint_qpos = joint_json.at("qpose").get<std::vector<float>>();
+                                auto joint_qpos = joint_json.at("orientation").get<std::vector<float>>();
                                 joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
                                 joint_qpos_host(eid, joint_qpos_offset + 1) = joint_qpos[1];
                                 joint_qpos_host(eid, joint_qpos_offset + 2) = joint_qpos[2];
                                 joint_qpos_host(eid, joint_qpos_offset + 3) = joint_qpos[3];
 
-                                auto joint_qpos_ref = joint_json.at("qpose_ref").get<std::vector<float>>();
+                                auto joint_qpos_ref = joint_json.at("orientation_ref").get<std::vector<float>>();
                                 joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
                                 joint_qpos_ref_host(eid, joint_qpos_offset + 1) = joint_qpos_ref[1];
                                 joint_qpos_ref_host(eid, joint_qpos_offset + 2) = joint_qpos_ref[2];
@@ -525,6 +583,22 @@ namespace dyno {
         joint_axis_ref.assign(joint_axis_ref_host);
         joint_rel_pos.assign(joint_rel_pos_host);
         joint_rel_quat.assign(joint_rel_quat_host);
+
+        friction_mu.assign(friction_mu_host);
+        contact_weights.assign(contact_weights_host);
+
+        joint_limit_constraints.ref_nums.assign(jl_ref_num_host);
+        joint_limit_constraints.joint_idx.assign(jl_joint_idx_host);
+        joint_limit_constraints.is_upper.assign(jl_is_upper_host);
+        joint_limit_constraints.limit.assign(jl_limit_host);
+
+        joint_limit_constraints.time_const.assign(jl_tc_host);
+        joint_limit_constraints.damp_ratio.assign(jl_dr_host);
+        joint_limit_constraints.dmax.assign(jl_dmax_host);
+        joint_limit_constraints.dmin.assign(jl_dmin_host);
+        joint_limit_constraints.midpoint.assign(jl_midpoint_host);
+        joint_limit_constraints.width.assign(jl_width_host);
+        joint_limit_constraints.power.assign(jl_power_host);
 
         spdlog::info("Finished initializing rigid body state variables.");
     }

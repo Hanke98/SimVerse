@@ -1745,6 +1745,7 @@ namespace dyno
 
         const auto& collision_constraints = rigid_body_system.collision_constraints;
         const auto& weight_inv = rigid_body_system.batch_weight_inv;
+        const int& c_offset = rigid_body_system.constraint_offset[env_id][3];
         int body_A_idx = collision_constraints.body_idxs(env_id, contact_idx).first;
         int body_B_idx = collision_constraints.body_idxs(env_id, contact_idx).second;
         Real mu = collision_constraints.mu(env_id, contact_idx);
@@ -1753,7 +1754,7 @@ namespace dyno
         Real tmp = w * (1 + mu * mu);
 
         for(int i = 0; i < 4; i++)
-            rigid_body_system.batch_dA(env_id, contact_idx * 4 + i) = tmp;
+            rigid_body_system.batch_dA(env_id, c_offset + contact_idx * 4 + i) = tmp;
     }
 
     template<typename TDataType>

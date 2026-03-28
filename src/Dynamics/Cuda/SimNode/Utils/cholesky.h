@@ -36,6 +36,16 @@ namespace dyno
 	void BlockCholeskySolveSingleTileHost(
         const DArray<T> L, DArray<T> x, DArray<int> block_sizes, DArray<int> block_offsets, DArray<int> x_offsets, int num_blocks);
 
+    template<typename T>
+    void UniformBlockCholeskyFactorizeWithTileHost(T* A, int uniform_block_size, int num_blocks);
+
+    template<typename T>
+    void UniformBlockCholeskySolveWithTileHost(T* L, T* x, int uniform_block_size, int num_blocks);
+
 	void TestI();
 	void TestII();
+    void TestIII();
+    void TestIV();
+    void TestLowerSolve();
+    void TestUpperSolve();
 } // namespace dyno

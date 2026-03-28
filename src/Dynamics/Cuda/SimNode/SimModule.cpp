@@ -10,7 +10,7 @@ namespace dyno
     SimModule<TDataType>::SimModule() : ComputeModule()
     {
         spdlog::info("SimModule constructor called.");
-        TestII();
+        TestI();
     }
 
     template<typename TDataType>

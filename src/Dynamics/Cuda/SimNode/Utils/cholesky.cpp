@@ -105,20 +105,20 @@ namespace dyno
         dXOffsets.assign(hXOffsets);
 
         BatchCholeskyFactorizeHost(
-            dA,
-            dL,
-            dBlockSizes,
-            dBlockOffsets,
+            dA.begin(),
+            dL.begin(),
+            dBlockSizes.begin(),
+            dBlockOffsets.begin(),
             num_blocks);
 
         cuSafeCall(cudaDeviceSynchronize());
 
         BatchCholeskySolveHost(
-            dL,
-            dX,
-            dBlockSizes,
-            dBlockOffsets,
-            dXOffsets,
+            dL.begin(),
+            dX.begin(),
+            dBlockSizes.begin(),
+            dBlockOffsets.begin(),
+            dXOffsets.begin(),
             num_blocks);
         
         cuSafeCall(cudaDeviceSynchronize());
@@ -167,9 +167,9 @@ namespace dyno
 
         // 20 个 64, 20 个 80, 20 个 96
         std::vector<int> block_size_list;
-        block_size_list.insert(block_size_list.end(), 10, 64);
-        block_size_list.insert(block_size_list.end(), 10, 80);
-        block_size_list.insert(block_size_list.end(), 10, 96);
+        block_size_list.insert(block_size_list.end(), 100, 64);
+        block_size_list.insert(block_size_list.end(), 100, 80);
+        block_size_list.insert(block_size_list.end(), 100, 96);
 
         const int num_blocks = static_cast<int>(block_size_list.size());
 

@@ -1,7 +1,6 @@
-#include "SimNode/Utils/utils.h"
+#include "utils.h"
 #include "cholesky.h"
-
-
+#include <cstdio>
 
 
 namespace dyno
@@ -17,12 +16,12 @@ namespace dyno
         return val;
     }
 
-    // tile_offset表示tile在shared memory中每行的存储offset
-    // A_offset表示A在global memory中每行的存储offset，不考虑padding的情况就是A的列数
+    // tile_stride表示tile在shared memory中每行的存储stride
+    // A_stride表示A在global memory中每行的存储步长，不考虑padding的情况就是A的列数
     // 统一采用row-major存储
     // 模板参数，NTILES表示tile的行数，NTHREADS表示线程块大小，T表示数据类型
     template<unsigned NTILES, unsigned NTHREADS, class T>
-    __device__ void LoadTile(const T* A_kk, T* sA, int A_offset, int tile_offset)
+    __device__ void LoadTile(const T* A_ij, T* sA, int A_stride, int tile_stride, bool is_diagonal = true)
     {
         // 线程块大小为 NTHREADS，每个线程加载一个元素
         const int tid = threadIdx.x;
@@ -30,16 +29,26 @@ namespace dyno
         {
             int row = i / NTILES;
             int col = i % NTILES;
-            bool is_lower_triangular = (row >= col);
-            // 只加载下三角部分，或者加载整个块但上三角部分置零
-            if (is_lower_triangular)
-                sA[row * tile_offset + col] = A_kk[row * A_offset + col];
+            // 如果是对角块，且我们只需要下三角部分，那么只加载下三角部分的元素，或者加载整个块但上三角部分置零
+            if(is_diagonal)
+            {
+                // 只加载下三角部分，或者加载整个块但上三角部分置零
+                bool is_lower_triangular = (row >= col);
+                if(is_lower_triangular)
+                    sA[row * tile_stride + col] = A_ij[row * A_stride + col];
+                else
+                    sA[row * tile_stride + col] = T(0);
+            }
+            else 
+            {
+                sA[row * tile_stride + col] = A_ij[row * A_stride + col];
+            }
         }
         __syncthreads();
     }
 
     template<unsigned NTILES, unsigned NTHREADS, class T>
-    __device__ void StoreTile(const T* sA, T* L_kk, int L_offset, int tile_offset)
+    __device__ void StoreTile(const T* sA, T* L_kk, int L_stride, int tile_stride, bool is_diagonal = true)
     {
         const int tid = threadIdx.x;
         for (int i = tid; i < NTILES * NTILES; i += NTHREADS)
@@ -47,8 +56,18 @@ namespace dyno
             int row = i / NTILES;
             int col = i % NTILES;
             bool is_lower_triangular = (row >= col);
-            if (is_lower_triangular)
-                L_kk[row * L_offset + col] = sA[row * tile_offset + col];
+            if(is_diagonal)
+            {
+                if (is_lower_triangular)
+                    L_kk[row * L_stride + col] = sA[row * tile_stride + col];
+                else
+                    L_kk[row * L_stride + col] = T(0);
+            }
+            else 
+            {
+                L_kk[row * L_stride + col] = sA[row * tile_stride + col];
+            }
+            
         }
         __syncthreads();
     }
@@ -56,10 +75,61 @@ namespace dyno
     // 默认row-major
     // 这个函数是为了得到A中对应tile在global_memory中的起始地址
     template<unsigned NTILES, class T>
-    __device__ T* tile(T* A, unsigned A_offset, unsigned i, unsigned j) 
+    __device__ T* tile(T* A, unsigned A_stride, unsigned i, unsigned j) 
     {
-        return A + i * NTILES * A_offset + j * NTILES;
+        return A + i * NTILES * A_stride + j * NTILES;
     }
+
+    // __launch_bounds__指定了每个block的最大线程数为NTHREADS，便于编译器优化
+    // 这是一个每个block对应的size是uniform的版本，也就是A矩阵的每个diagonal的block是一个block_size * block_size的矩阵
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__  __launch_bounds__(NTHREADS) void CholeskyFactorizeUniformBlockTile(T* A, int block_size, int num_blocks)
+    {
+        int env_id = blockIdx.x;
+        if (env_id >= num_blocks) 
+        {
+            return;
+        }
+        int A_stride = block_size; // 因为是row-major，所以每行的步长就是列数
+        int tile_stride = NTILES; // tile在shared memory中是紧凑存储的，所以tile_stride等于NTILES
+
+        T* A_block = A + env_id * block_size * block_size;
+
+        extern __shared__ T smem[]; // 大小为4 * NTILES * NTILES * sizeof(T)
+        T* sA = smem; // 存A_kk Tile
+        T* sB = sA + NTILES * NTILES; // 存A_ik Tile
+        T* sC = sB + NTILES * NTILES; // 存A_kj Tile
+        T* sD = sC + NTILES * NTILES; // 存A_ij Tile
+
+        if(block_size % NTILES != 0)
+        {
+            // 忽略没有padding的情况
+            return;
+        }
+
+        int tile_dim = block_size / NTILES;
+
+        for(int k = 0; k < tile_dim; k++)
+        {
+            T* A_kk = tile<NTILES>(A_block, A_stride, k, k);
+
+            // Step 1: load A_kk tile into shared memory sA
+            LoadTile<NTILES, NTHREADS, T>(A_kk, sA, A_stride, tile_stride);
+
+            // Step 2: subtract previous contributions from sA
+            // A_kk = A_kk - sum_{j=0}^{k-1} L_kj * L_kj^T
+            for(int j = 0; j < k; j++)
+            {
+                T* L_kj = tile<NTILES>(A_block, A_stride, k, j);
+                // 加载非对角块L_kj到sB
+                LoadTile<NTILES, NTHREADS, T>(L_kj, sB, A_stride, tile_stride, false);
+    
+            }
+        }
+       
+        
+    }
+
 
 
     // 在矩阵A的每个env对应block的size比较小的时候，不必再分成很多个tile来处理
@@ -252,14 +322,7 @@ namespace dyno
         }
     }
 
-    // __launch_bounds__指定了每个block的最大线程数为NTHREADS，便于编译器优化
-    template<unsigned NTILES, unsigned NTHREADS, class T>
-    __global__  __launch_bounds__(NTHREADS) void CholeskyFactorizeTile(const T* A, T* L, const int* block_offsets, const int* block_sizes, int num_blocks)
-    {
-        
-        
-    }
-
+    
 
 
     // Basic Cholesky factorization for a single matrix
@@ -330,9 +393,9 @@ namespace dyno
 
     template<typename T>
     __global__ void BatchCholeskyFactorize(
-        const DArray<T> A, DArray<T> L, 
-        DArray<int> block_sizes, 
-        DArray<int> block_offsets, 
+        const T* A, T* L, 
+        const int* block_sizes, 
+        const int* block_offsets, 
         int num_blocks)
     {
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -345,10 +408,10 @@ namespace dyno
 
     template<typename T>
     __global__ void BatchCholeskySolve(
-        const DArray<T> L, DArray<T> x, 
-        DArray<int> block_sizes, 
-        DArray<int> block_offsets,
-        DArray<int> x_offsets, 
+        const T* L, T* x, 
+        const int* block_sizes, 
+        const int* block_offsets,
+        const int* x_offsets, 
         int num_blocks)
     {
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -372,6 +435,20 @@ namespace dyno
     {
         const int threads = 128;
         const int blocks = (num_blocks + threads - 1) / threads;
+        BatchCholeskyFactorize<T><<<blocks, threads>>>(A.begin(), L.begin(), block_sizes.begin(), block_offsets.begin(), num_blocks);
+        cudaDeviceSynchronize();
+    }
+
+    template<typename T>
+    void BatchCholeskyFactorizeHost(
+        const T* A, 
+        T* L, 
+        const int* block_sizes, 
+        const int* block_offsets, 
+        int num_blocks)
+    {
+        const int threads = 128;
+        const int blocks = (num_blocks + threads - 1) / threads;
         BatchCholeskyFactorize<T><<<blocks, threads>>>(A, L, block_sizes, block_offsets, num_blocks);
         cudaDeviceSynchronize();
     }
@@ -383,6 +460,22 @@ namespace dyno
         DArray<int> block_sizes, 
         DArray<int> block_offsets, 
         DArray<int> x_offsets, 
+        int num_blocks)
+    {
+        const int threads = 128;
+        const int blocks = (num_blocks + threads - 1) / threads;
+        BatchCholeskySolve<T><<<blocks, threads>>>(L.begin(), x.begin(), block_sizes.begin(), block_offsets.begin(), x_offsets.begin(), num_blocks);
+        cudaDeviceSynchronize();
+    }
+
+
+    template<typename T>
+    void BatchCholeskySolveHost(
+        const T* L, 
+        T* x, 
+        const int* block_sizes, 
+        const int* block_offsets, 
+        const int* x_offsets, 
         int num_blocks)
     {
         const int threads = 128;
@@ -482,11 +575,23 @@ namespace dyno
     template void dyno::BatchCholeskyFactorizeHost<double>(
         const dyno::DArray<double>, dyno::DArray<double>,dyno::DArray<int>, dyno::DArray<int>, int);
 
+    template void dyno::BatchCholeskyFactorizeHost<float>(
+        const float*, float*, const int*, const int*, int);
+
+    template void dyno::BatchCholeskyFactorizeHost<double>(
+        const double*, double*, const int*, const int*, int);
+
     template void dyno::BatchCholeskySolveHost<float>(
         const dyno::DArray<float>, dyno::DArray<float>, dyno::DArray<int>, dyno::DArray<int>, dyno::DArray<int>, int);
 
     template void dyno::BatchCholeskySolveHost<double>(
         const dyno::DArray<double>, dyno::DArray<double>, dyno::DArray<int>, dyno::DArray<int>, dyno::DArray<int>, int);
+
+    template void dyno::BatchCholeskySolveHost<float>(
+        const float*, float*, const int*, const int*, const int*, int);
+
+    template void dyno::BatchCholeskySolveHost<double>(
+        const double*, double*, const int*, const int*, const int*, int);
 
     template void dyno::BlockCholeskySingleTileHost<double>(
         const dyno::DArray<double>, dyno::DArray<double>, dyno::DArray<int>, dyno::DArray<int>, int);

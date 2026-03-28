@@ -86,6 +86,14 @@ namespace dyno
         CArray2D<Real>          fl_midpoint_host(env_num, fl_max);
         CArray2D<int>           fl_power_host(env_num, fl_max);
 
+        CArray2D<Real>          col_tc_host(env_num, body_max_num);
+        CArray2D<Real>          col_dr_host(env_num, body_max_num);
+        CArray2D<Real>          col_dmax_host(env_num, body_max_num);
+        CArray2D<Real>          col_dmin_host(env_num, body_max_num);
+        CArray2D<Real>          col_width_host(env_num, body_max_num);
+        CArray2D<Real>          col_midpoint_host(env_num, body_max_num);
+        CArray2D<int>           col_power_host(env_num, body_max_num);
+
         std::vector<Vec3i>  rendering_idx_2_rigid_body_mapping_host;
         CArray2D<int>       rigid_body_2_rendering_idx_mapping_host(env_num, body_max_num);
 
@@ -114,6 +122,14 @@ namespace dyno
 
                 joint_type_host(eid, bid) = 0;
                 contact_weights_host(eid, bid) = 1;
+
+                col_dmax_host(eid, bid) = 0.95;
+                col_dmin_host(eid, bid) = 0.9;
+                col_width_host(eid, bid) = 0.001;
+                col_midpoint_host(eid, bid) = 0.5;
+                col_tc_host(eid, bid) = 0.02;
+                col_dr_host(eid, bid) = 1.;
+                col_power_host(eid, bid) = 2;
             }
 
             for (int jl_id = 0; jl_id < joint_limit_max; jl_id++) {
@@ -342,6 +358,17 @@ namespace dyno
                             }
                             default: ;
                         }
+                    }
+
+                    if (rb_json.contains("sol_paras")) {
+                        auto paras = rb_json.at("sol_paras").get<std::vector<float>>();
+                        col_tc_host(eid, bid) = paras[0];
+                        col_dr_host(eid, bid) = paras[1];
+                        col_dmax_host(eid, bid) = paras[2];
+                        col_dmin_host(eid, bid) = paras[3];
+                        col_width_host(eid, bid) = paras[4];
+                        col_midpoint_host(eid, bid) = paras[5];
+                        col_power_host(eid, bid) = static_cast<int>(paras[6]);
                     }
 
                     bid++;
@@ -592,7 +619,13 @@ namespace dyno
         friction_loss_constraints.width.assign(fl_width_host);
         friction_loss_constraints.power.assign(fl_power_host);
 
-
+        collision_constraints.time_const.assign(col_tc_host);
+        collision_constraints.damp_ratio.assign(col_dr_host);
+        collision_constraints.dmax.assign(col_dmax_host);
+        collision_constraints.dmin.assign(col_dmin_host);
+        collision_constraints.midpoint.assign(col_midpoint_host);
+        collision_constraints.width.assign(col_width_host);
+        collision_constraints.power.assign(col_power_host);
 
         num_constraints.assign(num_constraints_host);
         num_each_constraint.assign(num_each_constraint_host);

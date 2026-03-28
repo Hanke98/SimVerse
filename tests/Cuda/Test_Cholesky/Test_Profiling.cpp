@@ -17,8 +17,8 @@ namespace dyno
 namespace
 {
 // Edit these constants directly for profiling configuration.
-constexpr const char* kInputBinPath = "tests/Cuda/Test_Cholesky/data/spd_512.bin";
-constexpr int kProfileNumBlocks = 128;
+constexpr const char* kInputBinPath = "tests/Cuda/Test_Cholesky/data/spd_128.bin";
+constexpr int kProfileNumBlocks = 2048;
 constexpr int kProfileWarmupIters = 5;
 constexpr int kProfileTimedIters = 50;
 
@@ -32,16 +32,20 @@ struct ProfileStats
 ProfileStats MeasureGpuKernelLoop(
     int warmup_iters,
     int timed_iters,
-    const DArray<double>& dA_ref,
-    const DArray<double>& dX_ref,
     DArray<double>& dA_work,
     DArray<double>& dX_work,
+    const CArray<double>& hA_ref,
+    const CArray<double>& hX_ref,
     const std::function<void()>& fn_factorize_solve)
 {
     for (int i = 0; i < warmup_iters; ++i)
     {
-        cuSafeCall(cudaMemcpy(dA_work.begin(), dA_ref.begin(), dA_ref.size() * sizeof(double), cudaMemcpyDeviceToDevice));
-        cuSafeCall(cudaMemcpy(dX_work.begin(), dX_ref.begin(), dX_ref.size() * sizeof(double), cudaMemcpyDeviceToDevice));
+        cuSafeCall(cudaMemcpy(
+            dA_work.begin(), hA_ref.begin(),
+            hA_ref.size() * sizeof(double), cudaMemcpyHostToDevice));
+        cuSafeCall(cudaMemcpy(
+            dX_work.begin(), hX_ref.begin(),
+            hX_ref.size() * sizeof(double), cudaMemcpyHostToDevice));
         fn_factorize_solve();
         cuSafeCall(cudaDeviceSynchronize());
     }
@@ -56,8 +60,12 @@ ProfileStats MeasureGpuKernelLoop(
 
     for (int i = 0; i < timed_iters; ++i)
     {
-        cuSafeCall(cudaMemcpy(dA_work.begin(), dA_ref.begin(), dA_ref.size() * sizeof(double), cudaMemcpyDeviceToDevice));
-        cuSafeCall(cudaMemcpy(dX_work.begin(), dX_ref.begin(), dX_ref.size() * sizeof(double), cudaMemcpyDeviceToDevice));
+        cuSafeCall(cudaMemcpy(
+            dA_work.begin(), hA_ref.begin(),
+            hA_ref.size() * sizeof(double), cudaMemcpyHostToDevice));
+        cuSafeCall(cudaMemcpy(
+            dX_work.begin(), hX_ref.begin(),
+            hX_ref.size() * sizeof(double), cudaMemcpyHostToDevice));
 
         cuSafeCall(cudaEventRecord(ev_start));
         fn_factorize_solve();
@@ -195,25 +203,19 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
     d_offsets.assign(h_offsets);
     d_x_offsets.assign(h_x_offsets);
 
-    DArray<double> dA_ref, dX_ref;
-    dA_ref.assign(hA);
-    dX_ref.assign(hB);
-
-    DArray<double> dA_uniform, dX_uniform;
-    DArray<double> dA_cu, dX_cu;
-    dA_uniform.resize(total_mat);
-    dX_uniform.resize(total_vec);
-    dA_cu.resize(total_mat);
-    dX_cu.resize(total_vec);
+    // Use one device workspace for A/x to reduce VRAM footprint.
+    DArray<double> dA_work, dX_work;
+    dA_work.resize(total_mat);
+    dX_work.resize(total_vec);
 
     std::vector<double*> hA_ptr_rw(num_blocks);
     std::vector<const double*> hA_ptr_ro(num_blocks);
     std::vector<double*> hB_ptr(num_blocks);
     for (int b = 0; b < num_blocks; ++b)
     {
-        hA_ptr_rw[b] = dA_cu.begin() + static_cast<size_t>(b) * block_size * block_size;
-        hA_ptr_ro[b] = dA_cu.begin() + static_cast<size_t>(b) * block_size * block_size;
-        hB_ptr[b] = dX_cu.begin() + static_cast<size_t>(b) * block_size;
+        hA_ptr_rw[b] = dA_work.begin() + static_cast<size_t>(b) * block_size * block_size;
+        hA_ptr_ro[b] = dA_work.begin() + static_cast<size_t>(b) * block_size * block_size;
+        hB_ptr[b] = dX_work.begin() + static_cast<size_t>(b) * block_size;
     }
 
     double** dA_ptr_rw = nullptr;
@@ -233,24 +235,24 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
 
     auto uniform_call = [&]() {
         CholeskyFactorizeHost(
-            dA_uniform.begin(), dA_uniform.begin(),
+            dA_work.begin(), dA_work.begin(),
             d_sizes.begin(), d_offsets.begin(),
-            num_blocks, CholeskyMethod::UniformTiled);
+            num_blocks, CholeskyMethod::WavefrontTiled);
         CholeskySolveHost(
-            dA_uniform.begin(), dX_uniform.begin(),
+            dA_work.begin(), dX_work.begin(),
             d_sizes.begin(), d_offsets.begin(), d_x_offsets.begin(),
-            num_blocks, CholeskyMethod::UniformTiled);
+            num_blocks, CholeskyMethod::WavefrontTiled);
     };
 
     auto cusolver_call = [&]() {
-        runner.Factorize(dA_cu.begin(), dA_ptr_rw, block_size, num_blocks, d_info, true);
-        runner.Solve(dA_cu.begin(), dX_cu.begin(), dA_ptr_ro, dB_ptr, block_size, num_blocks, true);
+        runner.Factorize(dA_work.begin(), dA_ptr_rw, block_size, num_blocks, d_info, true);
+        runner.Solve(dA_work.begin(), dX_work.begin(), dA_ptr_ro, dB_ptr, block_size, num_blocks, true);
     };
 
     const ProfileStats s_uniform = MeasureGpuKernelLoop(
-        warmup_iters, timed_iters, dA_ref, dX_ref, dA_uniform, dX_uniform, uniform_call);
+        warmup_iters, timed_iters, dA_work, dX_work, hA, hB, uniform_call);
     const ProfileStats s_cusolver = MeasureGpuKernelLoop(
-        warmup_iters, timed_iters, dA_ref, dX_ref, dA_cu, dX_cu, cusolver_call);
+        warmup_iters, timed_iters, dA_work, dX_work, hA, hB, cusolver_call);
 
     CArray<int> h_info;
     h_info.resize(num_blocks);
@@ -261,8 +263,22 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
     }
 
     CArray<double> hX_uniform, hX_cu;
-    hX_uniform.assign(dX_uniform);
-    hX_cu.assign(dX_cu);
+    // Re-run once for each method to fetch final x for correctness check.
+    cuSafeCall(cudaMemcpy(
+        dA_work.begin(), hA.begin(), hA.size() * sizeof(double), cudaMemcpyHostToDevice));
+    cuSafeCall(cudaMemcpy(
+        dX_work.begin(), hB.begin(), hB.size() * sizeof(double), cudaMemcpyHostToDevice));
+    uniform_call();
+    cuSafeCall(cudaDeviceSynchronize());
+    hX_uniform.assign(dX_work);
+
+    cuSafeCall(cudaMemcpy(
+        dA_work.begin(), hA.begin(), hA.size() * sizeof(double), cudaMemcpyHostToDevice));
+    cuSafeCall(cudaMemcpy(
+        dX_work.begin(), hB.begin(), hB.size() * sizeof(double), cudaMemcpyHostToDevice));
+    cusolver_call();
+    cuSafeCall(cudaDeviceSynchronize());
+    hX_cu.assign(dX_work);
 
     double max_rel_uniform = 0.0;
     double max_rel_cu = 0.0;

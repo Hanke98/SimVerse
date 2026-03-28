@@ -116,6 +116,14 @@ namespace dyno
         __syncthreads();
     }
 
+    // 更新A_ij
+    // 每次调用计算A_ik(sB) = A_ik(sB) - L_ij(sC) * L_kj^T(sD) 其中的4行(4个warp分别负责1行)
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __device__ void PanelGemmNTSub(T* sB, const T* sC, const T* sD, int tile_stride)
+    {
+
+    }
+
     // solve L_ik * L_kk^T = A_ik for L_ik
     // sA存L_kk，sB存A_ik，结果写回sB
     template<unsigned NTILES, unsigned NTHREADS, class T>
@@ -617,6 +625,106 @@ namespace dyno
         }
     }
 
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__  __launch_bounds__(NTHREADS) void DiagPotrf(T* A, int block_size, int num_blocks, int k_tile)
+    {
+        int env_id = blockIdx.x;
+        if (env_id >= num_blocks)
+            return;
+
+        T* A_block = A + env_id * block_size * block_size;
+        const int tile_stride = NTILES;
+
+        extern __shared__ unsigned char smem[]; // 大小为NTILES * NTILES * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存A_kk Tile
+        // T* sB = sA + NTILES * NTILES;   // 存L_kj Tile
+
+        // Load A_kk
+        LoadTilePadded<NTILES, NTHREADS, T>(A_block, sA, block_size, k_tile, k_tile, tile_stride, true);
+        
+        // // left looking type
+        // // Update A_kk(SYRK)
+        // // when k > 0, substract history contribution
+        // // A_kk -= sum_j L_kj * L_kj^T
+        // for(int j = 0; j < k_tile; j++)
+        // {
+        //     LoadTilePadded<NTILES, NTHREADS, T>(A_block, sB, block_size, k_tile, j, tile_stride, false);
+        //     SyrkSubLower<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+        // }
+        
+        // Potrf A_kk
+        PotrfTileLowerInplace<NTILES, NTHREADS, T>(sA, tile_stride);
+        // Store L_kk
+        StoreTileBounded<NTILES, NTHREADS, T>(sA, A_block, block_size, k_tile, k_tile, tile_stride, true);
+    }
+
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__  __launch_bounds__(NTHREADS) void PanelTrsm(T* A, int block_size, int num_blocks, int k_tile)
+    {
+        int env_id = blockIdx.x;
+        int i_tile = k_tile + 1 + blockIdx.y;
+        int num_tiles = (block_size + NTILES - 1) / NTILES;
+        if (env_id >= num_blocks || i_tile >= num_tiles)
+            return;
+
+        T* A_block = A + env_id * block_size * block_size;
+        const int tile_stride = NTILES;
+
+        extern __shared__ unsigned char smem[]; // 大小为2 * NTILES * NTILES * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存L_kk Tile (DiagPotrf Kernel 结果)
+        T* sB = sA + NTILES * NTILES;   // 存 A_ik Tile (右手项)
+
+        // Load L_kk(A_kk)
+        LoadTilePadded<NTILES, NTHREADS, T>(A_block, sA, block_size, k_tile, k_tile, tile_stride, true);
+        // Panel trail Result(A_ik)
+        LoadTilePadded<NTILES, NTHREADS, T>(A_block, sB, block_size, i_tile, k_tile, tile_stride, false);
+        // Trsm Solve
+        TrsmRightLowerTranspose<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+        StoreTileBounded<NTILES, NTHREADS, T>(sB, A_block, block_size, i_tile, k_tile, tile_stride, false);
+    }
+
+    
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__ __launch_bounds__(NTHREADS) void PanelTrailGemm(T* A, int block_size, int num_blocks, int k_tile)
+    {
+        int env_id   = blockIdx.x;
+        int i_tile   = k_tile + 1 + blockIdx.y;
+        int j_tile   = k_tile + 1 + blockIdx.z;
+        int num_tiles = (block_size + NTILES - 1) / NTILES;
+        if (env_id >= num_blocks || i_tile >= num_tiles || j_tile >= num_tiles) 
+            return;
+        if (i_tile < j_tile) 
+            return; // 只算下三角
+        
+        extern __shared__ unsigned char smem[]; // 大小为3 * NTILES * NTILES * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存A_ij Tile
+        T* sB = sA + NTILES * NTILES;   // 存L_ik Tile
+        T* sC = sB + NTILES * NTILES;   // 存 L_jk Tile
+
+        bool diag_tile = i_tile == j_tile;
+
+        T* A_block = A + env_id * block_size * block_size;
+        const int tile_stride = NTILES;
+
+        // Load A_ij
+        LoadTilePadded<NTILES, NTHREADS, T>(A_block, sA, block_size, i_tile, j_tile, tile_stride, diag_tile);
+        // Load L_ik
+        LoadTilePadded<NTILES, NTHREADS, T>(A_block, sB, block_size, i_tile, k_tile, tile_stride, false);
+        // Load L_jk
+        LoadTilePadded<NTILES, NTHREADS, T>(A_block, sC, block_size, j_tile, k_tile, tile_stride, false);
+
+        if (diag_tile)
+        {
+            SyrkSubLower<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+        }
+        else 
+        {
+            GemmNTSub<NTILES, NTHREADS, T>(sA, sB, sC, tile_stride);
+        }
+        StoreTileBounded<NTILES, NTHREADS, T>(sA, A_block, block_size, i_tile, j_tile, tile_stride, diag_tile);
+    }
+
     // 与上面的cholesky分解配套的Lower和Upper solve函数
     template<unsigned NTILES, unsigned NTHREADS, class T>
     __global__  __launch_bounds__(NTHREADS) void LowerSolveUniformBlockTile(T* L, T* x, int block_size, int num_blocks)
@@ -808,6 +916,127 @@ namespace dyno
             StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, i);
         }
     }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__ __launch_bounds__(NTHREADS) void LowerDiagSolve(
+        const T* L,
+        T* x,
+        int block_size,
+        int num_blocks,
+        int k_tile)
+    {
+        int env_id = blockIdx.x;
+
+        const int num_tiles = (block_size + NTILES - 1) / NTILES;
+        if (env_id >= num_blocks || k_tile >= num_tiles || block_size <= 0)
+            return;
+
+        const int tile_stride = NTILES;
+
+        const T* L_block = L + env_id * block_size * block_size;
+        T* x_block = x + env_id * block_size;
+
+        extern __shared__ unsigned char smem[]; // 大小为NTILES * (NTILES + 1) * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存L_kk Tile
+        T* sB = sA + NTILES * NTILES;   // 存rhs右手项
+
+        LoadTilePadded<NTILES, NTHREADS, T>(L_block, sA, block_size, k_tile, k_tile, tile_stride, true);
+        LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sB, block_size, k_tile);
+        TrsvLowerTileInplace<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+        StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, k_tile);
+    }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__ __launch_bounds__(NTHREADS) void LowerUpdatePanel(
+        const T* L,
+        T* x,
+        int block_size,
+        int num_blocks,
+        int k_tile)
+    {
+        int env_id = blockIdx.x;
+        int i_tile = blockIdx.y + k_tile + 1;
+
+        const int num_tiles = (block_size + NTILES - 1) / NTILES;
+        if (env_id >= num_blocks || i_tile >= num_tiles || block_size <= 0)
+            return;
+        const int tile_stride = NTILES;
+
+        const T* L_block = L + env_id * block_size * block_size;
+        T* x_block = x + env_id * block_size;
+
+        extern __shared__ unsigned char smem[]; // 大小为NTILES * (NTILES + 2) * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存L_ik Tile
+        T* sB = sA + NTILES * NTILES;   // 存b_i
+        T* sC = sB + NTILES; // 存y_k
+        LoadTilePadded<NTILES, NTHREADS, T>(L_block, sA, block_size, i_tile, k_tile, tile_stride, false);
+        LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sB, block_size, i_tile);
+        LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sC, block_size, k_tile);
+        
+        GemvSubLowerNTile<NTILES, NTHREADS, T>(sB, sA, sC, tile_stride);
+        StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, i_tile);
+    }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__ __launch_bounds__(NTHREADS) void UpperDiagSolve(
+        const T* L,
+        T* x,
+        int block_size,
+        int num_blocks,
+        int k_tile)
+    {
+        int env_id = blockIdx.x;
+
+        const int num_tiles = (block_size + NTILES - 1) / NTILES;
+        if (env_id >= num_blocks || k_tile >= num_tiles || block_size <= 0)
+            return;
+
+        const int tile_stride = NTILES;
+
+        const T* L_block = L + env_id * block_size * block_size;
+        T* x_block = x + env_id * block_size;
+
+        extern __shared__ unsigned char smem[]; // 大小为NTILES * (NTILES + 1) * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存L_kk Tile
+        T* sB = sA + NTILES * NTILES;   // 存rhs右手项
+
+        LoadTilePadded<NTILES, NTHREADS, T>(L_block, sA, block_size, k_tile, k_tile, tile_stride, true);
+        LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sB, block_size, k_tile);
+        TrsvUpperTileInplace<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+        StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, k_tile);
+    }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__ __launch_bounds__(NTHREADS) void UpperUpdatePanel(
+        const T* L,
+        T* x,
+        int block_size,
+        int num_blocks,
+        int k_tile)
+    {
+        int env_id = blockIdx.x;
+        int i_tile = k_tile - blockIdx.y - 1;
+
+        const int num_tiles = (block_size + NTILES - 1) / NTILES;
+        if (env_id >= num_blocks || i_tile < 0 || block_size <= 0)
+            return;
+        const int tile_stride = NTILES;
+
+        const T* L_block = L + env_id * block_size * block_size;
+        T* x_block = x + env_id * block_size;
+
+        extern __shared__ unsigned char smem[]; // 大小为NTILES * (NTILES + 2) * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存L_ki Tile, 按transpose使用
+        T* sB = sA + NTILES * NTILES;   // 存b_i
+        T* sC = sB + NTILES; // 存x_k
+        LoadTilePadded<NTILES, NTHREADS, T>(L_block, sA, block_size, k_tile, i_tile, tile_stride, false);
+        LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sB, block_size, i_tile);
+        LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sC, block_size, k_tile);
+        
+        GemvSubLowerTTile<NTILES, NTHREADS, T>(sB, sA, sC, tile_stride);
+        StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, i_tile);
+    }
+
 
 
     // 在矩阵A的每个env对应block的size比较小的时候，不必再分成很多个tile来处理
@@ -1195,11 +1424,6 @@ namespace dyno
                     return;
                 }
             }
-            if (block_size0 % 32 != 0)
-            {
-                std::printf("[CholeskyFactorizeHost] UniformTiled requires block_size multiple of 32\n");
-                return;
-            }
         }
         size_t smem_bytes = 4 * NTILES * NTILES * sizeof(T);
         cuSafeCall((CholeskyFactorizeUniformBlockTile<NTILES, NTHREADS, T>
@@ -1230,28 +1454,106 @@ namespace dyno
                 L, block_sizes, block_offsets, num_blocks)));
     }
 
-    // template<typename T>
-    // void CholeskyFactorizeWavefrontTiledHost(
-    //     const T* A,
-    //     T* L,
-    //     const int* block_sizes,
-    //     const int* block_offsets,
-    //     int num_blocks)
-    // {
-    //     constexpr int NTILES = 32;
-    //     constexpr int NTHREADS = 128;
+    template<typename T>
+    void CholeskyFactorizeWavefrontTiledHost(
+        const T* A,
+        T* L,
+        const int* block_sizes,
+        const int* block_offsets,
+        int num_blocks,
+        bool check_validity = false)
+    {
+        constexpr int NTILES = 32;
+        constexpr int NTHREADS = 128;
 
-    //     if (A != L)
-    //     {
-    //         std::printf("[CholeskyFactorizeHost] PaddedTiled requires A == L (in-place)\n");
-    //         return;
-    //     }
+        if (A != L)
+        {
+            std::printf("[CholeskyFactorizeHost] WavefrontTiled requires A == L (in-place)\n");
+            return;
+        }
 
-    //     size_t smem_bytes = 4 * NTILES * NTILES * sizeof(T);
-    //     cuSafeCall((CholeskyFactorizeVariableBlockTile<NTILES, NTHREADS, T>
-    //         <<<num_blocks, NTHREADS, smem_bytes>>>(
-    //             L, block_sizes, block_offsets, num_blocks)));
-    // }
+        int block_size = 0;
+        cuSafeCall(cudaMemcpy(&block_size, block_sizes, sizeof(int), cudaMemcpyDeviceToHost));
+
+        if (check_validity)
+        {
+            std::vector<int> h_sizes(num_blocks);
+            std::vector<int> h_offsets(num_blocks);
+            cuSafeCall(cudaMemcpy(h_sizes.data(), block_sizes, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+            cuSafeCall(cudaMemcpy(h_offsets.data(), block_offsets, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+
+            const int block_size0 = h_sizes[0];
+            for (int b = 1; b < num_blocks; ++b)
+            {
+                if (h_sizes[b] != block_size0)
+                {
+                    std::printf("[CholeskyFactorizeHost] WavefrontTiled requires all block_sizes equal\n");
+                    return;
+                }
+            }
+            for (int b = 0; b < num_blocks; ++b)
+            {
+                int expected = b * block_size0 * block_size0;
+                if (h_offsets[b] != expected)
+                {
+                    std::printf("[CholeskyFactorizeHost] WavefrontTiled requires contiguous block_offsets\n");
+                    return;
+                }
+            }
+        }
+
+        const int num_tiles = (block_size + NTILES - 1) / NTILES;
+
+        size_t smem_diag = 1 * NTILES * NTILES * sizeof(T);
+        size_t smem_panel = 2 * NTILES * NTILES * sizeof(T);
+        size_t smem_trail = 3 * NTILES * NTILES * sizeof(T);
+
+        // 暂时使用临时创建的方法
+        cudaStream_t stream = nullptr;
+        cuSafeCall(cudaStreamCreate(&stream));
+
+        // three phase wavefront progress in same stream
+        for(int k = 0; k < num_tiles; k++)
+        {
+            // phase A cholesky factorize A_kk(DiagPotrf)
+            DiagPotrf<NTILES, NTHREADS, T>
+            <<<num_blocks, NTHREADS, smem_diag, stream>>>(
+                L,          // in-place matrix buffer
+                block_size, // 单个矩阵维度
+                num_blocks,
+                k);    // 当前波前轮次
+
+            // phase B panel phase solve L_ik(TRSM)
+            // 当前需要并行计算的非对角tile
+            const int panel_tiles = num_tiles - (k + 1);
+            if (panel_tiles > 0)
+            {
+                dim3 grid_panel(num_blocks, panel_tiles, 1);
+                PanelTrsm<NTILES, NTHREADS, T>
+                    <<<grid_panel, NTHREADS, smem_panel, stream>>>(
+                        L,
+                        block_size,
+                        num_blocks,
+                        k);
+            }
+
+            // phase C update A_ij(GEMM)
+            // 更新未来的A_ij
+            if (panel_tiles > 0) {
+                dim3 grid(num_blocks, panel_tiles, panel_tiles);
+
+                PanelTrailGemm<NTILES, NTHREADS, T>
+                    <<<grid, NTHREADS, smem_trail, stream>>>(
+                        L, block_size, num_blocks, k);
+            }
+        }
+
+        if (stream) {
+            cuSafeCall(cudaStreamSynchronize(stream));
+            cuSafeCall(cudaStreamDestroy(stream));
+            stream = nullptr;
+        }
+    }
 
     template<typename T>
     void CholeskySolveSimplestHost(
@@ -1357,11 +1659,6 @@ namespace dyno
                     return;
                 }
             }
-            if (block_size % 32 != 0)
-            {
-                std::printf("[CholeskySolveHost] UniformTiled requires block_size multiple of 32\n");
-                return;
-            }
         }
 
         size_t smem_bytes = 2 * (NTILES * NTILES + NTILES) * sizeof(T);
@@ -1397,6 +1694,109 @@ namespace dyno
     }
 
     template<typename T>
+    void CholeskySolveWavefrontTiledHost(
+        const T* L,
+        T* x,
+        const int* block_sizes,
+        const int* block_offsets,
+        const int* x_offsets,
+        int num_blocks,
+        bool check_validity = false)
+    {
+        constexpr int NTILES = 32;
+        constexpr int NTHREADS = 128;
+
+        int block_size;
+        cuSafeCall(cudaMemcpy(&block_size, block_sizes, sizeof(int), cudaMemcpyDeviceToHost));
+        if (check_validity)
+        {
+            std::vector<int> h_sizes(num_blocks);
+            std::vector<int> h_offsets(num_blocks);
+            std::vector<int> h_x_offsets(num_blocks);
+            cuSafeCall(cudaMemcpy(h_sizes.data(), block_sizes, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+            cuSafeCall(cudaMemcpy(h_offsets.data(), block_offsets, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+            cuSafeCall(cudaMemcpy(h_x_offsets.data(), x_offsets, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+
+            for (int b = 1; b < num_blocks; ++b)
+            {
+                if (h_sizes[b] != block_size)
+                {
+                    std::printf("[CholeskySolveHost] WavefrontTiled requires all block_sizes equal\n");
+                    return;
+                }
+            }
+
+            for (int b = 0; b < num_blocks; ++b)
+            {
+                int expected_mat = b * block_size * block_size;
+                int expected_vec = b * block_size;
+                if (h_offsets[b] != expected_mat || h_x_offsets[b] != expected_vec)
+                {
+                    std::printf("[CholeskySolveHost] WavefrontTiled requires contiguous block_offsets/x_offsets\n");
+                    return;
+                }
+            }
+        }
+
+        const int num_tiles = (block_size + NTILES - 1) / NTILES;
+
+        // shared memory for cholesky solve
+        size_t smem_diag = (NTILES * NTILES + NTILES) * sizeof(T);
+        size_t smem_panel = (NTILES * NTILES + 2 * NTILES) * sizeof(T);
+
+         // 暂时使用临时创建的方法
+        cudaStream_t stream = nullptr;
+        cuSafeCall(cudaStreamCreate(&stream));
+
+        // two phase wavefront progress in same stream(Lower Solve)
+        for(int k = 0; k < num_tiles; k++)
+        {
+            // Solve y_k with L_kk y_k = b_k
+            LowerDiagSolve<NTILES, NTHREADS, T>
+                <<<num_blocks, NTHREADS, smem_diag, stream>>>
+                (L, x, block_size, num_blocks, k);
+
+            // Update b_i
+            // right-looking更新的是未来的b_i(i > k)
+            const int panel_tiles = num_tiles - (k + 1);
+            if (panel_tiles > 0)
+            {
+                dim3 grid_panel(num_blocks, panel_tiles, 1);
+                LowerUpdatePanel<NTILES, NTHREADS, T>
+                    <<<grid_panel, NTHREADS, smem_panel, stream>>>(
+                        L, x, block_size, num_blocks, k);
+            }
+
+        }
+
+        // Upper Solve
+        for(int k = num_tiles - 1; k >= 0; k--)
+        {
+            // Solve y_k with L_kk y_k = b_k
+            UpperDiagSolve<NTILES, NTHREADS, T>
+                <<<num_blocks, NTHREADS, smem_diag, stream>>>
+                (L, x, block_size, num_blocks, k);
+
+            // Update b_i
+            // right-looking更新的是未来的b_i(i > k)
+            const int panel_tiles = k;
+            if (panel_tiles > 0)
+            {
+                dim3 grid_panel(num_blocks, panel_tiles, 1);
+                UpperUpdatePanel<NTILES, NTHREADS, T>
+                    <<<grid_panel, NTHREADS, smem_panel, stream>>>(
+                        L, x, block_size, num_blocks, k);
+            }
+        }
+
+        if (stream) {
+            cuSafeCall(cudaStreamSynchronize(stream));
+            cuSafeCall(cudaStreamDestroy(stream));
+            stream = nullptr;
+        }
+    }
+
+    template<typename T>
     void CholeskyFactorizeHost(
         const T* A,
         T* L,
@@ -1422,6 +1822,9 @@ namespace dyno
             return;
         case CholeskyMethod::PaddedTiled:
             CholeskyFactorizePaddedTiledHost(A, L, block_sizes, block_offsets, num_blocks);
+            return;
+        case CholeskyMethod::WavefrontTiled:
+            CholeskyFactorizeWavefrontTiledHost(A, L, block_sizes, block_offsets, num_blocks);
             return;
         default:
             std::printf("[CholeskyFactorizeHost] Unknown method = %d\n", static_cast<int>(method));
@@ -1456,6 +1859,9 @@ namespace dyno
             return;
         case CholeskyMethod::PaddedTiled:
             CholeskySolvePaddedTiledHost(L, x, block_sizes, block_offsets, x_offsets, num_blocks);
+            return;
+        case CholeskyMethod::WavefrontTiled:
+            CholeskySolveWavefrontTiledHost(L, x, block_sizes, block_offsets, x_offsets, num_blocks, check_validity);
             return;
         default:
             std::printf("[CholeskySolveHost] Unknown method = %d\n", static_cast<int>(method));

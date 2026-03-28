@@ -191,4 +191,11 @@ TEST(CholeskyDispatch, PaddedTiled)
     EXPECT_LT(r.max_rel_x_err, 1e-8);
 }
 
+TEST(CholeskyDispatch, WavefrontTiled)
+{
+    const DispatchResult r = RunDispatchCase(CholeskyMethod::WavefrontTiled, {192, 192, 192, 192}, true);
+    EXPECT_LT(r.max_rel_lower_err, 1e-8);
+    EXPECT_LT(r.max_rel_x_err, 1e-8);
+}
+
 } // namespace dyno

@@ -92,7 +92,7 @@ TEST(CholeskyUniform, CompareWithCuSolverCuBlas)
     CholeskyFactorizeHost(
         dA_ours.begin(), dA_ours.begin(),
         d_sizes.begin(), d_offsets.begin(),
-        batch, CholeskyMethod::UniformTiled);
+        batch, CholeskyMethod::WavefrontTiled);
     cuSafeCall(cudaDeviceSynchronize());
     CholeskySolveHost(
         dA_ours.begin(), dX_ours.begin(),

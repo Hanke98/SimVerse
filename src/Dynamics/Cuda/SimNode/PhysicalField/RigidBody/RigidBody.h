@@ -137,7 +137,8 @@ namespace dyno {
         DArray2D<int>           rigid_body_2_rendering_idx_mapping; // [env_id, body_id] -> idx of its pos in topo state
 
     public:
-        void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num, int joint_limit_max, int connect_max);
+        void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num,
+            int joint_limit_max, int connect_max, int fl_max);
     };
 
     

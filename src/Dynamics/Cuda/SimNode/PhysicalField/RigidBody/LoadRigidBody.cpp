@@ -7,7 +7,7 @@ namespace dyno
 {
     template<typename TDataType>
     void RigidBody<TDataType>::ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num,
-        int joint_limit_max, int connect_max)
+        int joint_limit_max, int connect_max, int fl_max)
     {
         spdlog::info("Start initializing rigid body state variables.");
         // printf("connect_num: %d", connect_max);
@@ -75,6 +75,17 @@ namespace dyno
         CArray2D<Real>          connect_midpoint_host(env_num, connect_max);
         CArray2D<int>           connect_power_host(env_num, connect_max);
 
+        CArray2D<int>           fl_dof_idxs_host(env_num, fl_max);
+        CArray2D<Real>          fl_dof_frictionloss_host(env_num, fl_max);
+
+        CArray2D<Real>          fl_tc_host(env_num, fl_max);
+        CArray2D<Real>          fl_dr_host(env_num, fl_max);
+        CArray2D<Real>          fl_dmax_host(env_num, fl_max);
+        CArray2D<Real>          fl_dmin_host(env_num, fl_max);
+        CArray2D<Real>          fl_width_host(env_num, fl_max);
+        CArray2D<Real>          fl_midpoint_host(env_num, fl_max);
+        CArray2D<int>           fl_power_host(env_num, fl_max);
+
         std::vector<Vec3i>  rendering_idx_2_rigid_body_mapping_host;
         CArray2D<int>       rigid_body_2_rendering_idx_mapping_host(env_num, body_max_num);
 
@@ -123,6 +134,16 @@ namespace dyno
                 connect_tc_host(eid, connect_id) = 0.02;
                 connect_dr_host(eid, connect_id) = 1.;
                 connect_power_host(eid, connect_id) = 2;
+            }
+
+            for (int fl_id = 0; fl_id < fl_max; fl_id++) {
+                fl_dmax_host(eid, fl_id) = 0.95;
+                fl_dmin_host(eid, fl_id) = 0.9;
+                fl_width_host(eid, fl_id) = 0.001;
+                fl_midpoint_host(eid, fl_id) = 0.5;
+                fl_tc_host(eid, fl_id) = 0.02;
+                fl_dr_host(eid, fl_id) = 1.;
+                fl_power_host(eid, fl_id) = 2;
             }
         }
 
@@ -235,8 +256,8 @@ namespace dyno
                             jl_joint_idx_host(eid, jl_num) = bid;
                             jl_limit_host(eid, jl_num) = joint_json.at("upper").get<float>();
 
-                            if (joint_json.contains("jl_paras")) {
-                                auto jl_paras = joint_json.at("jl_paras").get<std::vector<float>>();
+                            if (joint_json.contains("sol_paras")) {
+                                auto jl_paras = joint_json.at("sol_paras").get<std::vector<float>>();
                                 jl_tc_host(eid, jl_num) = jl_paras[0];
                                 jl_dr_host(eid, jl_num) = jl_paras[1];
                                 jl_dmax_host(eid, jl_num) = jl_paras[2];
@@ -253,6 +274,18 @@ namespace dyno
                             jl_is_upper_host(eid, jl_num) = 0;
                             jl_joint_idx_host(eid, jl_num) = bid;
                             jl_limit_host(eid, jl_num) = joint_json.at("lower").get<float>();
+
+                            if (joint_json.contains("sol_paras")) {
+                                auto jl_paras = joint_json.at("sol_paras").get<std::vector<float>>();
+                                jl_tc_host(eid, jl_num) = jl_paras[0];
+                                jl_dr_host(eid, jl_num) = jl_paras[1];
+                                jl_dmax_host(eid, jl_num) = jl_paras[2];
+                                jl_dmin_host(eid, jl_num) = jl_paras[3];
+                                jl_width_host(eid, jl_num) = jl_paras[4];
+                                jl_midpoint_host(eid, jl_num) = jl_paras[5];
+                                jl_power_host(eid, jl_num) = static_cast<int>(jl_paras[6]);
+                            }
+
                             jl_num++;
                         }
 
@@ -324,6 +357,18 @@ namespace dyno
                     connect_anchor_A_local_host(eid, connect_num) = Vec3f{localA[0], localA[1], localA[2]};
                     auto localB = connect_json.at("anchorB").get<std::vector<float>>();
                     connect_anchor_B_local_host(eid, connect_num) = Vec3f{localB[0], localB[1], localB[2]};
+
+                    if (connect_json.contains("sol_paras")) {
+                        auto paras = connect_json.at("sol_paras").get<std::vector<float>>();
+                        connect_tc_host(eid, connect_num) = paras[0];
+                        connect_dr_host(eid, connect_num) = paras[1];
+                        connect_dmax_host(eid, connect_num) = paras[2];
+                        connect_dmin_host(eid, connect_num) = paras[3];
+                        connect_width_host(eid, connect_num) = paras[4];
+                        connect_midpoint_host(eid, connect_num) = paras[5];
+                        connect_power_host(eid, connect_num) = static_cast<int>(paras[6]);
+                    }
+
                     connect_num++;
                 }
                 num_each_constraint.x = connect_num * 3;
@@ -333,6 +378,25 @@ namespace dyno
                 constraint_offset_host.push_back(constraint_offset);
                 num_constraints_host.push_back(num_each_constraint.x + num_each_constraint.y);
 
+
+                int fl_num = 0;
+                for (const auto& fl_json : env_json["friction_loss"]) {
+                    fl_dof_idxs_host(eid, fl_num) = fl_json.at("dof_id").get<int>();
+                    fl_dof_frictionloss_host(eid, fl_num) = fl_json.at("resistance").get<float>();
+
+                    if (fl_json.contains("sol_paras")) {
+                        auto paras = fl_json.at("sol_paras").get<std::vector<float>>();
+                        fl_tc_host(eid, fl_num) = paras[0];
+                        fl_dr_host(eid, fl_num) = paras[1];
+                        fl_dmax_host(eid, fl_num) = paras[2];
+                        fl_dmin_host(eid, fl_num) = paras[3];
+                        fl_width_host(eid, fl_num) = paras[4];
+                        fl_midpoint_host(eid, fl_num) = paras[5];
+                        fl_power_host(eid, fl_num) = static_cast<int>(paras[6]);
+                    }
+
+                    fl_num++;
+                }
 
                 batch_bodies_host[eid] = bid;
                 env_num_spheres_host[eid] = sphere_num;
@@ -431,12 +495,18 @@ namespace dyno
             }
         }
 
+        // for (eid = 0; eid < env_num; ++eid) {
+        //     for (int i = 0; i < connect_anchor_nums_host[eid]; i++)
+        //         printf("anchor_id: %d, bodyA_id: %d, bodyB_id: %d, anchorA: %f %f %f, anchorB: %f %f %f\n",
+        //             i, connect_body_idxs_host(eid, i).first, connect_body_idxs_host(eid, i).second,
+        //             connect_anchor_A_local_host(eid, i).x, connect_anchor_A_local_host(eid, i).y, connect_anchor_A_local_host(eid, i).z,
+        //             connect_anchor_B_local_host(eid, i).x, connect_anchor_B_local_host(eid, i).y, connect_anchor_B_local_host(eid, i).z);
+        // }
+
         for (eid = 0; eid < env_num; ++eid) {
-            for (int i = 0; i < connect_anchor_nums_host[eid]; i++)
-                printf("anchor_id: %d, bodyA_id: %d, bodyB_id: %d, anchorA: %f %f %f, anchorB: %f %f %f\n",
-                    i, connect_body_idxs_host(eid, i).first, connect_body_idxs_host(eid, i).second,
-                    connect_anchor_A_local_host(eid, i).x, connect_anchor_A_local_host(eid, i).y, connect_anchor_A_local_host(eid, i).z,
-                    connect_anchor_B_local_host(eid, i).x, connect_anchor_B_local_host(eid, i).y, connect_anchor_B_local_host(eid, i).z);
+            for (int i = 0; i < fl_max; i++) {
+                printf("fl_id: %d, dof_id: %d, resistance: %f\n", i, fl_dof_idxs_host(eid, i), fl_dof_frictionloss_host(eid, i));
+            }
         }
 
         shape_type.assign(shape_type_host);
@@ -510,6 +580,19 @@ namespace dyno
         anchor_constraints.midpoint.assign(connect_midpoint_host);
         anchor_constraints.width.assign(connect_width_host);
         anchor_constraints.power.assign(connect_power_host);
+
+        friction_loss_constraints.dof_idxs.assign(fl_dof_idxs_host);
+        friction_loss_constraints.dof_frictionloss.assign(fl_dof_frictionloss_host);
+
+        friction_loss_constraints.time_const.assign(fl_tc_host);
+        friction_loss_constraints.damp_ratio.assign(fl_dr_host);
+        friction_loss_constraints.dmax.assign(fl_dmax_host);
+        friction_loss_constraints.dmin.assign(fl_dmin_host);
+        friction_loss_constraints.midpoint.assign(fl_midpoint_host);
+        friction_loss_constraints.width.assign(fl_width_host);
+        friction_loss_constraints.power.assign(fl_power_host);
+
+
 
         num_constraints.assign(num_constraints_host);
         num_each_constraint.assign(num_each_constraint_host);

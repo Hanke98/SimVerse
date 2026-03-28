@@ -1195,7 +1195,7 @@ namespace dyno
         const int& nv = rigid_body_system.batch_nv[env_id];
         auto& batch_J = rigid_body_system.batch_J;
 
-        const int& nv_idx = rigid_body_system.friction_loss_constraints.dof_frictionloss(env_id, cidx);
+        const int& nv_idx = rigid_body_system.friction_loss_constraints.dof_idxs(env_id, cidx);
         
         batch_J(env_id, (constraint_start + cidx) * nv + nv_idx) = 1.f;
 
@@ -1704,7 +1704,7 @@ namespace dyno
 
         const auto& friction_loss_constraints = rigid_body_system.friction_loss_constraints;
 
-        const int& dof_idx = friction_loss_constraints.dof_frictionloss(env_id, fidx);
+        const int& dof_idx = friction_loss_constraints.dof_idxs(env_id, fidx);
         const int& c_offset = rigid_body_system.constraint_offset[env_id][1];
         Real w = rigid_body_system.batch_dof_weight_inv(env_id, dof_idx);
         rigid_body_system.batch_dA(env_id, c_offset + fidx) = w;
@@ -2878,6 +2878,10 @@ namespace dyno
         
         printf("Aref:\n");
         PrintVector<<<1, 1>>>(rigid_body_system->batch_aref, 0, 16);
+        cudaDeviceSynchronize();
+
+        printf("Imp:\n");
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_imp, 0, 16);
         cudaDeviceSynchronize();
 
         // Compute constraint residuals Jaref

@@ -376,54 +376,66 @@ namespace dyno
 
                 Vec4i num_each_constraint = Vec4i(0, 0, 0, 0);
                 Vec4i constraint_offset = Vec4i(0, 0, 0, 0);
-                int connect_num = 0;
-                connect_anchor_nums_host[eid] = static_cast<int>(env_json["connect"].size());
-                for (const auto& connect_json : env_json["connect"]) {
-                    connect_body_idxs_host(eid, connect_num) = Pair<int, int>(connect_json.at("bodyA").get<int>(), connect_json.at("bodyB").get<int>());
-                    auto localA = connect_json.at("anchorA").get<std::vector<float>>();
-                    connect_anchor_A_local_host(eid, connect_num) = Vec3f{localA[0], localA[1], localA[2]};
-                    auto localB = connect_json.at("anchorB").get<std::vector<float>>();
-                    connect_anchor_B_local_host(eid, connect_num) = Vec3f{localB[0], localB[1], localB[2]};
 
-                    if (connect_json.contains("sol_paras")) {
-                        auto paras = connect_json.at("sol_paras").get<std::vector<float>>();
-                        connect_tc_host(eid, connect_num) = paras[0];
-                        connect_dr_host(eid, connect_num) = paras[1];
-                        connect_dmax_host(eid, connect_num) = paras[2];
-                        connect_dmin_host(eid, connect_num) = paras[3];
-                        connect_width_host(eid, connect_num) = paras[4];
-                        connect_midpoint_host(eid, connect_num) = paras[5];
-                        connect_power_host(eid, connect_num) = static_cast<int>(paras[6]);
+                if(env_json.contains("connect"))
+                {
+                    int connect_num = 0;
+                    connect_anchor_nums_host[eid] = static_cast<int>(env_json["connect"].size());
+                    for (const auto& connect_json : env_json["connect"]) {
+                        connect_body_idxs_host(eid, connect_num) = Pair<int, int>(connect_json.at("bodyA").get<int>(), connect_json.at("bodyB").get<int>());
+                        auto localA = connect_json.at("anchorA").get<std::vector<float>>();
+                        connect_anchor_A_local_host(eid, connect_num) = Vec3f{localA[0], localA[1], localA[2]};
+                        auto localB = connect_json.at("anchorB").get<std::vector<float>>();
+                        connect_anchor_B_local_host(eid, connect_num) = Vec3f{localB[0], localB[1], localB[2]};
+
+                        if (connect_json.contains("sol_paras")) {
+                            auto paras = connect_json.at("sol_paras").get<std::vector<float>>();
+                            connect_tc_host(eid, connect_num) = paras[0];
+                            connect_dr_host(eid, connect_num) = paras[1];
+                            connect_dmax_host(eid, connect_num) = paras[2];
+                            connect_dmin_host(eid, connect_num) = paras[3];
+                            connect_width_host(eid, connect_num) = paras[4];
+                            connect_midpoint_host(eid, connect_num) = paras[5];
+                            connect_power_host(eid, connect_num) = static_cast<int>(paras[6]);
+                        }
+
+                        connect_num++;
+                    }
+                    num_each_constraint.x = connect_num * 3;
+                    constraint_offset[1] = num_each_constraint.x;
+                }
+
+                if(env_json.contains("friction_loss"))
+                {
+                    int fl_num = 0;
+                    for (const auto& fl_json : env_json["friction_loss"])
+                    {
+                        fl_dof_idxs_host(eid, fl_num) = fl_json.at("dof_id").get<int>();
+                        fl_dof_frictionloss_host(eid, fl_num) = fl_json.at("resistance").get<float>();
+
+                        if (fl_json.contains("sol_paras")) {
+                            auto paras = fl_json.at("sol_paras").get<std::vector<float>>();
+                            fl_tc_host(eid, fl_num) = paras[0];
+                            fl_dr_host(eid, fl_num) = paras[1];
+                            fl_dmax_host(eid, fl_num) = paras[2];
+                            fl_dmin_host(eid, fl_num) = paras[3];
+                            fl_width_host(eid, fl_num) = paras[4];
+                            fl_midpoint_host(eid, fl_num) = paras[5];
+                            fl_power_host(eid, fl_num) = static_cast<int>(paras[6]);
+                        }
+
+                        fl_num++;
                     }
 
-                    connect_num++;
+                    num_each_constraint.y = fl_num;
+                    constraint_offset[2] = constraint_offset[1] + num_each_constraint.y;
                 }
-                num_each_constraint.x = connect_num * 3;
-                constraint_offset[1] = num_each_constraint.x;
+
+
 
                 num_each_constraint_host.push_back(num_each_constraint);
                 constraint_offset_host.push_back(constraint_offset);
                 num_constraints_host.push_back(num_each_constraint.x + num_each_constraint.y);
-
-
-                int fl_num = 0;
-                for (const auto& fl_json : env_json["friction_loss"]) {
-                    fl_dof_idxs_host(eid, fl_num) = fl_json.at("dof_id").get<int>();
-                    fl_dof_frictionloss_host(eid, fl_num) = fl_json.at("resistance").get<float>();
-
-                    if (fl_json.contains("sol_paras")) {
-                        auto paras = fl_json.at("sol_paras").get<std::vector<float>>();
-                        fl_tc_host(eid, fl_num) = paras[0];
-                        fl_dr_host(eid, fl_num) = paras[1];
-                        fl_dmax_host(eid, fl_num) = paras[2];
-                        fl_dmin_host(eid, fl_num) = paras[3];
-                        fl_width_host(eid, fl_num) = paras[4];
-                        fl_midpoint_host(eid, fl_num) = paras[5];
-                        fl_power_host(eid, fl_num) = static_cast<int>(paras[6]);
-                    }
-
-                    fl_num++;
-                }
 
                 batch_bodies_host[eid] = bid;
                 env_num_spheres_host[eid] = sphere_num;
@@ -548,6 +560,7 @@ namespace dyno
         batch_rot.assign(body_rot_host);
         batch_quat.assign(batch_quat_host);
 
+        spdlog::info("num boxes: {}, num spheres: {}, num capsules: {}", total_boxes, total_spheres, total_capsules);
         env_num_boxes.assign(env_num_boxes_host);
         env_box_offset.assign(env_box_offset_host);
         env_num_spheres.assign(env_num_spheres_host);

@@ -1,5 +1,4 @@
 #include "SimModule.h"
-#include "Utils/cholesky.h"
 
 
 namespace dyno
@@ -10,7 +9,6 @@ namespace dyno
     SimModule<TDataType>::SimModule() : ComputeModule()
     {
         spdlog::info("SimModule constructor called.");
-        TestVariableBlockCholeskyFactorizeAndSolve(50);
     }
 
     template<typename TDataType>

@@ -233,15 +233,22 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
     CuSolverCholeskyRunner<double> runner;
     ASSERT_TRUE(runner.Initialize());
 
+    cudaStream_t stream = nullptr;
+    cuSafeCall(cudaStreamCreate(&stream));
+    BatchedCholeskySolver<double> solver;
+    ASSERT_TRUE(solver.Initialize(stream));
+
     auto uniform_call = [&]() {
-        CholeskyFactorizeHost(
-            dA_work.begin(), dA_work.begin(),
+        const bool ok_factorize = solver.Factorize(
+            dA_work.begin(),
             d_sizes.begin(), d_offsets.begin(),
-            num_blocks, CholeskyMethod::WavefrontTiled);
-        CholeskySolveHost(
+            num_blocks, CholeskyMethod::WavefrontTiled, block_size);
+        EXPECT_TRUE(ok_factorize);
+        const bool ok_solve = solver.Solve(
             dA_work.begin(), dX_work.begin(),
             d_sizes.begin(), d_offsets.begin(), d_x_offsets.begin(),
-            num_blocks, CholeskyMethod::WavefrontTiled);
+            num_blocks, CholeskyMethod::WavefrontTiled, block_size);
+        EXPECT_TRUE(ok_solve);
     };
 
     auto cusolver_call = [&]() {
@@ -304,6 +311,8 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
         s_cusolver.avg_ms, s_cusolver.min_ms, s_cusolver.max_ms,
         s_uniform.avg_ms / std::max(1e-6f, s_cusolver.avg_ms));
 
+    solver.Release();
+    cuSafeCall(cudaStreamDestroy(stream));
     runner.Release();
     if (dA_ptr_rw) cuSafeCall(cudaFree(dA_ptr_rw));
     if (dA_ptr_ro) cuSafeCall(cudaFree(reinterpret_cast<void*>(const_cast<double**>(dA_ptr_ro))));

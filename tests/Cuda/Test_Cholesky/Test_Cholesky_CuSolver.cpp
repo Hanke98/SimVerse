@@ -89,16 +89,21 @@ TEST(CholeskyUniform, CompareWithCuSolverCuBlas)
     DArray<double> dA_ours, dX_ours;
     dA_ours.assign(hA);
     dX_ours.assign(hB);
-    CholeskyFactorizeHost(
-        dA_ours.begin(), dA_ours.begin(),
+    cudaStream_t stream = nullptr;
+    cuSafeCall(cudaStreamCreate(&stream));
+    BatchedCholeskySolver<double> solver;
+    ASSERT_TRUE(solver.Initialize(stream));
+    ASSERT_TRUE(solver.Factorize(
+        dA_ours.begin(),
         d_sizes.begin(), d_offsets.begin(),
-        batch, CholeskyMethod::WavefrontTiled);
-    cuSafeCall(cudaDeviceSynchronize());
-    CholeskySolveHost(
+        batch, CholeskyMethod::WavefrontTiled, n));
+    ASSERT_TRUE(solver.Solve(
         dA_ours.begin(), dX_ours.begin(),
         d_sizes.begin(), d_offsets.begin(), d_x_offsets.begin(),
-        batch, CholeskyMethod::UniformTiled);
-    cuSafeCall(cudaDeviceSynchronize());
+        batch, CholeskyMethod::UniformTiled, n));
+    cuSafeCall(cudaStreamSynchronize(stream));
+    solver.Release();
+    cuSafeCall(cudaStreamDestroy(stream));
 
     CArray<double> hL_ours, hX_ours;
     hL_ours.assign(dA_ours);

@@ -21,6 +21,7 @@ struct DispatchResult
 
 DispatchResult RunDispatchCase(CholeskyMethod method, const std::vector<int>& sizes, bool inplace_required)
 {
+    (void)inplace_required;
     const int num_blocks = static_cast<int>(sizes.size());
 
     CArray<int> h_block_sizes;
@@ -93,43 +94,65 @@ DispatchResult RunDispatchCase(CholeskyMethod method, const std::vector<int>& si
         }
     }
 
-    DArray<double> dA;
     DArray<double> dL;
     DArray<double> dX;
     DArray<int> d_block_sizes;
     DArray<int> d_block_offsets;
     DArray<int> d_x_offsets;
 
-    dA.assign(hA);
-    dL.resize(total_mat_size);
-    dL.reset();
+    dL.assign(hA);
     dX.assign(hB);
     d_block_sizes.assign(h_block_sizes);
     d_block_offsets.assign(h_block_offsets);
     d_x_offsets.assign(h_x_offsets);
 
-    if (inplace_required)
-    {
-        dL.assign(hA);
-        CholeskyFactorizeHost(
-            dL.begin(), dL.begin(),
-            d_block_sizes.begin(), d_block_offsets.begin(),
-            num_blocks, method);
-    }
-    else
-    {
-        CholeskyFactorizeHost(
-            dA.begin(), dL.begin(),
-            d_block_sizes.begin(), d_block_offsets.begin(),
-            num_blocks, method);
-    }
-    cuSafeCall(cudaDeviceSynchronize());
+    cudaStream_t stream = nullptr;
+    cuSafeCall(cudaStreamCreate(&stream));
 
-    CholeskySolveHost(
+    BatchedCholeskySolver<double> solver;
+    bool ok = solver.Initialize(stream);
+    if (!ok)
+    {
+        cuSafeCall(cudaStreamDestroy(stream));
+        DispatchResult bad;
+        bad.max_rel_lower_err = 1.0;
+        bad.max_rel_x_err = 1.0;
+        return bad;
+    }
+
+    const int uniform_block_size =
+        (method == CholeskyMethod::UniformTiled || method == CholeskyMethod::WavefrontTiled) ? sizes[0] : -1;
+
+    ok = solver.Factorize(
+        dL.begin(),
+        d_block_sizes.begin(), d_block_offsets.begin(),
+        num_blocks, method, uniform_block_size);
+    if (!ok)
+    {
+        solver.Release();
+        cuSafeCall(cudaStreamDestroy(stream));
+        DispatchResult bad;
+        bad.max_rel_lower_err = 1.0;
+        bad.max_rel_x_err = 1.0;
+        return bad;
+    }
+
+    ok = solver.Solve(
         dL.begin(), dX.begin(),
         d_block_sizes.begin(), d_block_offsets.begin(), d_x_offsets.begin(),
-        num_blocks, method);
-    cuSafeCall(cudaDeviceSynchronize());
+        num_blocks, method, uniform_block_size);
+    if (!ok)
+    {
+        solver.Release();
+        cuSafeCall(cudaStreamDestroy(stream));
+        DispatchResult bad;
+        bad.max_rel_lower_err = 1.0;
+        bad.max_rel_x_err = 1.0;
+        return bad;
+    }
+    cuSafeCall(cudaStreamSynchronize(stream));
+    solver.Release();
+    cuSafeCall(cudaStreamDestroy(stream));
 
     CArray<double> hL_gpu;
     CArray<double> hX_gpu;

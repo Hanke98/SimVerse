@@ -15,25 +15,46 @@ namespace dyno
 		WavefrontTiled = 4
     };
 
-	// host function
 	template<typename T>
-    void CholeskyFactorizeHost(
-        const T* A,
-        T* L,
-        const int* block_sizes,
-        const int* block_offsets,
-        int num_blocks,
-        CholeskyMethod method);
+	class BatchedCholeskySolver
+	{
+	public:
+		BatchedCholeskySolver();
+		~BatchedCholeskySolver();
 
-    template<typename T>
-    void CholeskySolveHost(
-        const T* L,
-        T* x,
-        const int* block_sizes,
-        const int* block_offsets,
-        const int* x_offsets,
-        int num_blocks,
-        CholeskyMethod method);
+		BatchedCholeskySolver(const BatchedCholeskySolver&) = delete;
+		BatchedCholeskySolver& operator=(const BatchedCholeskySolver&) = delete;
+
+		// Allocate/reuse internal resources for up to these limits.
+		bool Initialize(cudaStream_t stream = nullptr);
+		void Release();
+
+		bool IsInitialized() const;
+
+		// In-place factorization: A -> L (stored in A)
+		bool Factorize(
+			T* A,
+			const int* block_sizes,
+			const int* block_offsets,
+			int num_blocks,
+			CholeskyMethod method,
+			int uniform_block_size = -1);
+
+		// In-place solve on x: b -> x
+		bool Solve(
+			const T* L,
+			T* x,
+			const int* block_sizes,
+			const int* block_offsets,
+			const int* x_offsets,
+			int num_blocks,
+			CholeskyMethod method,
+			int uniform_block_size = -1);
+
+	private:
+		bool initialized_ = false;
+		cudaStream_t stream_ = nullptr;
+	};
 
     // cuSolver/cuBLAS specialized interface:
     // A/x are contiguous batched buffers:

@@ -114,6 +114,7 @@ namespace dyno
 
             if (parent_idx == -1)
             {
+                is_isolated(env_id, bid) = 1;
                 if(is_static)
                     continue;   // Static root body, no DoFs
 
@@ -123,7 +124,6 @@ namespace dyno
                 qpos_num(env_id, bid) = 7;
                 nv += 6;
                 nqpos += 7;
-                is_isolated(env_id, bid) = 1;
             }
             else
             {
@@ -827,7 +827,7 @@ namespace dyno
             return;
 
         int anchor_idx = threadIdx.x;
-        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0])
+        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0] / 3)
             return;
         
         auto& anchor_constraints = rigid_body_system.anchor_constraints;
@@ -946,12 +946,12 @@ namespace dyno
         auto& offsets = rigid_body_system.constraint_offset[env_id];
         auto& num_constraints = rigid_body_system.num_constraints[env_id];
 
-        num_constraints = num_each_constraint[env_id][0] + num_each_constraint[env_id][1];
-        for(int i = 2; i < 4; i++)
-        {
-            offsets[i] = offsets[i - 1] + num_each_constraint[env_id][i - 1];
+        num_constraints = 0;
+        for(int i = 0; i < 4; i++)
             num_constraints += num_each_constraint[env_id][i];
-        }
+
+        offsets[2] = num_each_constraint[env_id][0] + num_each_constraint[env_id][1];
+        offsets[3] = offsets[2] + num_each_constraint[env_id][2];
 
 
         printf("Env: %d, Num constraints(total: %d): %d, %d, %d, %d\n", env_id, num_constraints, num_each_constraint[env_id].x, num_each_constraint[env_id].y, num_each_constraint[env_id].z, num_each_constraint[env_id].w);
@@ -1006,13 +1006,12 @@ namespace dyno
     }
 
     template<typename TDataType>
-    __device__ void ComputeJac(Real* dst_jac, const Vec3f& c_point, const RigidBody<TDataType>& rigid_body_system, int env_id, int bid, int cidx)
+    __device__ void ComputeJac(Real* dst_jac, const Vec3f& c_point, const RigidBody<TDataType>& rigid_body_system, int env_id, int bid)
     {
         const int root_idx = rigid_body_system.root_idx(env_id, bid);
         Vec3f offset = c_point - rigid_body_system.subtree_com(env_id, root_idx);
 
         const auto& cdof = rigid_body_system.batch_cdof;
-        // const int jac_offset = cidx * 6;
         const int nv = rigid_body_system.batch_nv[env_id];
 
         // Always clear the local Jacobian buffer first. ComputeJac only writes
@@ -1079,9 +1078,9 @@ namespace dyno
         Real jacA[6 * NV_TMP];
         Real jacB[6 * NV_TMP];
 
-        ComputeJac(jacA, c_point, rigid_body_system, env_id, a_idx, cidx);
+        ComputeJac(jacA, c_point, rigid_body_system, env_id, a_idx);
         if(b_idx != -1)
-            ComputeJac(jacB, c_point, rigid_body_system, env_id, b_idx, cidx);
+            ComputeJac(jacB, c_point, rigid_body_system, env_id, b_idx);
         else
         {
             for(int i = 0; i < 6 * num_nv; i++)
@@ -1152,30 +1151,29 @@ namespace dyno
         if(env_id >= num_envs)
             return;
 
-        int cidx = threadIdx.x;
+        int anchor_idx = threadIdx.x;
         const auto& batch_anchor = rigid_body_system.anchor_constraints;
-        const int& anchor_nums = batch_anchor.anchor_nums[env_id];
-        if(cidx >= anchor_nums)
+        const int& anchor_nums = rigid_body_system.num_each_constraint[env_id][0] / 3;
+        if(anchor_idx >= anchor_nums)
             return;
 
-        const int& c_start = rigid_body_system.constraint_offset[env_id][0];
-        const int& a_idx = batch_anchor.body_idxs(env_id, cidx).first;
-        const int& b_idx = batch_anchor.body_idxs(env_id, cidx).second;
-        const Vec3f& anchor_A_global = batch_anchor.anchor_A_world(env_id, cidx);
-        const Vec3f& anchor_B_global = batch_anchor.anchor_B_world(env_id, cidx);
+        const int& a_idx = batch_anchor.body_idxs(env_id, anchor_idx).first;
+        const int& b_idx = batch_anchor.body_idxs(env_id, anchor_idx).second;
+        const Vec3f& anchor_A_global = batch_anchor.anchor_A_world(env_id, anchor_idx);
+        const Vec3f& anchor_B_global = batch_anchor.anchor_B_world(env_id, anchor_idx);
         const int& nv = rigid_body_system.batch_nv[env_id];
         
         auto& J = rigid_body_system.batch_J;
 
         Real jacA[6 * NV_TMP];
         Real jacB[6 * NV_TMP];
-        ComputeJac(jacA, anchor_A_global, rigid_body_system, env_id, a_idx, cidx);
-        ComputeJac(jacB, anchor_B_global, rigid_body_system, env_id, b_idx, cidx);
+        ComputeJac(jacA, anchor_A_global, rigid_body_system, env_id, a_idx);
+        ComputeJac(jacB, anchor_B_global, rigid_body_system, env_id, b_idx);
 
         for(int i = 0; i < 3; i++)
             for(int j = 0; j < nv; j++)
             {
-                int row = c_start + cidx * 3 + i;
+                int row = anchor_idx * 3 + i;
                 J(env_id, row * nv + j) = jacA[(i + 3) * nv + j] - jacB[(i + 3) * nv + j];
             }
     }
@@ -1300,7 +1298,7 @@ namespace dyno
     
         int anchor_idx = threadIdx.x;
         const auto& anchor_constraints = rigid_body_system.anchor_constraints;
-        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0])
+        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0] / 3)
             return;
 
         const auto& dmax = anchor_constraints.dmax(env_id, anchor_idx);
@@ -1311,11 +1309,12 @@ namespace dyno
         const auto& width = anchor_constraints.width(env_id, anchor_idx);
         const auto& power = anchor_constraints.power(env_id, anchor_idx);
         const auto& constraint_vels = rigid_body_system.batch_constraint_vel;
+        const Vec3f& pos_err = anchor_constraints.anchor_error(env_id, anchor_idx);
 
         auto& aref = rigid_body_system.batch_aref;
         auto& imp = rigid_body_system.batch_imp;
 
-        Real pos_err_norm = anchor_constraints.anchor_error(env_id, anchor_idx).norm();
+        Real pos_err_norm = pos_err.norm();
         Vec4f KBIP = ComputeKBIP(pos_err_norm, dmax, dmin, time_const, damp_ratio, midpoint, width, power);
         Real K = KBIP[0];
         Real B = KBIP[1];
@@ -1323,7 +1322,7 @@ namespace dyno
         for(int i = 0; i < 3; i++)
         {
             imp(env_id, anchor_idx * 3 + i) = I;
-            aref(env_id, anchor_idx * 3 + i) = -B * constraint_vels(env_id, anchor_idx * 3 + i) - K * I * pos_err_norm;
+            aref(env_id, anchor_idx * 3 + i) = -B * constraint_vels(env_id, anchor_idx * 3 + i) - K * I * pos_err[i];
         }
     }
 
@@ -1532,7 +1531,7 @@ namespace dyno
         Real jac[6 * NV_TMP];
         Real j_tmp[6 * NV_TMP];
         const auto& pos = rigid_body_system.batch_pos(env_id, bid);
-        ComputeJac(j_tmp, pos, rigid_body_system, env_id, bid, bid);
+        ComputeJac(j_tmp, pos, rigid_body_system, env_id, bid);
         RotateJacobianRow(j_tmp, jac, nv);
 
         // batch_qM_inv stores the in-place Cholesky factor L of qM from Step().
@@ -1679,7 +1678,7 @@ namespace dyno
             return;
 
         int anchor_idx = threadIdx.x;
-        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0])
+        if(anchor_idx >= rigid_body_system.num_each_constraint[env_id][0] / 3)
             return;
 
         const auto& anchor_constraints = rigid_body_system.anchor_constraints;
@@ -2575,9 +2574,6 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_crb, num_envs, max_bodies * 10);
 
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_J, num_envs, num_max_constraints * max_nv);
-        INIT_DYNO_ARRAY(rigid_body_system->num_constraints, num_envs);
-        INIT_DYNO_ARRAY(rigid_body_system->num_each_constraint, num_envs);
-        INIT_DYNO_ARRAY(rigid_body_system->constraint_offset, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_vel, num_envs, num_max_constraints);
         INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_force, num_envs, num_max_constraints);
 

@@ -81,6 +81,10 @@ namespace dyno
         CArray2D<int> is_static_host(env_num, body_max_num);
         CArray2D<Real> mass_host(env_num, body_max_num);
 
+        std::vector<int> num_constraints_host;
+        std::vector<Vec4i> num_each_constraint_host;
+        std::vector<Vec4i> constraint_offset_host;
+
         // std::cout << "initial" << std::endl;
 
         for (int eid = 0; eid < env_num; ++eid)
@@ -310,6 +314,8 @@ namespace dyno
                     bid++;
                 }
 
+                Vec4i num_each_constraint = Vec4i(0, 0, 0, 0);
+                Vec4i constraint_offset = Vec4i(0, 0, 0, 0);
                 int connect_num = 0;
                 connect_anchor_nums_host[eid] = static_cast<int>(env_json["connect"].size());
                 for (const auto& connect_json : env_json["connect"]) {
@@ -320,6 +326,13 @@ namespace dyno
                     connect_anchor_B_local_host(eid, connect_num) = Vec3f{localB[0], localB[1], localB[2]};
                     connect_num++;
                 }
+                num_each_constraint.x = connect_num * 3;
+                constraint_offset[1] = num_each_constraint.x;
+
+                num_each_constraint_host.push_back(num_each_constraint);
+                constraint_offset_host.push_back(constraint_offset);
+                num_constraints_host.push_back(num_each_constraint.x + num_each_constraint.y);
+
 
                 batch_bodies_host[eid] = bid;
                 env_num_spheres_host[eid] = sphere_num;
@@ -483,7 +496,6 @@ namespace dyno
         joint_limit_constraints.width.assign(jl_width_host);
         joint_limit_constraints.power.assign(jl_power_host);
 
-        anchor_constraints.anchor_nums.assign(connect_anchor_nums_host);
         anchor_constraints.body_idxs.assign(connect_body_idxs_host);
         anchor_constraints.anchor_A_local.assign(connect_anchor_A_local_host);
         anchor_constraints.anchor_B_local.assign(connect_anchor_B_local_host);
@@ -498,6 +510,10 @@ namespace dyno
         anchor_constraints.midpoint.assign(connect_midpoint_host);
         anchor_constraints.width.assign(connect_width_host);
         anchor_constraints.power.assign(connect_power_host);
+
+        num_constraints.assign(num_constraints_host);
+        num_each_constraint.assign(num_each_constraint_host);
+        constraint_offset.assign(constraint_offset_host);
 
         spdlog::info("Finished initializing rigid body state variables.");
     }

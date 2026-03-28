@@ -37,7 +37,6 @@ namespace dyno
 
     struct BatchAnchorConstraints: public BatchConstraintParas
     {
-        DArray<int>                anchor_nums;
         DArray2D<Pair<int, int>>   body_idxs;         // [env_id, constraint_id] pair of body indices involved in the constraint
         DArray2D<Vec3f>            anchor_A_local;    // [env_id, constraint_id] anchor point in local frame of body A
         DArray2D<Vec3f>            anchor_B_local;    // [env_id, constraint_id] anchor point in local frame of body B

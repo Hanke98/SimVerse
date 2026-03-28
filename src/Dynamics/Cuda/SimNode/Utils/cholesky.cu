@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "cholesky.h"
+#include "SimBlockArray.h"
 #include <cstddef>
 #include <cstdio>
 #include <vector>
@@ -1425,7 +1426,7 @@ namespace dyno
             std::printf("[CholeskySolveHost] WavefrontTiledHost need cuda stream input!");
             return;
         }
-
+        
         const int num_tiles = (block_size + NTILES - 1) / NTILES;
 
         size_t smem_diag = 1 * NTILES * NTILES * sizeof(T);
@@ -1441,7 +1442,7 @@ namespace dyno
                 A,          // in-place matrix buffer
                 block_size, // 单个矩阵维度
                 num_blocks,
-                k);    // 当前波前轮次
+                k); 
 
             // phase B panel phase solve L_ik(TRSM)
             // 当前需要并行计算的非对角tile
@@ -1581,20 +1582,18 @@ namespace dyno
         const T* L,
         T* x,
         const int block_size,
-        int num_blocks)
+        int num_blocks,
+        cudaStream_t stream)
     {
         constexpr int NTILES = 32;
         constexpr int NTHREADS = 128;
+
 
         const int num_tiles = (block_size + NTILES - 1) / NTILES;
 
         // shared memory for cholesky solve
         size_t smem_diag = (NTILES * NTILES + NTILES) * sizeof(T);
         size_t smem_panel = (NTILES * NTILES + 2 * NTILES) * sizeof(T);
-
-         // 暂时使用临时创建的方法
-        cudaStream_t stream = nullptr;
-        cuSafeCall(cudaStreamCreate(&stream));
 
         // two phase wavefront progress in same stream(Lower Solve)
         for(int k = 0; k < num_tiles; k++)
@@ -1637,11 +1636,7 @@ namespace dyno
             }
         }
 
-        if (stream) {
-            cuSafeCall(cudaStreamSynchronize(stream));
-            cuSafeCall(cudaStreamDestroy(stream));
-            stream = nullptr;
-        }
+        cuSafeCall(cudaStreamSynchronize(stream));
     }
 
     template<typename T>
@@ -1660,6 +1655,8 @@ namespace dyno
     template<typename T>
     void BatchedCholeskySolver<T>::Release() 
     {
+        factorize_graph_cache_.release();
+        solve_graph_cache_.release();
         stream_ = nullptr;
         initialized_ = false;
     }
@@ -1688,7 +1685,8 @@ namespace dyno
         const int* block_offsets,
         int num_blocks,
         CholeskyMethod method,
-        int uniform_block_size)
+        int uniform_block_size,
+        bool use_graph)
     {
         if (!initialized_)
         {
@@ -1746,13 +1744,137 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Factorize] WavefrontTiled requires uniform_block_size > 0\n");
                 return false;
             }
-            CholeskyFactorizeWavefrontTiledHost(A, uniform_block_size, num_blocks, stream_);
+            // CholeskyFactorizeWavefrontTiledHost(A, uniform_block_size, num_blocks, stream_);
+            if (use_graph)
+                FactorizeWavefrontWithGraph(A, uniform_block_size, num_blocks);
+            else
+                CholeskyFactorizeWavefrontTiledHost(A, uniform_block_size, num_blocks, stream_);
             return true;
 
         default:
             std::printf("[BatchedCholeskySolver::Factorize] unknown method=%d\n", static_cast<int>(method));
             return false;
         }
+    }
+
+    template<typename T>
+    bool BatchedCholeskySolver<T>::Factorize(
+        DevBlockArray<T>& A_blocks,
+        const int* block_sizes,
+        CholeskyMethod method,
+        int uniform_block_size,
+        bool use_graph)
+    {
+        // Note:
+        // block_sizes stores matrix dimension n (NOT n*n).
+        // A_blocks stores flattened per-block data.
+        return Factorize(
+            A_blocks.Begin(),
+            block_sizes,
+            A_blocks.Offsets().Begin(),
+            A_blocks.NumBlocks(),
+            method,
+            uniform_block_size,
+            use_graph);
+    }
+
+    template<typename T>
+    bool BatchedCholeskySolver<T>::Factorize(
+        DevBlockArray<T>& A_blocks,
+        const DevArr<int>& block_sizes,
+        CholeskyMethod method,
+        int uniform_block_size,
+        bool use_graph)
+    {
+        return Factorize(
+            A_blocks,
+            block_sizes.Begin(),
+            method,
+            uniform_block_size,
+            use_graph);
+    }
+
+    template<typename T>
+    bool BatchedCholeskySolver<T>::FactorizeWavefrontWithGraph(
+		T* A, 
+		const int block_size, 
+		int num_blocks)
+    {
+        constexpr int NTILES = 32;
+        constexpr int NTHREADS = 128;
+
+        if(stream_ == nullptr)
+        {
+            std::printf("[CholeskySolveHost] WavefrontTiledHost need cuda stream input!");
+            return false;
+        }
+
+        const bool need_rebuild =
+        !factorize_graph_cache_.built ||
+        factorize_graph_cache_.A_ptr != A ||
+        factorize_graph_cache_.block_size != block_size ||
+        factorize_graph_cache_.num_blocks != num_blocks ||
+        factorize_graph_cache_.stream != stream_;
+
+        if (need_rebuild)
+        {
+            factorize_graph_cache_.release();
+            const int num_tiles = (block_size + NTILES - 1) / NTILES;
+
+            size_t smem_diag = 1 * NTILES * NTILES * sizeof(T);
+            size_t smem_panel = 2 * NTILES * NTILES * sizeof(T);
+            size_t smem_trail = 3 * NTILES * NTILES * sizeof(T);
+
+            // 捕获当前 stream 上的 kernel 调度序列
+            cuSafeCall(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal));
+
+            // three phase wavefront progress in same stream
+            for(int k = 0; k < num_tiles; k++)
+            {
+                // phase A cholesky factorize A_kk(DiagPotrf)
+                DiagPotrf<NTILES, NTHREADS, T>
+                <<<num_blocks, NTHREADS, smem_diag, stream_>>>(
+                    A,          // in-place matrix buffer
+                    block_size, // 单个矩阵维度
+                    num_blocks,
+                    k); 
+
+                // phase B panel phase solve L_ik(TRSM)
+                // 当前需要并行计算的非对角tile
+                const int panel_tiles = num_tiles - (k + 1);
+                if (panel_tiles > 0)
+                {
+                    dim3 grid_panel(num_blocks, panel_tiles, 1);
+                    PanelTrsm<NTILES, NTHREADS, T>
+                        <<<grid_panel, NTHREADS, smem_panel, stream_>>>(
+                            A,
+                            block_size,
+                            num_blocks,
+                            k);
+                }
+
+                // phase C update A_ij(GEMM)
+                // 更新未来的A_ij
+                if (panel_tiles > 0) {
+                    dim3 grid(num_blocks, panel_tiles, panel_tiles);
+
+                    PanelTrailGemm<NTILES, NTHREADS, T>
+                        <<<grid, NTHREADS, smem_trail, stream_>>>(
+                            A, block_size, num_blocks, k);
+                }
+            }
+
+            cuSafeCall(cudaStreamEndCapture(stream_, &factorize_graph_cache_.graph));
+            cuSafeCall(cudaGraphInstantiate(&factorize_graph_cache_.exec, factorize_graph_cache_.graph, nullptr, nullptr, 0));
+            factorize_graph_cache_.A_ptr = A;
+            factorize_graph_cache_.block_size = block_size;
+            factorize_graph_cache_.num_blocks = num_blocks;
+            factorize_graph_cache_.stream = stream_;
+            factorize_graph_cache_.built = true;
+        }   
+        
+        cuSafeCall(cudaGraphLaunch(factorize_graph_cache_.exec, stream_));
+        return true;
     }
     
     template<typename T>
@@ -1821,7 +1943,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] WavefrontTiled requires uniform_block_size > 0\n");
                 return false;
             }
-            CholeskySolveWavefrontTiledHost(L, x, uniform_block_size, num_blocks);
+            CholeskySolveWavefrontTiledHost(L, x, uniform_block_size, num_blocks, stream_);
             return true;
 
         default:
@@ -1833,4 +1955,3 @@ namespace dyno
     template class dyno::BatchedCholeskySolver<float>;
     template class dyno::BatchedCholeskySolver<double>;
 } // namespace dyno
-

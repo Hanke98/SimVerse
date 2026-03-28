@@ -2,9 +2,38 @@
 #include "utils.h"
 #include <cublas_v2.h>
 #include <cusolverDn.h>
+#include "SimBlockArray.h"
 
 namespace dyno
 {
+
+
+	template<typename T>
+	struct CholeskyGraphCache
+	{
+		cudaGraph_t graph = nullptr;
+		cudaGraphExec_t exec = nullptr;
+
+		T* A_ptr = nullptr;
+		T* x_ptr = nullptr;
+		int block_size = -1;
+		int num_blocks = -1;
+		cudaStream_t stream = nullptr;
+		bool built = false;
+
+		void release()
+		{
+			if (exec) { cuSafeCall(cudaGraphExecDestroy(exec)); exec = nullptr; }
+			if (graph) { cuSafeCall(cudaGraphDestroy(graph)); graph = nullptr; }
+			built = false;
+			A_ptr = nullptr;
+			x_ptr = nullptr;
+			block_size = -1;
+			num_blocks = -1;
+			stream = nullptr;
+		}
+	};
+
 	// cholesky method
     enum class CholeskyMethod : int
     {
@@ -27,6 +56,9 @@ namespace dyno
 
 		// Allocate/reuse internal resources for up to these limits.
 		bool Initialize(cudaStream_t stream = nullptr);
+
+		void SetStream(cudaStream_t& stream){	stream_ = stream;	}
+
 		void Release();
 
 		bool IsInitialized() const;
@@ -38,7 +70,30 @@ namespace dyno
 			const int* block_offsets,
 			int num_blocks,
 			CholeskyMethod method,
-			int uniform_block_size = -1);
+			int uniform_block_size = -1,
+			bool use_graph = false);
+
+        // Overload for SimBlockArray storage:
+        // block_sizes stores matrix dimension n (NOT n*n).
+        bool Factorize(
+            DevBlockArray<T>& A_blocks,
+            const int* block_sizes,
+            CholeskyMethod method,
+            int uniform_block_size = -1,
+            bool use_graph = false);
+
+        // Preferred overload: block_sizes container stores matrix dimension n (NOT n*n).
+        bool Factorize(
+            DevBlockArray<T>& A_blocks,
+            const DevArr<int>& block_sizes,
+            CholeskyMethod method,
+            int uniform_block_size = -1,
+            bool use_graph = false);
+
+		bool FactorizeWavefrontWithGraph(
+			T* A, 
+			const int block_size, 
+			int num_blocks);
 
 		// In-place solve on x: b -> x
 		bool Solve(
@@ -54,6 +109,8 @@ namespace dyno
 	private:
 		bool initialized_ = false;
 		cudaStream_t stream_ = nullptr;
+		CholeskyGraphCache<T> factorize_graph_cache_;
+		CholeskyGraphCache<T> solve_graph_cache_;
 	};
 
     // cuSolver/cuBLAS specialized interface:

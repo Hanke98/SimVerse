@@ -17,8 +17,8 @@ namespace dyno
 namespace
 {
 // Edit these constants directly for profiling configuration.
-constexpr const char* kInputBinPath = "tests/Cuda/Test_Cholesky/data/spd_128.bin";
-constexpr int kProfileNumBlocks = 2048;
+constexpr const char* kInputBinPath = "tests/Cuda/Test_Cholesky/data/spd_4096.bin";
+constexpr int kProfileNumBlocks = 64;
 constexpr int kProfileWarmupIters = 5;
 constexpr int kProfileTimedIters = 50;
 
@@ -122,7 +122,7 @@ std::pair<std::vector<double>, int> LoadSingleSquareMatrixBin(const char* path)
 
 } // namespace
 
-TEST(CholeskyProfiling, UniformVsCuSolver)
+TEST(CholeskyProfiling, NoGraphVsGraphVsCuSolver)
 {
     int device_count = 0;
     if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count <= 0)
@@ -238,7 +238,7 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
     BatchedCholeskySolver<double> solver;
     ASSERT_TRUE(solver.Initialize(stream));
 
-    auto uniform_call = [&]() {
+    auto no_graph_call = [&]() {
         const bool ok_factorize = solver.Factorize(
             dA_work.begin(),
             d_sizes.begin(), d_offsets.begin(),
@@ -251,13 +251,28 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
         EXPECT_TRUE(ok_solve);
     };
 
+    // auto graph_call = [&]() {
+    //     const bool ok_factorize = solver.Factorize(
+    //         dA_work.begin(),
+    //         d_sizes.begin(), d_offsets.begin(),
+    //         num_blocks, CholeskyMethod::WavefrontTiled, block_size, true);
+    //     EXPECT_TRUE(ok_factorize);
+    //     const bool ok_solve = solver.Solve(
+    //         dA_work.begin(), dX_work.begin(),
+    //         d_sizes.begin(), d_offsets.begin(), d_x_offsets.begin(),
+    //         num_blocks, CholeskyMethod::WavefrontTiled, block_size);
+    //     EXPECT_TRUE(ok_solve);
+    // };
+
     auto cusolver_call = [&]() {
         runner.Factorize(dA_work.begin(), dA_ptr_rw, block_size, num_blocks, d_info, true);
         runner.Solve(dA_work.begin(), dX_work.begin(), dA_ptr_ro, dB_ptr, block_size, num_blocks, true);
     };
 
-    const ProfileStats s_uniform = MeasureGpuKernelLoop(
-        warmup_iters, timed_iters, dA_work, dX_work, hA, hB, uniform_call);
+    const ProfileStats s_no_graph = MeasureGpuKernelLoop(
+        warmup_iters, timed_iters, dA_work, dX_work, hA, hB, no_graph_call);
+    // const ProfileStats s_graph = MeasureGpuKernelLoop(
+    //     warmup_iters, timed_iters, dA_work, dX_work, hA, hB, graph_call);
     const ProfileStats s_cusolver = MeasureGpuKernelLoop(
         warmup_iters, timed_iters, dA_work, dX_work, hA, hB, cusolver_call);
 
@@ -269,15 +284,23 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
         EXPECT_EQ(h_info[b], 0);
     }
 
-    CArray<double> hX_uniform, hX_cu;
+    CArray<double> hX_no_graph, hX_cu;
     // Re-run once for each method to fetch final x for correctness check.
     cuSafeCall(cudaMemcpy(
         dA_work.begin(), hA.begin(), hA.size() * sizeof(double), cudaMemcpyHostToDevice));
     cuSafeCall(cudaMemcpy(
         dX_work.begin(), hB.begin(), hB.size() * sizeof(double), cudaMemcpyHostToDevice));
-    uniform_call();
+    no_graph_call();
     cuSafeCall(cudaDeviceSynchronize());
-    hX_uniform.assign(dX_work);
+    hX_no_graph.assign(dX_work);
+
+    // cuSafeCall(cudaMemcpy(
+    //     dA_work.begin(), hA.begin(), hA.size() * sizeof(double), cudaMemcpyHostToDevice));
+    // cuSafeCall(cudaMemcpy(
+    //     dX_work.begin(), hB.begin(), hB.size() * sizeof(double), cudaMemcpyHostToDevice));
+    // graph_call();
+    // cuSafeCall(cudaDeviceSynchronize());
+    // hX_graph.assign(dX_work);
 
     cuSafeCall(cudaMemcpy(
         dA_work.begin(), hA.begin(), hA.size() * sizeof(double), cudaMemcpyHostToDevice));
@@ -287,29 +310,33 @@ TEST(CholeskyProfiling, UniformVsCuSolver)
     cuSafeCall(cudaDeviceSynchronize());
     hX_cu.assign(dX_work);
 
-    double max_rel_uniform = 0.0;
+    double max_rel_no_graph = 0.0;
     double max_rel_cu = 0.0;
     for (int i = 0; i < total_vec; ++i)
     {
         const double ref = hXRef[i];
-        const double r0 = std::abs(hX_uniform[i] - ref) / (std::abs(ref) + 1e-12);
-        const double r1 = std::abs(hX_cu[i] - ref) / (std::abs(ref) + 1e-12);
-        if (r0 > max_rel_uniform) max_rel_uniform = r0;
-        if (r1 > max_rel_cu) max_rel_cu = r1;
+        const double r0 = std::abs(hX_no_graph[i] - ref) / (std::abs(ref) + 1e-12);
+        const double r2 = std::abs(hX_cu[i] - ref) / (std::abs(ref) + 1e-12);
+        if (r0 > max_rel_no_graph) max_rel_no_graph = r0;
+        if (r2 > max_rel_cu) max_rel_cu = r2;
     }
 
-    EXPECT_LT(max_rel_uniform, 1e-8);
+    EXPECT_LT(max_rel_no_graph, 1e-8);
     EXPECT_LT(max_rel_cu, 1e-8);
 
     std::printf(
         "\n[Profiling] block_size=%d, num_blocks=%d, warmup=%d, iters=%d\n"
-        "  UniformTiled : avg=%.3f ms, min=%.3f ms, max=%.3f ms\n"
+        "  NoGraph      : avg=%.3f ms, min=%.3f ms, max=%.3f ms\n"
+        // "  Graph        : avg=%.3f ms, min=%.3f ms, max=%.3f ms\n"
         "  CuSolverWrap : avg=%.3f ms, min=%.3f ms, max=%.3f ms\n"
-        "  Speedup (Uniform/CuSolver) = %.3f x\n",
+        // "  Speedup (NoGraph/Graph)    = %.3f x\n"
+        "  Speedup (NoGraph/CuSolver) = %.3f x\n",
         block_size, num_blocks, warmup_iters, timed_iters,
-        s_uniform.avg_ms, s_uniform.min_ms, s_uniform.max_ms,
+        s_no_graph.avg_ms, s_no_graph.min_ms, s_no_graph.max_ms,
+        // s_graph.avg_ms, s_graph.min_ms, s_graph.max_ms,
         s_cusolver.avg_ms, s_cusolver.min_ms, s_cusolver.max_ms,
-        s_uniform.avg_ms / std::max(1e-6f, s_cusolver.avg_ms));
+        // s_no_graph.avg_ms / std::max(1e-6f, s_graph.avg_ms),
+        s_no_graph.avg_ms / std::max(1e-6f, s_cusolver.avg_ms));
 
     solver.Release();
     cuSafeCall(cudaStreamDestroy(stream));

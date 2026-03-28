@@ -2,6 +2,8 @@
 
 #include "Array/Array.h"
 #include "SimNode/Utils/cholesky.h"
+#include "SimNode/Utils/SimBlockMatrix.h"
+#include "SimNode/Utils/SimBlockVector.h"
 
 #include <Eigen/Dense>
 #include <algorithm>
@@ -184,6 +186,153 @@ DispatchResult RunDispatchCase(CholeskyMethod method, const std::vector<int>& si
     }
     return result;
 }
+
+DispatchResult RunBlockContainerCase(CholeskyMethod method, const std::vector<int>& sizes)
+{
+    const int num_blocks = static_cast<int>(sizes.size());
+
+    HostBlockMatrix<double> hA;
+    HostBlockMatrix<double> hL_ref;
+    HostBlockVector<double> hB;
+    HostBlockVector<double> hX_ref;
+    if (!hA.BuildFromSquares(sizes) ||
+        !hL_ref.BuildFromSquares(sizes) ||
+        !hB.BuildFromSizes(sizes) ||
+        !hX_ref.BuildFromSizes(sizes))
+    {
+        DispatchResult bad;
+        bad.max_rel_lower_err = 1.0;
+        bad.max_rel_x_err = 1.0;
+        return bad;
+    }
+
+    hA.Data().Reset();
+    hL_ref.Data().Reset();
+    hB.Data().Reset();
+    hX_ref.Data().Reset();
+
+    std::mt19937 rng(20260326 + static_cast<int>(method));
+    std::uniform_real_distribution<double> offdiag_dist(-0.2, 0.2);
+    std::uniform_real_distribution<double> diag_dist(5.0, 20.0);
+    std::uniform_real_distribution<double> x_dist(-1.0, 1.0);
+
+    for (int b = 0; b < num_blocks; ++b)
+    {
+        const int m = sizes[b];
+        double* A_blk = hA.BlockPtr(b);
+        double* L_blk_ref = hL_ref.BlockPtr(b);
+        double* b_blk = hB.BlockPtr(b);
+        double* x_blk_ref = hX_ref.BlockPtr(b);
+
+        Eigen::MatrixXd Lmat = Eigen::MatrixXd::Zero(m, m);
+        Eigen::VectorXd xref = Eigen::VectorXd::Zero(m);
+        for (int i = 0; i < m; ++i)
+        {
+            for (int j = 0; j <= i; ++j)
+            {
+                Lmat(i, j) = (i == j) ? (diag_dist(rng) + 1e-3 * i) : offdiag_dist(rng);
+            }
+            xref(i) = x_dist(rng);
+        }
+        const Eigen::MatrixXd Amat = Lmat * Lmat.transpose();
+        const Eigen::VectorXd bvec = Amat * xref;
+
+        for (int i = 0; i < m; ++i)
+        {
+            x_blk_ref[i] = xref(i);
+            b_blk[i] = bvec(i);
+            for (int j = 0; j < m; ++j)
+            {
+                A_blk[i * m + j] = Amat(i, j);
+                L_blk_ref[i * m + j] = (i >= j) ? Lmat(i, j) : 0.0;
+            }
+        }
+    }
+
+    DevBlockMatrix<double> dL;
+    DevBlockVector<double> dX;
+    dL.Assign(hA);
+    dX.Assign(hB);
+
+    cudaStream_t stream = nullptr;
+    cuSafeCall(cudaStreamCreate(&stream));
+
+    BatchedCholeskySolver<double> solver;
+    bool ok = solver.Initialize(stream);
+    if (!ok)
+    {
+        cuSafeCall(cudaStreamDestroy(stream));
+        DispatchResult bad;
+        bad.max_rel_lower_err = 1.0;
+        bad.max_rel_x_err = 1.0;
+        return bad;
+    }
+
+    const int uniform_block_size =
+        (method == CholeskyMethod::UniformTiled || method == CholeskyMethod::WavefrontTiled) ? sizes[0] : -1;
+
+    ok = solver.Factorize(dL, method, uniform_block_size, false);
+    if (!ok)
+    {
+        solver.Release();
+        cuSafeCall(cudaStreamDestroy(stream));
+        DispatchResult bad;
+        bad.max_rel_lower_err = 1.0;
+        bad.max_rel_x_err = 1.0;
+        return bad;
+    }
+
+    ok = solver.Solve(
+        dL.Data().Begin(), dX.Data().Begin(),
+        dL.Rows().Begin(), dL.Offsets().Begin(), dX.Offsets().Begin(),
+        dL.NumBlocks(),
+        method,
+        uniform_block_size);
+    if (!ok)
+    {
+        solver.Release();
+        cuSafeCall(cudaStreamDestroy(stream));
+        DispatchResult bad;
+        bad.max_rel_lower_err = 1.0;
+        bad.max_rel_x_err = 1.0;
+        return bad;
+    }
+
+    cuSafeCall(cudaStreamSynchronize(stream));
+    solver.Release();
+    cuSafeCall(cudaStreamDestroy(stream));
+
+    HostBlockMatrix<double> hL_gpu;
+    HostBlockVector<double> hX_gpu;
+    hL_gpu.Assign(dL);
+    hX_gpu.Assign(dX);
+
+    DispatchResult result;
+    for (int b = 0; b < num_blocks; ++b)
+    {
+        const int m = sizes[b];
+        const double* L_ref = hL_ref.BlockPtr(b);
+        const double* L_got = hL_gpu.BlockPtr(b);
+        const double* x_ref = hX_ref.BlockPtr(b);
+        const double* x_got = hX_gpu.BlockPtr(b);
+
+        for (int i = 0; i < m; ++i)
+        {
+            for (int j = 0; j <= i; ++j)
+            {
+                const double ref = L_ref[i * m + j];
+                const double got = L_got[i * m + j];
+                const double rel = std::abs(got - ref) / (std::abs(ref) + 1e-12);
+                result.max_rel_lower_err = std::max(result.max_rel_lower_err, rel);
+            }
+
+            const double x_rel = std::abs(x_got[i] - x_ref[i]) / (std::abs(x_ref[i]) + 1e-12);
+            result.max_rel_x_err = std::max(result.max_rel_x_err, x_rel);
+        }
+    }
+
+    return result;
+}
 } // namespace
 
 TEST(CholeskyDispatch, Simplest)
@@ -217,6 +366,41 @@ TEST(CholeskyDispatch, PaddedTiled)
 TEST(CholeskyDispatch, WavefrontTiled)
 {
     const DispatchResult r = RunDispatchCase(CholeskyMethod::WavefrontTiled, {192, 192, 192, 192}, true);
+    EXPECT_LT(r.max_rel_lower_err, 1e-8);
+    EXPECT_LT(r.max_rel_x_err, 1e-8);
+}
+
+TEST(CholeskyDispatch, BlockMatrixBlockVectorSimplest)
+{
+    const DispatchResult r = RunBlockContainerCase(CholeskyMethod::Simplest, {64, 80, 96});
+    EXPECT_LT(r.max_rel_lower_err, 1e-8);
+    EXPECT_LT(r.max_rel_x_err, 1e-8);
+}
+
+TEST(CholeskyDispatch, BlockMatrixBlockVectorSingleTiled)
+{
+    const DispatchResult r = RunBlockContainerCase(CholeskyMethod::SingleTiled, {64, 80, 96});
+    EXPECT_LT(r.max_rel_lower_err, 1e-8);
+    EXPECT_LT(r.max_rel_x_err, 1e-8);
+}
+
+TEST(CholeskyDispatch, BlockMatrixBlockVectorUniformTiled)
+{
+    const DispatchResult r = RunBlockContainerCase(CholeskyMethod::UniformTiled, {192, 192, 192, 192});
+    EXPECT_LT(r.max_rel_lower_err, 1e-8);
+    EXPECT_LT(r.max_rel_x_err, 1e-8);
+}
+
+TEST(CholeskyDispatch, BlockMatrixBlockVectorPaddedTiled)
+{
+    const DispatchResult r = RunBlockContainerCase(CholeskyMethod::PaddedTiled, {128, 173, 211, 256});
+    EXPECT_LT(r.max_rel_lower_err, 1e-8);
+    EXPECT_LT(r.max_rel_x_err, 1e-8);
+}
+
+TEST(CholeskyDispatch, BlockMatrixBlockVectorWavefrontTiled)
+{
+    const DispatchResult r = RunBlockContainerCase(CholeskyMethod::WavefrontTiled, {192, 192, 192, 192});
     EXPECT_LT(r.max_rel_lower_err, 1e-8);
     EXPECT_LT(r.max_rel_x_err, 1e-8);
 }

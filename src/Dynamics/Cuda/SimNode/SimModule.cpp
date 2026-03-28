@@ -10,7 +10,7 @@ namespace dyno
     SimModule<TDataType>::SimModule() : ComputeModule()
     {
         spdlog::info("SimModule constructor called.");
-        TestLowerSolve();
+        TestVariableBlockCholeskyFactorizeAndSolve(50);
     }
 
     template<typename TDataType>

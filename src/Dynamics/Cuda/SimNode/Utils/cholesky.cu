@@ -334,6 +334,94 @@ namespace dyno
         __syncthreads();
     }
 
+    // Load a tile from a block with size block_size and row-major stride block_size.
+    // Out-of-bound entries are treated as padded values:
+    // - diagonal tile: padded diagonal is identity, other padded entries are zero
+    // - non-diagonal tile: padded entries are zero
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __device__ void LoadTilePadded(
+        const T* A_block,
+        T* sA,
+        int block_size,
+        int tile_row,
+        int tile_col,
+        int tile_stride,
+        bool is_diagonal = true)
+    {
+        const int tid = threadIdx.x;
+        const int row0 = tile_row * NTILES;
+        const int col0 = tile_col * NTILES;
+
+        for (int idx = tid; idx < NTILES * NTILES; idx += NTHREADS)
+        {
+            int r = idx / NTILES;
+            int c = idx % NTILES;
+            int gr = row0 + r;
+            int gc = col0 + c;
+
+            T val = T(0);
+            bool in_bound = (gr < block_size) && (gc < block_size);
+            // in_bound的元素直接从A_block加载，out-of-bound元素根据是否在对角块以及位置决定是0还是1
+            if (in_bound)
+            {
+                val = A_block[gr * block_size + gc];
+            }
+            else if (is_diagonal)
+            {
+                // For padded diagonal area use identity so padded Cholesky stays well-defined.
+                if (gr == gc)
+                    val = T(1);
+            }
+
+            if (is_diagonal && r < c)
+                val = T(0);
+
+            sA[r * tile_stride + c] = val;
+        }
+        __syncthreads();
+    }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __device__ void StoreTileBounded(
+        const T* sA,
+        T* L_block,
+        int block_size,
+        int tile_row,
+        int tile_col,
+        int tile_stride,
+        bool is_diagonal = true)
+    {
+        const int tid = threadIdx.x;
+        const int row0 = tile_row * NTILES;
+        const int col0 = tile_col * NTILES;
+
+        for (int idx = tid; idx < NTILES * NTILES; idx += NTHREADS)
+        {
+            // shared_memory中的tile元素索引
+            int r = idx / NTILES;
+            int c = idx % NTILES;
+            // global_memory中对应的元素索引
+            int gr = row0 + r;
+            int gc = col0 + c;
+            if (gr >= block_size || gc >= block_size)
+                continue;
+
+            bool is_lower_triangular = (gr >= gc);
+            if (is_diagonal)
+            {
+                if (is_lower_triangular)
+                    L_block[gr * block_size + gc] = sA[r * tile_stride + c];
+                else
+                    L_block[gr * block_size + gc] = T(0);
+            }
+            else
+            {
+                L_block[gr * block_size + gc] = sA[r * tile_stride + c];
+            }
+        }
+        __syncthreads();
+    }
+
     template<unsigned NTILES, unsigned NTHREADS, class T>
     __device__ void LoadVecTile(const T* x, T* sx)
     {
@@ -352,6 +440,41 @@ namespace dyno
         for (int i = tid; i < NTILES; i += NTHREADS)
         {
             x[i] = sx[i];
+        }
+        __syncthreads();
+    }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __device__ void LoadVecTilePadded(
+        const T* x_block,
+        T* sx,
+        int vec_size,
+        int tile_i)
+    {
+        const int tid = threadIdx.x;
+        const int base = tile_i * NTILES;
+        for (int i = tid; i < NTILES; i += NTHREADS)
+        {
+            int gi = base + i;
+            sx[i] = (gi < vec_size) ? x_block[gi] : T(0);
+        }
+        __syncthreads();
+    }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __device__ void StoreVecTileBounded(
+        const T* sx,
+        T* x_block,
+        int vec_size,
+        int tile_i)
+    {
+        const int tid = threadIdx.x;
+        const int base = tile_i * NTILES;
+        for (int i = tid; i < NTILES; i += NTHREADS)
+        {
+            int gi = base + i;
+            if (gi < vec_size)
+                x_block[gi] = sx[i];
         }
         __syncthreads();
     }
@@ -379,8 +502,8 @@ namespace dyno
 
         T* A_block = A + env_id * block_size * block_size;
 
-        extern __shared__ T smem[]; // 大小为4 * NTILES * NTILES * sizeof(T)
-        T* sA = smem; // 存A_kk Tile
+        extern __shared__ unsigned char smem[]; // 大小为4 * NTILES * NTILES * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存A_kk Tile
         T* sB = sA + NTILES * NTILES; // 存A_ik Tile
         T* sC = sB + NTILES * NTILES; // 存A_kj Tile
         T* sD = sC + NTILES * NTILES; // 存A_ij Tile
@@ -443,6 +566,77 @@ namespace dyno
         }
     }
 
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__ __launch_bounds__(NTHREADS) void CholeskyFactorizeVariableBlockTile(
+        const T* A,
+        T* L,
+        const int* block_sizes,
+        const int* block_offsets,
+        int num_blocks)
+    {
+        int env_id = blockIdx.x;
+        if (env_id >= num_blocks)
+            return;
+
+        const int block_size = block_sizes[env_id];
+        if (block_size <= 0)
+            return;
+
+        const int block_offset = block_offsets[env_id];
+        const T* A_block = A + block_offset;
+        T* L_block = L + block_offset;
+        const int tile_stride = NTILES;
+        const int tile_dim = (block_size + NTILES - 1) / NTILES;
+
+        extern __shared__ unsigned char smem[];
+        T* sA = reinterpret_cast<T*>(smem);
+        T* sB = sA + NTILES * NTILES;
+        T* sC = sB + NTILES * NTILES;
+        T* sD = sC + NTILES * NTILES;
+
+        // Initialize output block so untouched upper-triangular entries are deterministic zeros.
+        for (int idx = threadIdx.x; idx < block_size * block_size; idx += NTHREADS)
+        {
+            L_block[idx] = T(0);
+        }
+        __syncthreads();
+
+        for (int k = 0; k < tile_dim; ++k)
+        {
+            // A_kk (with padding on the last tile if needed)
+            LoadTilePadded<NTILES, NTHREADS, T>(A_block, sA, block_size, k, k, tile_stride, true);
+
+            // A_kk -= sum_j L_kj * L_kj^T
+            for (int j = 0; j < k; ++j)
+            {
+                LoadTilePadded<NTILES, NTHREADS, T>(L_block, sB, block_size, k, j, tile_stride, false);
+                SyrkSubLower<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+            }
+
+            // potrf(A_kk)
+            PotrfTileLowerInplace<NTILES, NTHREADS, T>(sA, tile_stride);
+
+            // store L_kk
+            StoreTileBounded<NTILES, NTHREADS, T>(sA, L_block, block_size, k, k, tile_stride, true);
+
+            // A_ik update + trsm for i > k
+            for (int i = k + 1; i < tile_dim; ++i)
+            {
+                LoadTilePadded<NTILES, NTHREADS, T>(A_block, sB, block_size, i, k, tile_stride, false);
+
+                for (int j = 0; j < k; ++j)
+                {
+                    LoadTilePadded<NTILES, NTHREADS, T>(L_block, sC, block_size, i, j, tile_stride, false);
+                    LoadTilePadded<NTILES, NTHREADS, T>(L_block, sD, block_size, k, j, tile_stride, false);
+                    GemmNTSub<NTILES, NTHREADS, T>(sB, sC, sD, tile_stride);
+                }
+
+                TrsmRightLowerTranspose<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+                StoreTileBounded<NTILES, NTHREADS, T>(sB, L_block, block_size, i, k, tile_stride, false);
+            }
+        }
+    }
+
     // 与上面的cholesky分解配套的Lower和Upper solve函数
     template<unsigned NTILES, unsigned NTHREADS, class T>
     __global__  __launch_bounds__(NTHREADS) void LowerSolveUniformBlockTile(T* L, T* x, int block_size, int num_blocks)
@@ -458,8 +652,9 @@ namespace dyno
         T* L_block = L + env_id * block_size * block_size;
         T* x_block = x + env_id * block_size;
 
-        extern __shared__ T smem[]; // 大小为2 * (NTILES * NTILES  + NTILES) * sizeof(T)
-        T* sA = smem; // 存L_ii Tile
+        
+        extern __shared__ unsigned char smem[]; // 大小为2 * (NTILES * NTILES  + NTILES) * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存L_ii Tile
         T* sB = sA + NTILES * NTILES; // 存y_i Tile
         T* sC = sB + NTILES; // 存L_ij Tile
         T* sD = sC + NTILES * NTILES; // 存y_j Tile
@@ -516,8 +711,8 @@ namespace dyno
         T* L_block = L + env_id * block_size * block_size;
         T* x_block = x + env_id * block_size;
 
-        extern __shared__ T smem[]; // 大小为2 * (NTILES * NTILES  + NTILES) * sizeof(T)
-        T* sA = smem; // 存L_ii Tile, 按transpose使用
+        extern __shared__ unsigned char smem[]; // 大小为2 * (NTILES * NTILES  + NTILES) * sizeof(T)
+        T* sA = reinterpret_cast<T*>(smem); // 存L_ii Tile, 按transpose使用
         T* sB = sA + NTILES * NTILES; // 存x_i Tile
         T* sC = sB + NTILES; // 存L_ji Tile, 按transpose使用
         T* sD = sC + NTILES * NTILES; // 存x_j Tile
@@ -557,6 +752,102 @@ namespace dyno
 
             // Step 5: Store the result back to x_i
             StoreVecTile<NTILES, NTHREADS, T>(sB, x_i);
+        }
+    }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__ __launch_bounds__(NTHREADS) void LowerSolveVariableBlockTile(
+        const T* L,
+        T* x,
+        const int* block_sizes,
+        const int* block_offsets,
+        const int* x_offsets,
+        int num_blocks)
+    {
+        int env_id = blockIdx.x;
+        if (env_id >= num_blocks)
+            return;
+
+        const int block_size = block_sizes[env_id];
+        if (block_size <= 0)
+            return;
+
+        const int block_offset = block_offsets[env_id];
+        const int x_offset = x_offsets[env_id];
+        const T* L_block = L + block_offset;
+        T* x_block = x + x_offset;
+
+        const int tile_stride = NTILES;
+        const int tile_dim = (block_size + NTILES - 1) / NTILES;
+
+        extern __shared__ unsigned char smem_var_lower[];
+        T* sA = reinterpret_cast<T*>(smem_var_lower); // L_ii
+        T* sB = sA + NTILES * NTILES;                 // y_i
+        T* sC = sB + NTILES;                          // L_ij
+        T* sD = sC + NTILES * NTILES;                 // y_j
+
+        for (int i = 0; i < tile_dim; ++i)
+        {
+            LoadTilePadded<NTILES, NTHREADS, T>(L_block, sA, block_size, i, i, tile_stride, true);
+            LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sB, block_size, i);
+
+            for (int j = 0; j < i; ++j)
+            {
+                LoadTilePadded<NTILES, NTHREADS, T>(L_block, sC, block_size, i, j, tile_stride, false);
+                LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sD, block_size, j);
+                GemvSubLowerNTile<NTILES, NTHREADS, T>(sB, sC, sD, tile_stride);
+            }
+
+            TrsvLowerTileInplace<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+            StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, i);
+        }
+    }
+
+    template<unsigned NTILES, unsigned NTHREADS, class T>
+    __global__ __launch_bounds__(NTHREADS) void UpperSolveVariableBlockTile(
+        const T* L,
+        T* x,
+        const int* block_sizes,
+        const int* block_offsets,
+        const int* x_offsets,
+        int num_blocks)
+    {
+        int env_id = blockIdx.x;
+        if (env_id >= num_blocks)
+            return;
+
+        const int block_size = block_sizes[env_id];
+        if (block_size <= 0)
+            return;
+
+        const int block_offset = block_offsets[env_id];
+        const int x_offset = x_offsets[env_id];
+        const T* L_block = L + block_offset;
+        T* x_block = x + x_offset;
+
+        const int tile_stride = NTILES;
+        const int tile_dim = (block_size + NTILES - 1) / NTILES;
+
+        extern __shared__ unsigned char smem_var_upper[];
+        T* sA = reinterpret_cast<T*>(smem_var_upper); // L_ii (as transpose)
+        T* sB = sA + NTILES * NTILES;                 // x_i
+        T* sC = sB + NTILES;                          // L_ji
+        T* sD = sC + NTILES * NTILES;                 // x_j
+
+        for (int i = tile_dim - 1; i >= 0; --i)
+        {
+            LoadTilePadded<NTILES, NTHREADS, T>(L_block, sA, block_size, i, i, tile_stride, true);
+            LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sB, block_size, i);
+
+            for (int j = i + 1; j < tile_dim; ++j)
+            {
+                LoadTilePadded<NTILES, NTHREADS, T>(L_block, sC, block_size, j, i, tile_stride, false);
+                LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sD, block_size, j);
+                GemvSubLowerTTile<NTILES, NTHREADS, T>(sB, sC, sD, tile_stride);
+            }
+
+            TrsvUpperTileInplace<NTILES, NTHREADS, T>(sA, sB, tile_stride);
+            StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, i);
         }
     }
 
@@ -654,8 +945,8 @@ namespace dyno
         int block_offset = block_offsets[env_id];
         int x_offset = x_offsets[env_id];
         
-        extern __shared__ T smem[];
-        T* sL = smem;                         // size: MAX_N * MAX_N
+        extern __shared__ unsigned char smem[];
+        T* sL = reinterpret_cast<T*>(smem);            // size: MAX_N * MAX_N
         T* sx = sL + MAX_N * MAX_N;          // size: MAX_N
         // Load L and x into shared memory
         for (int idx = thread_id; idx < block_size * block_size; idx += NTHREADS) 
@@ -711,8 +1002,8 @@ namespace dyno
         int block_offset = block_offsets[env_id];
         int x_offset = x_offsets[env_id];
         
-        extern __shared__ T smem[];
-        T* sL = smem;                         // size: MAX_N * MAX_N
+        extern __shared__ unsigned char smem[];
+        T* sL = reinterpret_cast<T*>(smem);            // size: MAX_N * MAX_N
         T* sx = sL + MAX_N * MAX_N;          // size: MAX_N
         // Load L and x into shared memory
         for (int idx = thread_id; idx < block_size * block_size; idx += NTHREADS) 
@@ -1020,9 +1311,136 @@ namespace dyno
             <<<num_blocks, NTHREADS, smem_bytes>>>(
                 L, x, uniform_block_size, num_blocks)));
         
-        // CUDA_LAUNCH_AND_CHECK((UpperSolveUniformBlockTile<NTILES, NTHREADS, T>
-        //     <<<num_blocks, NTHREADS, smem_bytes>>>(
-        //         L, x, uniform_block_size, num_blocks)));
+        CUDA_LAUNCH_AND_CHECK((UpperSolveUniformBlockTile<NTILES, NTHREADS, T>
+            <<<num_blocks, NTHREADS, smem_bytes>>>(
+                L, x, uniform_block_size, num_blocks)));
+    }
+
+    template<typename T>
+    void BatchBlockCholeskyFactorize(
+        const T* A,
+        T* L,
+        const int* block_sizes,
+        const int* block_offsets,
+        int num_blocks)
+    {
+        constexpr int NTILES = 32;
+        constexpr int NTHREADS = 128;
+        size_t smem_bytes = 4 * NTILES * NTILES * sizeof(T);
+
+        if (num_blocks <= 0)
+            return;
+
+        CUDA_LAUNCH_AND_CHECK((CholeskyFactorizeVariableBlockTile<NTILES, NTHREADS, T>
+            <<<num_blocks, NTHREADS, smem_bytes>>>(
+                A,
+                L,
+                block_sizes,
+                block_offsets,
+                num_blocks)));
+    }
+
+    template<typename T>
+    void BatchBlockCholeskyFactorizeHost(
+        const DArray<T> A,
+        DArray<T> L,
+        DArray<int> block_sizes,
+        DArray<int> block_offsets,
+        int num_blocks)
+    {
+        BatchBlockCholeskyFactorize(
+            A.begin(),
+            L.begin(),
+            block_sizes.begin(),
+            block_offsets.begin(),
+            num_blocks);
+    }
+
+    template<typename T>
+    void BatchBlockCholeskyFactorizeHost(
+        const T* A,
+        T* L,
+        const int* block_sizes,
+        const int* block_offsets,
+        int num_blocks)
+    {
+        BatchBlockCholeskyFactorize(
+            A,
+            L,
+            block_sizes,
+            block_offsets,
+            num_blocks);
+    }
+
+    template<typename T>
+    void BatchBlockCholeskySolve(
+        const T* L,
+        T* x,
+        const int* block_sizes,
+        const int* block_offsets,
+        const int* x_offsets,
+        int num_blocks)
+    {
+        constexpr int NTILES = 32;
+        constexpr int NTHREADS = 128;
+        size_t smem_bytes = 2 * (NTILES * NTILES + NTILES) * sizeof(T);
+
+        if (num_blocks <= 0)
+            return;
+
+        CUDA_LAUNCH_AND_CHECK((LowerSolveVariableBlockTile<NTILES, NTHREADS, T>
+            <<<num_blocks, NTHREADS, smem_bytes>>>(
+                L,
+                x,
+                block_sizes,
+                block_offsets,
+                x_offsets,
+                num_blocks)));
+
+        CUDA_LAUNCH_AND_CHECK((UpperSolveVariableBlockTile<NTILES, NTHREADS, T>
+            <<<num_blocks, NTHREADS, smem_bytes>>>(
+                L,
+                x,
+                block_sizes,
+                block_offsets,
+                x_offsets,
+                num_blocks)));
+    }
+
+    template<typename T>
+    void BatchBlockCholeskySolveHost(
+        const DArray<T> L,
+        DArray<T> x,
+        DArray<int> block_sizes,
+        DArray<int> block_offsets,
+        DArray<int> x_offsets,
+        int num_blocks)
+    {
+        BatchBlockCholeskySolve(
+            L.begin(),
+            x.begin(),
+            block_sizes.begin(),
+            block_offsets.begin(),
+            x_offsets.begin(),
+            num_blocks);
+    }
+
+    template<typename T>
+    void BatchBlockCholeskySolveHost(
+        const T* L,
+        T* x,
+        const int* block_sizes,
+        const int* block_offsets,
+        const int* x_offsets,
+        int num_blocks)
+    {
+        BatchBlockCholeskySolve(
+            L,
+            x,
+            block_sizes,
+            block_offsets,
+            x_offsets,
+            num_blocks);
     }
 
 
@@ -1062,4 +1480,40 @@ namespace dyno
     
     template void dyno::UniformBlockCholeskySolveWithTileHost<double>(
         double*, double*, int, int);
+
+    template void dyno::BatchBlockCholeskyFactorize<float>(
+        const float*, float*, const int*, const int*, int);
+
+    template void dyno::BatchBlockCholeskyFactorize<double>(
+        const double*, double*, const int*, const int*, int);
+
+    template void dyno::BatchBlockCholeskySolve<float>(
+        const float*, float*, const int*, const int*, const int*, int);
+
+    template void dyno::BatchBlockCholeskySolve<double>(
+        const double*, double*, const int*, const int*, const int*, int);
+
+    template void dyno::BatchBlockCholeskyFactorizeHost<float>(
+        const dyno::DArray<float>, dyno::DArray<float>, dyno::DArray<int>, dyno::DArray<int>, int);
+
+    template void dyno::BatchBlockCholeskyFactorizeHost<double>(
+        const dyno::DArray<double>, dyno::DArray<double>, dyno::DArray<int>, dyno::DArray<int>, int);
+
+    template void dyno::BatchBlockCholeskyFactorizeHost<float>(
+        const float*, float*, const int*, const int*, int);
+
+    template void dyno::BatchBlockCholeskyFactorizeHost<double>(
+        const double*, double*, const int*, const int*, int);
+
+    template void dyno::BatchBlockCholeskySolveHost<float>(
+        const dyno::DArray<float>, dyno::DArray<float>, dyno::DArray<int>, dyno::DArray<int>, dyno::DArray<int>, int);
+
+    template void dyno::BatchBlockCholeskySolveHost<double>(
+        const dyno::DArray<double>, dyno::DArray<double>, dyno::DArray<int>, dyno::DArray<int>, dyno::DArray<int>, int);
+
+    template void dyno::BatchBlockCholeskySolveHost<float>(
+        const float*, float*, const int*, const int*, const int*, int);
+
+    template void dyno::BatchBlockCholeskySolveHost<double>(
+        const double*, double*, const int*, const int*, const int*, int);
 } // namespace dyno

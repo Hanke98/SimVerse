@@ -2,6 +2,7 @@
 #include "cholesky.h"
 #include "spdlog/spdlog.h"
 #include <Eigen/Dense>
+#include <algorithm>
 #include <random>
 
 namespace dyno
@@ -652,266 +653,389 @@ namespace dyno
 		spdlog::info("====================   End Test Uniform Blocked Cholesky Random Dense L + Solve   ===================");
 	}
 
-	void TestLowerSolve()
+	void TestVariableBlockCholeskyFactorize(int num_blocks)
 	{
-		spdlog::info("====================   Test Lower Solve Only   ====================");
+		spdlog::info("====================   Test Variable Block Cholesky Factorize   ===================");
 
-		constexpr int block_size = 512;
-		constexpr int num_blocks = 4;
-		constexpr int total_mat_size = num_blocks * block_size * block_size;
-		constexpr int total_vec_size = num_blocks * block_size;
+		if (num_blocks <= 0)
+		{
+			spdlog::warn("num_blocks <= 0, skip test");
+			return;
+		}
 
-		CArray<double> hL;
-		CArray<double> hYRef;
-		CArray<double> hB;
-		CArray<double> hYGpu;
+		constexpr int min_block_size = 128;
+		constexpr int max_block_size = 1024;
 
-		hL.resize(total_mat_size);
-		hYRef.resize(total_vec_size);
-		hB.resize(total_vec_size);
-		hYGpu.resize(total_vec_size);
+		std::mt19937 rng(20260319);
+		std::uniform_int_distribution<int> size_dist(min_block_size, max_block_size);
+		std::uniform_real_distribution<double> offdiag_dist(-0.3, 0.3);
+		std::uniform_real_distribution<double> diag_dist(5.0, 20.0);
 
-		hL.reset();
-		hYRef.reset();
-		hB.reset();
-		hYGpu.reset();
+		CArray<int> hBlockSizes;
+		CArray<int> hBlockOffsets;
+		hBlockSizes.resize(num_blocks);
+		hBlockOffsets.resize(num_blocks);
 
-		std::mt19937 rng(20260318);
-		std::uniform_real_distribution<double> offdiag_dist(-0.5, 0.5);
-		std::uniform_real_distribution<double> diag_dist(1.0, 15.0);
-		std::uniform_real_distribution<double> y_dist(-1.0, 1.0);
+		int total_mat_size = 0;
+		int min_size_seen = max_block_size;
+		int max_size_seen = min_block_size;
+		for (int b = 0; b < num_blocks; ++b)
+		{
+			int m = size_dist(rng);
+			hBlockSizes[b] = m;
+			hBlockOffsets[b] = total_mat_size;
+			total_mat_size += m * m;
+
+			min_size_seen = std::min(min_size_seen, m);
+			max_size_seen = std::max(max_size_seen, m);
+		}
+
+		CArray<double> hA;
+		CArray<double> hLRef;
+		CArray<double> hLGpu;
+		CArray<double> hLInit;
+
+		hA.resize(total_mat_size);
+		hLRef.resize(total_mat_size);
+		hLGpu.resize(total_mat_size);
+		hLInit.resize(total_mat_size);
+
+		hA.reset();
+		hLRef.reset();
+		hLGpu.reset();
+		hLInit.reset();
 
 		for (int b = 0; b < num_blocks; ++b)
 		{
-			const int mat_offset = b * block_size * block_size;
-			const int vec_offset = b * block_size;
+			const int m = hBlockSizes[b];
+			const int offset = hBlockOffsets[b];
 
-			Eigen::MatrixXd Lmat = Eigen::MatrixXd::Zero(block_size, block_size);
-			Eigen::VectorXd yref = Eigen::VectorXd::Zero(block_size);
+			Eigen::MatrixXd Lmat = Eigen::MatrixXd::Zero(m, m);
 
-			// 构造随机 dense lower triangular L
-			for (int i = 0; i < block_size; ++i)
+			for (int i = 0; i < m; ++i)
 			{
 				for (int j = 0; j <= i; ++j)
 				{
 					if (i == j)
-						Lmat(i, j) = diag_dist(rng) + 0.001 * i + 0.0001 * b;
+						Lmat(i, j) = diag_dist(rng) + 1e-3 * i + 1e-4 * b;
 					else
 						Lmat(i, j) = offdiag_dist(rng);
 				}
 			}
 
-			// 构造参考解 y_ref
-			for (int i = 0; i < block_size; ++i)
+			Eigen::MatrixXd Amat = Lmat * Lmat.transpose();
+
+			for (int i = 0; i < m; ++i)
 			{
-				yref(i) = y_dist(rng);
-			}
-
-			// 构造右端 b = L * y_ref
-			Eigen::VectorXd bvec = Lmat * yref;
-
-			for (int i = 0; i < block_size; ++i)
-			{
-				hYRef[vec_offset + i] = yref(i);
-				hB[vec_offset + i] = bvec(i);
-
-				for (int j = 0; j < block_size; ++j)
+				for (int j = 0; j < m; ++j)
 				{
-					hL[mat_offset + i * block_size + j] = Lmat(i, j);
+					hA[offset + i * m + j] = Amat(i, j);
+					hLRef[offset + i * m + j] = (i >= j) ? Lmat(i, j) : 0.0;
 				}
 			}
 		}
 
+		DArray<double> dA;
 		DArray<double> dL;
-		DArray<double> dX;
+		DArray<int> dBlockSizes;
+		DArray<int> dBlockOffsets;
+		dA.assign(hA);
+		dL.assign(hLInit);
+		dBlockSizes.assign(hBlockSizes);
+		dBlockOffsets.assign(hBlockOffsets);
 
-		dL.assign(hL);
-		dX.assign(hB); // solve 输入是 b
-
-		// 只跑 lower solve: L y = b
-		UniformBlockCholeskySolveWithTileHost(dL.begin(), dX.begin(), block_size, num_blocks);
+		BatchBlockCholeskyFactorize(
+			dA.begin(),
+			dL.begin(),
+			dBlockSizes.begin(),
+			dBlockOffsets.begin(),
+			num_blocks);
 
 		cuSafeCall(cudaDeviceSynchronize());
 
-		hYGpu.assign(dX);
+		hLGpu.assign(dL);
 
-		double max_abs_y_err = 0.0;
-		double max_rel_y_err = 0.0;
-
-		// 额外加一个整体范数误差
-		double max_vec_rel_err = 0.0;
+		double max_abs_lower_err = 0.0;
+		double max_rel_lower_err = 0.0;
+		double max_abs_upper = 0.0;
+		double max_recon_abs_err = 0.0;
+		double max_recon_rel_err = 0.0;
 
 		for (int b = 0; b < num_blocks; ++b)
 		{
-			const int vec_offset = b * block_size;
+			const int m = hBlockSizes[b];
+			const int offset = hBlockOffsets[b];
 
-			Eigen::VectorXd yref(block_size);
-			Eigen::VectorXd ygpu(block_size);
+			Eigen::MatrixXd Lgpu = Eigen::MatrixXd::Zero(m, m);
+			Eigen::MatrixXd Aref = Eigen::MatrixXd::Zero(m, m);
 
-			for (int i = 0; i < block_size; ++i)
+			for (int i = 0; i < m; ++i)
 			{
-				double ref = hYRef[vec_offset + i];
-				double got = hYGpu[vec_offset + i];
+				for (int j = 0; j < m; ++j)
+				{
+					const double ref = hLRef[offset + i * m + j];
+					const double got = hLGpu[offset + i * m + j];
 
-				yref(i) = ref;
-				ygpu(i) = got;
+					if (i >= j)
+					{
+						const double abs_err = std::abs(got - ref);
+						const double rel_err = abs_err / (std::abs(ref) + 1e-12);
+						max_abs_lower_err = std::max(max_abs_lower_err, abs_err);
+						max_rel_lower_err = std::max(max_rel_lower_err, rel_err);
+						Lgpu(i, j) = got;
+					}
+					else
+					{
+						max_abs_upper = std::max(max_abs_upper, std::abs(got));
+					}
 
-				double abs_err = std::abs(got - ref);
-				double rel_err = abs_err / (std::abs(ref) + 1e-12);
-
-				max_abs_y_err = std::max(max_abs_y_err, abs_err);
-				max_rel_y_err = std::max(max_rel_y_err, rel_err);
+					Aref(i, j) = hA[offset + i * m + j];
+				}
 			}
 
-			double vec_rel_err = (ygpu - yref).norm() / (yref.norm() + 1e-12);
-			max_vec_rel_err = std::max(max_vec_rel_err, vec_rel_err);
+			Eigen::MatrixXd Arecon = Lgpu * Lgpu.transpose();
+			Eigen::MatrixXd Diff = Arecon - Aref;
+			const double recon_abs_err = Diff.cwiseAbs().maxCoeff();
+			const double recon_rel_err = Diff.norm() / (Aref.norm() + 1e-12);
+			max_recon_abs_err = std::max(max_recon_abs_err, recon_abs_err);
+			max_recon_rel_err = std::max(max_recon_rel_err, recon_rel_err);
 		}
 
-		spdlog::info("block_size = {}", block_size);
 		spdlog::info("num_blocks = {}", num_blocks);
-		spdlog::info("Max abs lower-solve y error = {}", max_abs_y_err);
-		spdlog::info("Max rel lower-solve y error = {}", max_rel_y_err);
-		spdlog::info("Max vector rel lower-solve y error = {}", max_vec_rel_err);
+		spdlog::info("block size range = [{}, {}]", min_size_seen, max_size_seen);
+		spdlog::info("total_mat_size = {}", total_mat_size);
+		spdlog::info("Max abs lower-triangle error = {}", max_abs_lower_err);
+		spdlog::info("Max rel lower-triangle error = {}", max_rel_lower_err);
+		spdlog::info("Max abs upper-triangle residual = {}", max_abs_upper);
+		spdlog::info("Max abs reconstruction error = {}", max_recon_abs_err);
+		spdlog::info("Max rel reconstruction error = {}", max_recon_rel_err);
 
-		const double tol_rel = 1e-8;
-		const double tol_vec = 1e-8;
-
-		if (max_rel_y_err < tol_rel && max_vec_rel_err < tol_vec)
-			spdlog::info("Lower solve only test PASSED");
+		const double tol_lower = 1e-8;
+		const double tol_recon = 1e-8;
+		if (max_rel_lower_err < tol_lower && max_recon_rel_err < tol_recon)
+			spdlog::info("Variable block Cholesky factorize test PASSED");
 		else
-			spdlog::error("Lower solve only test FAILED");
+			spdlog::error("Variable block Cholesky factorize test FAILED");
 
-		spdlog::info("====================   End Test Lower Solve Only   ===================");
+		spdlog::info("====================   End Test Variable Block Cholesky Factorize   ===================");
 	}
 
-	void TestUpperSolve()
+	void TestVariableBlockCholeskyFactorizeAndSolve(int num_blocks)
 	{
-		spdlog::info("====================   Test Upper Solve Only   ====================");
+		spdlog::info("====================   Test Variable Block Cholesky Factorize + Solve   ===================");
 
-		constexpr int block_size = 512;
-		constexpr int num_blocks = 4;
-		constexpr int total_mat_size = num_blocks * block_size * block_size;
-		constexpr int total_vec_size = num_blocks * block_size;
+		if (num_blocks <= 0)
+		{
+			spdlog::warn("num_blocks <= 0, skip test");
+			return;
+		}
 
-		CArray<double> hL;
+		constexpr int min_block_size = 128;
+		constexpr int max_block_size = 1024;
+
+		std::mt19937 rng(20260319);
+		std::uniform_int_distribution<int> size_dist(min_block_size, max_block_size);
+		std::uniform_real_distribution<double> offdiag_dist(-0.3, 0.3);
+		std::uniform_real_distribution<double> diag_dist(5.0, 20.0);
+		std::uniform_real_distribution<double> x_dist(-1.0, 1.0);
+
+		CArray<int> hBlockSizes;
+		CArray<int> hBlockOffsets;
+		CArray<int> hXOffsets;
+		hBlockSizes.resize(num_blocks);
+		hBlockOffsets.resize(num_blocks);
+		hXOffsets.resize(num_blocks);
+
+		int total_mat_size = 0;
+		int total_vec_size = 0;
+		int min_size_seen = max_block_size;
+		int max_size_seen = min_block_size;
+		for (int b = 0; b < num_blocks; ++b)
+		{
+			int m = size_dist(rng);
+			hBlockSizes[b] = m;
+			hBlockOffsets[b] = total_mat_size;
+			hXOffsets[b] = total_vec_size;
+			total_mat_size += m * m;
+			total_vec_size += m;
+
+			min_size_seen = std::min(min_size_seen, m);
+			max_size_seen = std::max(max_size_seen, m);
+		}
+
+		CArray<double> hA;
+		CArray<double> hARef;
+		CArray<double> hLRef;
+		CArray<double> hLGpu;
 		CArray<double> hXRef;
-		CArray<double> hY;
+		CArray<double> hB;
 		CArray<double> hXGpu;
 
-		hL.resize(total_mat_size);
+		hA.resize(total_mat_size);
+		hARef.resize(total_mat_size);
+		hLRef.resize(total_mat_size);
+		hLGpu.resize(total_mat_size);
 		hXRef.resize(total_vec_size);
-		hY.resize(total_vec_size);
+		hB.resize(total_vec_size);
 		hXGpu.resize(total_vec_size);
 
-		hL.reset();
+		hA.reset();
+		hARef.reset();
+		hLRef.reset();
+		hLGpu.reset();
 		hXRef.reset();
-		hY.reset();
+		hB.reset();
 		hXGpu.reset();
-
-		std::mt19937 rng(20260318);
-		std::uniform_real_distribution<double> offdiag_dist(-0.5, 0.5);
-		std::uniform_real_distribution<double> diag_dist(1.0, 15.0);
-		std::uniform_real_distribution<double> x_dist(-1.0, 1.0);
 
 		for (int b = 0; b < num_blocks; ++b)
 		{
-			const int mat_offset = b * block_size * block_size;
-			const int vec_offset = b * block_size;
+			const int m = hBlockSizes[b];
+			const int mat_offset = hBlockOffsets[b];
+			const int vec_offset = hXOffsets[b];
 
-			Eigen::MatrixXd Lmat = Eigen::MatrixXd::Zero(block_size, block_size);
-			Eigen::VectorXd xref = Eigen::VectorXd::Zero(block_size);
+			Eigen::MatrixXd Lmat = Eigen::MatrixXd::Zero(m, m);
+			Eigen::VectorXd xref = Eigen::VectorXd::Zero(m);
 
-			// 构造随机 dense lower triangular L
-			for (int i = 0; i < block_size; ++i)
+			for (int i = 0; i < m; ++i)
 			{
 				for (int j = 0; j <= i; ++j)
 				{
 					if (i == j)
-						Lmat(i, j) = diag_dist(rng) + 0.001 * i + 0.0001 * b;
+						Lmat(i, j) = diag_dist(rng) + 1e-3 * i + 1e-4 * b;
 					else
 						Lmat(i, j) = offdiag_dist(rng);
 				}
-			}
-
-			// 构造参考解 x_ref
-			for (int i = 0; i < block_size; ++i)
-			{
 				xref(i) = x_dist(rng);
 			}
 
-			// 构造右端 y = L^T * x_ref
-			Eigen::VectorXd yvec = Lmat.transpose() * xref;
+			Eigen::MatrixXd Amat = Lmat * Lmat.transpose();
+			Eigen::VectorXd bvec = Amat * xref;
 
-			for (int i = 0; i < block_size; ++i)
+			for (int i = 0; i < m; ++i)
 			{
 				hXRef[vec_offset + i] = xref(i);
-				hY[vec_offset + i] = yvec(i);
+				hB[vec_offset + i] = bvec(i);
 
-				for (int j = 0; j < block_size; ++j)
+				for (int j = 0; j < m; ++j)
 				{
-					hL[mat_offset + i * block_size + j] = Lmat(i, j);
+					hA[mat_offset + i * m + j] = Amat(i, j);
+					hARef[mat_offset + i * m + j] = Amat(i, j);
+					hLRef[mat_offset + i * m + j] = (i >= j) ? Lmat(i, j) : 0.0;
 				}
 			}
 		}
 
+		DArray<double> dA;
 		DArray<double> dL;
 		DArray<double> dX;
+		DArray<int> dBlockSizes;
+		DArray<int> dBlockOffsets;
+		DArray<int> dXOffsets;
 
-		dL.assign(hL);
-		dX.assign(hY); // upper solve 输入是 y
+		dA.assign(hA);
+		dL.resize(total_mat_size);
+		dL.reset();
+		dX.assign(hB);
+		dBlockSizes.assign(hBlockSizes);
+		dBlockOffsets.assign(hBlockOffsets);
+		dXOffsets.assign(hXOffsets);
 
-		// 只跑 upper solve: L^T x = y
-		UniformBlockCholeskySolveWithTileHost(dL.begin(), dX.begin(), block_size, num_blocks);
-
+		BatchBlockCholeskyFactorizeHost(
+			dA.begin(),
+			dL.begin(),
+			dBlockSizes.begin(),
+			dBlockOffsets.begin(),
+			num_blocks);
+		cuSafeCall(cudaDeviceSynchronize());
+		BatchBlockCholeskySolveHost(
+			dL.begin(),
+			dX.begin(),
+			dBlockSizes.begin(),
+			dBlockOffsets.begin(),
+			dXOffsets.begin(),
+			num_blocks);
 		cuSafeCall(cudaDeviceSynchronize());
 
+		hLGpu.assign(dL);
 		hXGpu.assign(dX);
 
+		double max_abs_lower_err = 0.0;
+		double max_rel_lower_err = 0.0;
+		double max_abs_upper = 0.0;
+		double max_recon_abs_err = 0.0;
+		double max_recon_rel_err = 0.0;
 		double max_abs_x_err = 0.0;
 		double max_rel_x_err = 0.0;
-		double max_vec_rel_err = 0.0;
 
 		for (int b = 0; b < num_blocks; ++b)
 		{
-			const int vec_offset = b * block_size;
+			const int m = hBlockSizes[b];
+			const int mat_offset = hBlockOffsets[b];
+			const int vec_offset = hXOffsets[b];
 
-			Eigen::VectorXd xref(block_size);
-			Eigen::VectorXd xgpu(block_size);
+			Eigen::MatrixXd Lgpu = Eigen::MatrixXd::Zero(m, m);
+			Eigen::MatrixXd Aref = Eigen::MatrixXd::Zero(m, m);
 
-			for (int i = 0; i < block_size; ++i)
+			for (int i = 0; i < m; ++i)
 			{
-				double ref = hXRef[vec_offset + i];
-				double got = hXGpu[vec_offset + i];
+				for (int j = 0; j < m; ++j)
+				{
+					const double ref = hLRef[mat_offset + i * m + j];
+					const double got = hLGpu[mat_offset + i * m + j];
 
-				xref(i) = ref;
-				xgpu(i) = got;
+					if (i >= j)
+					{
+						const double abs_err = std::abs(got - ref);
+						const double rel_err = abs_err / (std::abs(ref) + 1e-12);
+						max_abs_lower_err = std::max(max_abs_lower_err, abs_err);
+						max_rel_lower_err = std::max(max_rel_lower_err, rel_err);
+						Lgpu(i, j) = got;
+					}
+					else
+					{
+						max_abs_upper = std::max(max_abs_upper, std::abs(got));
+					}
 
-				double abs_err = std::abs(got - ref);
-				double rel_err = abs_err / (std::abs(ref) + 1e-12);
+					Aref(i, j) = hARef[mat_offset + i * m + j];
+				}
 
-				max_abs_x_err = std::max(max_abs_x_err, abs_err);
-				max_rel_x_err = std::max(max_rel_x_err, rel_err);
+				const double x_ref = hXRef[vec_offset + i];
+				const double x_got = hXGpu[vec_offset + i];
+				const double x_abs_err = std::abs(x_got - x_ref);
+				const double x_rel_err = x_abs_err / (std::abs(x_ref) + 1e-12);
+				max_abs_x_err = std::max(max_abs_x_err, x_abs_err);
+				max_rel_x_err = std::max(max_rel_x_err, x_rel_err);
 			}
 
-			double vec_rel_err = (xgpu - xref).norm() / (xref.norm() + 1e-12);
-			max_vec_rel_err = std::max(max_vec_rel_err, vec_rel_err);
+			Eigen::MatrixXd Arecon = Lgpu * Lgpu.transpose();
+			Eigen::MatrixXd Diff = Arecon - Aref;
+			const double recon_abs_err = Diff.cwiseAbs().maxCoeff();
+			const double recon_rel_err = Diff.norm() / (Aref.norm() + 1e-12);
+			max_recon_abs_err = std::max(max_recon_abs_err, recon_abs_err);
+			max_recon_rel_err = std::max(max_recon_rel_err, recon_rel_err);
 		}
 
-		spdlog::info("block_size = {}", block_size);
 		spdlog::info("num_blocks = {}", num_blocks);
-		spdlog::info("Max abs upper-solve x error = {}", max_abs_x_err);
-		spdlog::info("Max rel upper-solve x error = {}", max_rel_x_err);
-		spdlog::info("Max vector rel upper-solve x error = {}", max_vec_rel_err);
+		spdlog::info("block size range = [{}, {}]", min_size_seen, max_size_seen);
+		spdlog::info("total_mat_size = {}", total_mat_size);
+		spdlog::info("total_vec_size = {}", total_vec_size);
+		spdlog::info("Max abs lower-triangle error = {}", max_abs_lower_err);
+		spdlog::info("Max rel lower-triangle error = {}", max_rel_lower_err);
+		spdlog::info("Max abs upper-triangle residual = {}", max_abs_upper);
+		spdlog::info("Max abs reconstruction error = {}", max_recon_abs_err);
+		spdlog::info("Max rel reconstruction error = {}", max_recon_rel_err);
+		spdlog::info("Max abs solve-x error = {}", max_abs_x_err);
+		spdlog::info("Max rel solve-x error = {}", max_rel_x_err);
 
-		const double tol_rel = 1e-8;
-		const double tol_vec = 1e-8;
-
-		if (max_rel_x_err < tol_rel && max_vec_rel_err < tol_vec)
-			spdlog::info("Upper solve only test PASSED");
+		const double tol_lower = 1e-8;
+		const double tol_recon = 1e-8;
+		const double tol_solve = 1e-8;
+		if (max_rel_lower_err < tol_lower && max_recon_rel_err < tol_recon && max_rel_x_err < tol_solve)
+			spdlog::info("Variable block Cholesky factorize + solve test PASSED");
 		else
-			spdlog::error("Upper solve only test FAILED");
+			spdlog::error("Variable block Cholesky factorize + solve test FAILED");
 
-		spdlog::info("====================   End Test Upper Solve Only   ===================");
+		spdlog::info("====================   End Test Variable Block Cholesky Factorize + Solve   ===================");
 	}
 
 } // namespace dyno

@@ -1,8 +1,9 @@
 #pragma once
 #include "utils.h"
+#include "SimBlockMatrix.h"
+#include "SimBlockVector.h"
 #include <cublas_v2.h>
 #include <cusolverDn.h>
-#include "SimBlockArray.h"
 
 namespace dyno
 {
@@ -73,19 +74,10 @@ namespace dyno
 			int uniform_block_size = -1,
 			bool use_graph = false);
 
-        // Overload for SimBlockArray storage:
-        // block_sizes stores matrix dimension n (NOT n*n).
+        // overload for SimBlockMatrix:
+        // infer block dimension n from rows/cols and require square blocks (rows == cols).
         bool Factorize(
-            DevBlockArray<T>& A_blocks,
-            const int* block_sizes,
-            CholeskyMethod method,
-            int uniform_block_size = -1,
-            bool use_graph = false);
-
-        // Preferred overload: block_sizes container stores matrix dimension n (NOT n*n).
-        bool Factorize(
-            DevBlockArray<T>& A_blocks,
-            const DevArr<int>& block_sizes,
+            DevBlockMatrix<T>& A_blocks,
             CholeskyMethod method,
             int uniform_block_size = -1,
             bool use_graph = false);
@@ -105,6 +97,12 @@ namespace dyno
 			int num_blocks,
 			CholeskyMethod method,
 			int uniform_block_size = -1);
+
+		bool Solve(
+            DevBlockMatrix<T>& L_blocks,
+			DevBlockVector<T>& x_blocks,
+            CholeskyMethod method,
+            int uniform_block_size = -1);
 
 	private:
 		bool initialized_ = false;

@@ -12,18 +12,18 @@ namespace dyno
 #else
 #define SIM_GPU_FUNC
 #endif
-#define SIM_BLOCKARRAY_LOCAL_GPU_FUNC
+#define SIM_BLOCKVECTOR_LOCAL_GPU_FUNC
 #endif
 
     template<typename T>
-    class DevBlockArray;
+    class DevBlockVector;
 
     template<typename T>
-    class HostBlockArray
+    class HostBlockVector
     {
     public:
-        HostBlockArray() = default;
-        ~HostBlockArray() = default;
+        HostBlockVector() = default;
+        ~HostBlockVector() = default;
 
         void Clear()
         {
@@ -36,38 +36,34 @@ namespace dyno
 
         bool BuildFromSizes(const std::vector<int>& sizes)
         {
-            HostArr<int> hsizes;
-            hsizes.Assign(sizes);
-            return BuildFromSizes(hsizes);
+            HostArr<int> h;
+            h.Assign(sizes);
+            return BuildFromSizes(h);
         }
 
         bool BuildFromSizes(const HostArr<int>& sizes)
         {
             Clear();
-
-            const int nblocks = sizes.Size();
-            if (nblocks == 0) return true;
+            const int n = sizes.Size();
+            if (n == 0) return true;
 
             HostArr<int> offsets;
-            offsets.Resize(nblocks);
+            offsets.Resize(n);
 
             int total = 0;
-            for (int b = 0; b < nblocks; ++b)
+            for (int b = 0; b < n; ++b)
             {
-                const int s = sizes[b];
-                if (s <= 0)
+                const int size = sizes[b];
+                if (size <= 0)
                 {
                     Clear();
                     return false;
                 }
-
-                const int len = s;
-
                 offsets[b] = total;
-                total += len;
+                total += size;
             }
 
-            num_blocks_ = nblocks;
+            num_blocks_ = n;
             total_size_ = total;
             sizes_.Assign(sizes);
             offsets_.Assign(offsets);
@@ -76,13 +72,37 @@ namespace dyno
             return true;
         }
 
+        void Assign(const DevBlockVector<T>& src)
+        {
+            num_blocks_ = src.NumBlocks();
+            total_size_ = src.TotalSize();
+            if (num_blocks_ == 0 || total_size_ == 0)
+            {
+                Clear();
+                return;
+            }
+            sizes_.Assign(src.Sizes());
+            offsets_.Assign(src.Offsets());
+            data_.Assign(src.Data());
+        }
+
+        bool Assign(const HostBlockVector<T>& src)
+        {
+            num_blocks_ = src.num_blocks_;
+            total_size_ = src.total_size_;
+            sizes_.Assign(src.sizes_);
+            offsets_.Assign(src.offsets_);
+            data_.Assign(src.data_);
+            return true;
+        }
+
         inline int NumBlocks() const { return num_blocks_; }
         inline int TotalSize() const { return total_size_; }
         inline bool Empty() const { return num_blocks_ == 0 || total_size_ == 0; }
 
         inline const HostArr<int>& Sizes() const { return sizes_; }
-        inline const HostArr<int>& Offsets() const { return offsets_; }
         inline HostArr<int>& Sizes() { return sizes_; }
+        inline const HostArr<int>& Offsets() const { return offsets_; }
         inline HostArr<int>& Offsets() { return offsets_; }
 
         inline const HostArr<T>& Data() const { return data_; }
@@ -92,12 +112,9 @@ namespace dyno
         inline T* Begin() { return data_.Begin(); }
 
         inline int BlockOffset(int block_id) const { return offsets_[block_id]; }
-        inline int BlockLength(int block_id) const { return sizes_[block_id]; }
-
+        inline int BlockSize(int block_id) const { return sizes_[block_id]; }
         inline const T* BlockPtr(int block_id) const { return data_.Begin() + offsets_[block_id]; }
         inline T* BlockPtr(int block_id) { return data_.Begin() + offsets_[block_id]; }
-        inline const T* BlockBegin(int block_id) const { return BlockPtr(block_id); }
-        inline T* BlockBegin(int block_id) { return BlockPtr(block_id); }
 
         bool IsValid() const
         {
@@ -105,31 +122,6 @@ namespace dyno
             if (sizes_.Size() != num_blocks_) return false;
             if (offsets_.Size() != num_blocks_) return false;
             if (data_.Size() != total_size_) return false;
-            return true;
-        }
-
-        void Assign(const DevBlockArray<T>& src)
-        {
-            num_blocks_ = src.NumBlocks();
-            total_size_ = src.TotalSize();
-
-            if (num_blocks_ == 0 || total_size_ == 0)
-            {
-                Clear();
-                return;
-            }
-
-            sizes_.Assign(src.Sizes());
-            offsets_.Assign(src.Offsets());
-            data_.Assign(src.Data());
-        }
-        bool Assign(const HostBlockArray<T>& src)
-        {
-            num_blocks_ = src.num_blocks_;
-            total_size_ = src.total_size_;
-            sizes_.Assign(src.sizes_);
-            offsets_.Assign(src.offsets_);
-            data_.Assign(src.data_);
             return true;
         }
 
@@ -142,11 +134,11 @@ namespace dyno
     };
 
     template<typename T>
-    class DevBlockArray
+    class DevBlockVector
     {
     public:
-        DevBlockArray() = default;
-        ~DevBlockArray() = default;
+        DevBlockVector() = default;
+        ~DevBlockVector() = default;
 
         void Clear()
         {
@@ -157,20 +149,18 @@ namespace dyno
             total_size_ = 0;
         }
 
-        // Input is per-block span length directly (defined by caller).
         bool BuildFromSizes(const std::vector<int>& sizes)
         {
-            HostBlockArray<T> host_desc;
-            if (!host_desc.BuildFromSizes(sizes)) return false;
-            return Upload(host_desc.Sizes(), host_desc.Offsets(), host_desc.NumBlocks(), host_desc.TotalSize());
+            HostBlockVector<T> h;
+            if (!h.BuildFromSizes(sizes)) return false;
+            return Upload(h.Sizes(), h.Offsets(), h.NumBlocks(), h.TotalSize());
         }
 
-        // Input is per-block span length directly (defined by caller).
         bool BuildFromSizes(const HostArr<int>& sizes)
         {
-            HostBlockArray<T> host_desc;
-            if (!host_desc.BuildFromSizes(sizes)) return false;
-            return Upload(host_desc.Sizes(), host_desc.Offsets(), host_desc.NumBlocks(), host_desc.TotalSize());
+            HostBlockVector<T> h;
+            if (!h.BuildFromSizes(sizes)) return false;
+            return Upload(h.Sizes(), h.Offsets(), h.NumBlocks(), h.TotalSize());
         }
 
         bool Upload(const HostArr<int>& sizes, const HostArr<int>& offsets, int num_blocks, int total_size)
@@ -181,7 +171,6 @@ namespace dyno
             Clear();
             num_blocks_ = num_blocks;
             total_size_ = total_size;
-
             sizes_.Assign(sizes);
             offsets_.Assign(offsets);
             data_.Resize(total_size_);
@@ -196,13 +185,29 @@ namespace dyno
             return true;
         }
 
+        bool Assign(const HostBlockVector<T>& src)
+        {
+            return Upload(src.Sizes(), src.Offsets(), src.NumBlocks(), src.TotalSize()) && Assign(src.Data());
+        }
+
+        bool Assign(const DevBlockVector<T>& src)
+        {
+            Clear();
+            num_blocks_ = src.num_blocks_;
+            total_size_ = src.total_size_;
+            sizes_.Assign(src.sizes_);
+            offsets_.Assign(src.offsets_);
+            data_.Assign(src.data_);
+            return true;
+        }
+
         bool Download(HostArr<T>& host_data) const
         {
             host_data.Assign(data_);
             return true;
         }
 
-        bool Download(HostBlockArray<T>& host_data) const
+        bool Download(HostBlockVector<T>& host_data) const
         {
             host_data.Assign(*this);
             return true;
@@ -213,8 +218,8 @@ namespace dyno
         inline bool Empty() const { return num_blocks_ == 0 || total_size_ == 0; }
 
         inline const DevArr<int>& Sizes() const { return sizes_; }
-        inline const DevArr<int>& Offsets() const { return offsets_; }
         inline DevArr<int>& Sizes() { return sizes_; }
+        inline const DevArr<int>& Offsets() const { return offsets_; }
         inline DevArr<int>& Offsets() { return offsets_; }
 
         inline const DevArr<T>& Data() const { return data_; }
@@ -224,7 +229,7 @@ namespace dyno
         inline T* Begin() { return data_.Begin(); }
 
         inline int BlockOffset(int block_id) const { return offsets_.Begin()[block_id]; }
-        inline int BlockLength(int block_id) const { return sizes_.Begin()[block_id]; }
+        inline int BlockSize(int block_id) const { return sizes_.Begin()[block_id]; }
 
         SIM_GPU_FUNC inline const T* BlockPtr(int block_id) const
         {
@@ -236,28 +241,13 @@ namespace dyno
             return data_.Begin() + offsets_.Begin()[block_id];
         }
 
-        SIM_GPU_FUNC inline int BlockSize(int block_id) const
-        {
-            return sizes_.Begin()[block_id];
-        }
-        SIM_GPU_FUNC inline const T* BlockBegin(int block_id) const { return BlockPtr(block_id); }
-        SIM_GPU_FUNC inline T* BlockBegin(int block_id) { return BlockPtr(block_id); }
-        SIM_GPU_FUNC inline T& AtBlockArray(int block_id, int row, int col, int stride)
-        {
-            const int base = offsets_.Begin()[block_id];
-            return data_.Begin()[base + row * stride + col];
-        }
-        SIM_GPU_FUNC inline const T& AtBlockArray(int block_id, int row, int col, int stride) const
-        {
-            const int base = offsets_.Begin()[block_id];
-            return data_.Begin()[base + row * stride + col];
-        }
-        SIM_GPU_FUNC inline T& AtBlockArray(int block_id, int index)
+        SIM_GPU_FUNC inline T& AtBlock(int block_id, int index)
         {
             const int base = offsets_.Begin()[block_id];
             return data_.Begin()[base + index];
         }
-        SIM_GPU_FUNC inline const T& AtBlockArray(int block_id, int index) const
+
+        SIM_GPU_FUNC inline const T& AtBlock(int block_id, int index) const
         {
             const int base = offsets_.Begin()[block_id];
             return data_.Begin()[base + index];
@@ -272,22 +262,6 @@ namespace dyno
             return true;
         }
 
-        bool Assign(const DevBlockArray<T>& src)
-        {
-            Clear();
-            num_blocks_ = src.num_blocks_;
-            total_size_ = src.total_size_;
-            sizes_.Assign(src.sizes_);
-            offsets_.Assign(src.offsets_);
-            data_.Assign(src.data_);
-            return true;
-        }
-
-        bool Assign(const HostBlockArray<T>& src)
-        {
-            return Upload(src.Sizes(), src.Offsets(), src.NumBlocks(), src.TotalSize()) && Assign(src.Data());
-        }
-
     private:
         DevArr<T> data_;
         DevArr<int> sizes_;
@@ -296,8 +270,8 @@ namespace dyno
         int total_size_ = 0;
     };
 
-#ifdef SIM_BLOCKARRAY_LOCAL_GPU_FUNC
+#ifdef SIM_BLOCKVECTOR_LOCAL_GPU_FUNC
 #undef SIM_GPU_FUNC
-#undef SIM_BLOCKARRAY_LOCAL_GPU_FUNC
+#undef SIM_BLOCKVECTOR_LOCAL_GPU_FUNC
 #endif
 }

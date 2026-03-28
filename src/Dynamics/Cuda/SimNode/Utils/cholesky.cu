@@ -1,6 +1,7 @@
+#include "SimNode/Utils/SimBlockVector.h"
 #include "utils.h"
 #include "cholesky.h"
-#include "SimBlockArray.h"
+#include "SimBlockMatrix.h"
 #include <cstddef>
 #include <cstdio>
 #include <vector>
@@ -1759,36 +1760,31 @@ namespace dyno
 
     template<typename T>
     bool BatchedCholeskySolver<T>::Factorize(
-        DevBlockArray<T>& A_blocks,
-        const int* block_sizes,
+        DevBlockMatrix<T>& A_blocks,
         CholeskyMethod method,
         int uniform_block_size,
         bool use_graph)
     {
-        // Note:
-        // block_sizes stores matrix dimension n (NOT n*n).
-        // A_blocks stores flattened per-block data.
+
+        // validate square blocks on host: rows == cols and both > 0
+        // HostArr<int> h_rows;
+        // HostArr<int> h_cols;
+        // h_rows.Assign(A_blocks.Rows());
+        // h_cols.Assign(A_blocks.Cols());
+        // for (int b = 0; b < A_blocks.NumBlocks(); ++b)
+        // {
+        //     if (h_rows[b] <= 0 || h_cols[b] <= 0 || h_rows[b] != h_cols[b])
+        //     {
+        //         std::printf("[BatchedCholeskySolver::Factorize] A_blocks contains non-square block(s)\n");
+        //         return false;
+        //     }
+        // }
+
         return Factorize(
-            A_blocks.Begin(),
-            block_sizes,
+            A_blocks.Data().Begin(),
+            A_blocks.Rows().Begin(),
             A_blocks.Offsets().Begin(),
             A_blocks.NumBlocks(),
-            method,
-            uniform_block_size,
-            use_graph);
-    }
-
-    template<typename T>
-    bool BatchedCholeskySolver<T>::Factorize(
-        DevBlockArray<T>& A_blocks,
-        const DevArr<int>& block_sizes,
-        CholeskyMethod method,
-        int uniform_block_size,
-        bool use_graph)
-    {
-        return Factorize(
-            A_blocks,
-            block_sizes.Begin(),
             method,
             uniform_block_size,
             use_graph);
@@ -1950,6 +1946,25 @@ namespace dyno
             std::printf("[BatchedCholeskySolver::Solve] unknown method=%d\n", static_cast<int>(method));
             return false;
         }
+    }
+
+    template<typename T>
+    bool BatchedCholeskySolver<T>::Solve(
+        DevBlockMatrix<T>& L_blocks,
+        DevBlockVector<T>& x_blocks,
+        CholeskyMethod method,
+        int uniform_block_size)
+    {
+
+        return Solve(
+            L_blocks.Data().Begin(),
+            x_blocks.Data().Begin(),
+            L_blocks.Rows().Begin(),
+            L_blocks.Offsets().Begin(),
+            x_blocks.Offsets().Begin(),
+            L_blocks.NumBlocks(),
+            method,
+            uniform_block_size);
     }
 
     template class dyno::BatchedCholeskySolver<float>;

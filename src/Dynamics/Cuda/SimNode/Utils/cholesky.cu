@@ -498,7 +498,6 @@ namespace dyno
         {
             return;
         }
-        int A_stride = block_size; // 因为是row-major，所以每行的步长就是列数
         int tile_stride = NTILES; // tile在shared memory中是紧凑存储的，所以tile_stride等于NTILES
 
         T* A_block = A + env_id * block_size * block_size;
@@ -509,28 +508,19 @@ namespace dyno
         T* sC = sB + NTILES * NTILES; // 存A_kj Tile
         T* sD = sC + NTILES * NTILES; // 存A_ij Tile
 
-        if(block_size % NTILES != 0)
-        {
-            // 忽略没有padding的情况
-            return;
-        }
-
-        int tile_dim = block_size / NTILES;
+        int tile_dim = (block_size + NTILES - 1) / NTILES;
 
         for(int k = 0; k < tile_dim; k++)
         {
-            T* A_kk = tile<NTILES>(A_block, A_stride, k, k);
-
-            // Step 1: Load A_kk tile into shared memory sA
-            LoadTile<NTILES, NTHREADS, T>(A_kk, sA, A_stride, tile_stride);
+            // Step 1: Load A_kk tile into shared memory sA (with padding on boundary tiles)
+            LoadTilePadded<NTILES, NTHREADS, T>(A_block, sA, block_size, k, k, tile_stride, true);
 
             // Step 2: Subtract previous contributions from sA
             // A_kk = A_kk - sum_{j=0}^{k-1} L_kj * L_kj^T
             for(int j = 0; j < k; j++)
             {
-                T* L_kj = tile<NTILES>(A_block, A_stride, k, j);
                 // 加载非对角块L_kj到sB
-                LoadTile<NTILES, NTHREADS, T>(L_kj, sB, A_stride, tile_stride, false);
+                LoadTilePadded<NTILES, NTHREADS, T>(A_block, sB, block_size, k, j, tile_stride, false);
                 // 计算A_kk - L_kj * L_kj^T
                 SyrkSubLower<NTILES, NTHREADS>(sA, sB, tile_stride);
             }
@@ -538,22 +528,19 @@ namespace dyno
             // Step 3: Cholesky factorization on the tile sA, result stored back in sA
             PotrfTileLowerInplace<NTILES, NTHREADS>(sA, tile_stride);
 
-            // Step 4: Store the result from sA back to A_kk
-            StoreTile<NTILES, NTHREADS, T>(sA, A_kk, A_stride, tile_stride);
+            // Step 4: Store the result from sA back to A_kk (bounded by real block_size)
+            StoreTileBounded<NTILES, NTHREADS, T>(sA, A_block, block_size, k, k, tile_stride, true);
 
             // Step 5: Update the tiles below the diagonal in column k: A_ik = A_ik - L_ij * L_kj^T for i > k
             for(int i = k + 1; i < tile_dim; i++)
             {
-                T* A_ik = tile<NTILES>(A_block, A_stride, i, k);
-                // 加载A_ik到sB
-                LoadTile<NTILES, NTHREADS, T>(A_ik, sB, A_stride, tile_stride, false);
+                // 加载A_ik到sB（边界tile自动补零）
+                LoadTilePadded<NTILES, NTHREADS, T>(A_block, sB, block_size, i, k, tile_stride, false);
                 for(int j = 0; j < k; j++)
                 {
-                    T* L_ij = tile<NTILES>(A_block, A_stride, i, j);
-                    T* L_kj = tile<NTILES>(A_block, A_stride, k, j);
                     // 加载L_ij到sC，加载L_kj到sD
-                    LoadTile<NTILES, NTHREADS, T>(L_ij, sC, A_stride, tile_stride, false);
-                    LoadTile<NTILES, NTHREADS, T>(L_kj, sD, A_stride, tile_stride, false);
+                    LoadTilePadded<NTILES, NTHREADS, T>(A_block, sC, block_size, i, j, tile_stride, false);
+                    LoadTilePadded<NTILES, NTHREADS, T>(A_block, sD, block_size, k, j, tile_stride, false);
                     // 计算A_ik = A_ik - L_ij * L_kj^T
                     GemmNTSub<NTILES, NTHREADS, T>(sB, sC, sD, tile_stride);
                 }
@@ -561,8 +548,8 @@ namespace dyno
                 // Step 6: Solve L_ik * L_kk^T = A_ik for L_ik, where L_kk is the Cholesky factor we just computed in sA
                 TrsmRightLowerTranspose<NTILES, NTHREADS, T>(sA, sB, tile_stride);
 
-                // Step 7: Store the result back to A_ik
-                StoreTile<NTILES, NTHREADS, T>(sB, A_ik, A_stride, tile_stride, false); 
+                // Step 7: Store the result back to A_ik (bounded by real block_size)
+                StoreTileBounded<NTILES, NTHREADS, T>(sB, A_block, block_size, i, k, tile_stride, false); 
             }
         }
     }
@@ -639,7 +626,6 @@ namespace dyno
         {
             return;
         }
-        int L_stride = block_size; // 因为是row-major，所以每行的步长就是列数
         int tile_stride = NTILES; // tile在shared memory中是紧凑存储的，所以tile_stride等于NTILES
 
         T* L_block = L + env_id * block_size * block_size;
@@ -652,32 +638,22 @@ namespace dyno
         T* sC = sB + NTILES; // 存L_ij Tile
         T* sD = sC + NTILES * NTILES; // 存y_j Tile
 
-        if(block_size % NTILES != 0)
-        {
-            // 忽略没有padding的情况
-            return;
-        }
-
-        int tile_dim = block_size / NTILES;
+        int tile_dim = (block_size + NTILES - 1) / NTILES;
         for(int i = 0; i < tile_dim; i++)
         {
             // Step 1: Load L_ii tile into shared memory sA
-            T* L_ii = tile<NTILES>(L_block, L_stride, i, i);
-            LoadTile<NTILES, NTHREADS, T>(L_ii, sA, L_stride, tile_stride);
+            LoadTilePadded<NTILES, NTHREADS, T>(L_block, sA, block_size, i, i, tile_stride, true);
 
             // Step 2: Load y_i into sB
-            T* y_i = x_block + i * NTILES; // y_i在global memory中的起始地址
-            LoadVecTile<NTILES, NTHREADS, T>(y_i, sB);
+            LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sB, block_size, i);
 
             // Step 3: Subtract previous contributions from sB
             // b_i -= sum_{j=0}^{i-1} L_ij * y_j
             for(int j = 0; j < i; j++)
             {
                 // Load L_ij into sC, Load y_j into sD
-                T* L_ij = tile<NTILES>(L_block, L_stride, i, j);
-                T* y_j = x_block + j * NTILES;
-                LoadTile<NTILES, NTHREADS, T>(L_ij, sC, L_stride, tile_stride, false);
-                LoadVecTile<NTILES, NTHREADS, T>(y_j, sD);
+                LoadTilePadded<NTILES, NTHREADS, T>(L_block, sC, block_size, i, j, tile_stride, false);
+                LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sD, block_size, j);
                 // 计算b_i -= L_ij * y_j
                 GemvSubLowerNTile<NTILES, NTHREADS, T>(sB, sC, sD, tile_stride);
             }
@@ -685,8 +661,8 @@ namespace dyno
             // Step 4: Solve L_ii * y_i = b for y_i
             TrsvLowerTileInplace<NTILES, NTHREADS, T>(sA, sB, tile_stride);
 
-            // Step 5: Store the result back to y_i
-            StoreVecTile<NTILES, NTHREADS, T>(sB, y_i);
+            // Step 5: Store the result back to y_i (bounded by real block_size)
+            StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, i);
         }
     }
 
@@ -698,7 +674,6 @@ namespace dyno
         {
             return;
         }
-        int L_stride = block_size; // 因为是row-major，所以每行的步长就是列数
         int tile_stride = NTILES; // tile在shared memory中是紧凑存储的，所以tile_stride等于NTILES
 
         T* L_block = L + env_id * block_size * block_size;
@@ -710,32 +685,22 @@ namespace dyno
         T* sC = sB + NTILES; // 存L_ji Tile, 按transpose使用
         T* sD = sC + NTILES * NTILES; // 存x_j Tile
 
-        if(block_size % NTILES != 0)
-        {
-            // 忽略没有padding的情况
-            return;
-        }
-
-        int tile_dim = block_size / NTILES;
+        int tile_dim = (block_size + NTILES - 1) / NTILES;
         for(int i = tile_dim - 1; i >= 0; i--)
         {
             // Step 1: Load L_ii tile into shared memory sA（后续按转置方法使用）
-            T* L_ii = tile<NTILES>(L_block, L_stride, i, i);
-            LoadTile<NTILES, NTHREADS, T>(L_ii, sA, L_stride, tile_stride);
+            LoadTilePadded<NTILES, NTHREADS, T>(L_block, sA, block_size, i, i, tile_stride, true);
 
             // Step 2: Load x_i into sB
-            T* x_i = x_block + i * NTILES;
-            LoadVecTile<NTILES, NTHREADS, T>(x_i, sB);
+            LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sB, block_size, i);
 
             // Step 3: Subtract previous contributions from sB
             // b_i -= sum_{j=i+1}^{n-1} L_ji^T * x_j
             for(int j = i + 1; j < tile_dim; j++)
             {
                 // Load L_ji into sC（后续按转置方法使用）, Load y_j into sD
-                T* L_ji = tile<NTILES>(L_block, L_stride, j, i);
-                T* x_j = x_block + j * NTILES;
-                LoadTile<NTILES, NTHREADS, T>(L_ji, sC, L_stride, tile_stride, false);
-                LoadVecTile<NTILES, NTHREADS, T>(x_j, sD);
+                LoadTilePadded<NTILES, NTHREADS, T>(L_block, sC, block_size, j, i, tile_stride, false);
+                LoadVecTilePadded<NTILES, NTHREADS, T>(x_block, sD, block_size, j);
                 // 计算b_i -= L_ji^T * x_j
                 GemvSubLowerTTile<NTILES, NTHREADS, T>(sB, sC, sD, tile_stride);
             }
@@ -743,8 +708,8 @@ namespace dyno
             // Step 4: Solve L_ii^T * x_i = b for x_i
             TrsvUpperTileInplace<NTILES, NTHREADS, T>(sA, sB, tile_stride);
 
-            // Step 5: Store the result back to x_i
-            StoreVecTile<NTILES, NTHREADS, T>(sB, x_i);
+            // Step 5: Store the result back to x_i (bounded by real block_size)
+            StoreVecTileBounded<NTILES, NTHREADS, T>(sB, x_block, block_size, i);
         }
     }
 
@@ -1264,6 +1229,29 @@ namespace dyno
             <<<num_blocks, NTHREADS, smem_bytes>>>(
                 L, block_sizes, block_offsets, num_blocks)));
     }
+
+    // template<typename T>
+    // void CholeskyFactorizeWavefrontTiledHost(
+    //     const T* A,
+    //     T* L,
+    //     const int* block_sizes,
+    //     const int* block_offsets,
+    //     int num_blocks)
+    // {
+    //     constexpr int NTILES = 32;
+    //     constexpr int NTHREADS = 128;
+
+    //     if (A != L)
+    //     {
+    //         std::printf("[CholeskyFactorizeHost] PaddedTiled requires A == L (in-place)\n");
+    //         return;
+    //     }
+
+    //     size_t smem_bytes = 4 * NTILES * NTILES * sizeof(T);
+    //     cuSafeCall((CholeskyFactorizeVariableBlockTile<NTILES, NTHREADS, T>
+    //         <<<num_blocks, NTHREADS, smem_bytes>>>(
+    //             L, block_sizes, block_offsets, num_blocks)));
+    // }
 
     template<typename T>
     void CholeskySolveSimplestHost(

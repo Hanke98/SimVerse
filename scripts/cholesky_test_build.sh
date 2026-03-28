@@ -30,6 +30,7 @@ cmake -B "$build_dir" -S . -G "Ninja Multi-Config" \
   -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized" \
   -DCMAKE_PREFIX_PATH="${PERIDYNO_CMAKE_PREFIX_PATH:-}" \
   -DPERIDYNO_TESTS=ON \
+  -DPERIDYNO_EXAMPLE=OFF \
   -DPERIDYNO_LIBRARY_FRAMEWORK=ON \
   -DPERIDYNO_LIBRARY_SIMNODE=ON
 

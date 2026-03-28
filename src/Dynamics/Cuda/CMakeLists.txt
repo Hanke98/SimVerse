@@ -63,6 +63,11 @@ if(PERIDYNO_LIBRARY_SIMNODE)
             $<INSTALL_INTERFACE:${PERIDYNO_INC_INSTALL_DIR}/external/spdlog/include>
             $<BUILD_INTERFACE:${PERIDYNO_ROOT}/external/rapidobj/include>
             $<INSTALL_INTERFACE:${PERIDYNO_INC_INSTALL_DIR}/external/rapidobj/include>)
-        target_link_libraries(SimNode PRIVATE spdlog::spdlog_header_only rapidobj::rapidobj)
+        target_link_libraries(SimNode 
+            PRIVATE 
+            spdlog::spdlog_header_only 
+            rapidobj::rapidobj
+            cublas
+            cusolver)
     endif()
 endif()

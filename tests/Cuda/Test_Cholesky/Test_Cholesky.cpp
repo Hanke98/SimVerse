@@ -179,7 +179,7 @@ TEST(CholeskyDispatch, SingleTiled)
 
 TEST(CholeskyDispatch, UniformTiled)
 {
-    const DispatchResult r = RunDispatchCase(CholeskyMethod::UniformTiled, {128, 128, 128, 128}, true);
+    const DispatchResult r = RunDispatchCase(CholeskyMethod::UniformTiled, {192, 192, 192, 192}, true);
     EXPECT_LT(r.max_rel_lower_err, 1e-8);
     EXPECT_LT(r.max_rel_x_err, 1e-8);
 }
@@ -192,4 +192,3 @@ TEST(CholeskyDispatch, PaddedTiled)
 }
 
 } // namespace dyno
-

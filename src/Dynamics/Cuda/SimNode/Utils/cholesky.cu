@@ -1,6 +1,7 @@
 #include "utils.h"
 #include "cholesky.h"
 #include <cstdio>
+#include <vector>
 
 
 namespace dyno
@@ -872,13 +873,14 @@ namespace dyno
         
         // sA的大小为MAX_N * MAX_N
         // block_size <= MAX_N，保证了每个block的矩阵都能放入shared memory中
-        extern __shared__ T sA[];
+        extern __shared__ unsigned char smem_single_factor_raw[];
+        T* smem_single_factor = reinterpret_cast<T*>(smem_single_factor_raw);
         // Load block diagonal environment matrix into shared memory
         for (int idx = threadIdx.x; idx < block_size * block_size; idx += NTHREADS) 
         {
             int r = idx / block_size;
             int c = idx % block_size;
-            sA[r * block_size + c] = A[block_offset + r * block_size + c];
+            smem_single_factor[r * block_size + c] = A[block_offset + r * block_size + c];
         }
         __syncthreads();
         for(int j = 0; j < block_size; j++)
@@ -887,26 +889,26 @@ namespace dyno
             if(thread_id == 0)
             {
                 // L_jj = sqrt(A_jj - sum_j_{j<i}(L_ji^2))
-                T sum = sA[j + j * block_size];
+                T sum = smem_single_factor[j + j * block_size];
                 for (int i = 0; i < j; ++i) 
                 {
-                    T v = sA[j * block_size + i];
+                    T v = smem_single_factor[j * block_size + i];
                     sum -= v * v;
                 }
-                sA[j + j * block_size] = sqrt(sum);
+                smem_single_factor[j + j * block_size] = sqrt(sum);
             }
             __syncthreads();
-            T L_ii = sA[j * block_size + j];
+            T L_ii = smem_single_factor[j * block_size + j];
             // threads 1...i compute the off-diagonal elements L_ij for j < i
             // L_ij = (A_ij - sum_k_{k < j}(L_ik * L_jk)) / L_jj
             for (int i = j + 1 + thread_id; i < block_size; i += NTHREADS)
             {
-                T sum = sA[i * block_size + j];
+                T sum = smem_single_factor[i * block_size + j];
                 for (int k = 0; k < j; ++k) 
                 {
-                    sum -= sA[i * block_size + k] * sA[j * block_size + k];
+                    sum -= smem_single_factor[i * block_size + k] * smem_single_factor[j * block_size + k];
                 }
-                sA[i * block_size + j] = sum / L_ii;
+                smem_single_factor[i * block_size + j] = sum / L_ii;
             }
             __syncthreads();
         }
@@ -918,7 +920,7 @@ namespace dyno
 
             if (r >= c) 
             {
-                L[block_offset + r * block_size + c] = sA[r * block_size + c];
+                L[block_offset + r * block_size + c] = smem_single_factor[r * block_size + c];
             } 
             else 
             {
@@ -1342,22 +1344,6 @@ namespace dyno
 
     template<typename T>
     void BatchBlockCholeskyFactorizeHost(
-        const DArray<T> A,
-        DArray<T> L,
-        DArray<int> block_sizes,
-        DArray<int> block_offsets,
-        int num_blocks)
-    {
-        BatchBlockCholeskyFactorize(
-            A.begin(),
-            L.begin(),
-            block_sizes.begin(),
-            block_offsets.begin(),
-            num_blocks);
-    }
-
-    template<typename T>
-    void BatchBlockCholeskyFactorizeHost(
         const T* A,
         T* L,
         const int* block_sizes,
@@ -1409,24 +1395,6 @@ namespace dyno
 
     template<typename T>
     void BatchBlockCholeskySolveHost(
-        const DArray<T> L,
-        DArray<T> x,
-        DArray<int> block_sizes,
-        DArray<int> block_offsets,
-        DArray<int> x_offsets,
-        int num_blocks)
-    {
-        BatchBlockCholeskySolve(
-            L.begin(),
-            x.begin(),
-            block_sizes.begin(),
-            block_offsets.begin(),
-            x_offsets.begin(),
-            num_blocks);
-    }
-
-    template<typename T>
-    void BatchBlockCholeskySolveHost(
         const T* L,
         T* x,
         const int* block_sizes,
@@ -1441,6 +1409,278 @@ namespace dyno
             block_offsets,
             x_offsets,
             num_blocks);
+    }
+
+    template<typename T>
+    void CholeskyFactorizeHost(
+        const T* A,
+        T* L,
+        const int* block_sizes,
+        const int* block_offsets,
+        int num_blocks,
+        CholeskyMethod method)
+    {
+        if (num_blocks <= 0)
+            return;
+
+        bool check_validity = false; // for debug, check validity of block sizes and offsets for each method
+        
+        // for tiled methods
+        constexpr int NTILES = 32; // tile size of 32x32
+        constexpr int NTHREADS = 128; // number of threads per block
+        
+        switch (method)
+        {
+        case CholeskyMethod::Simplest:
+            BatchCholeskyFactorizeHost(A, L, block_sizes, block_offsets, num_blocks);
+            return;
+
+        case CholeskyMethod::SingleTiled:
+        {
+            constexpr int MAX_N = 96;
+            constexpr int NTHREADS = 128;
+            size_t smem_bytes = MAX_N * MAX_N * sizeof(T);
+            const int blocks = num_blocks;
+            if (check_validity)
+            {
+                std::vector<int> h_sizes(num_blocks);
+                CUDA_CHECK(cudaMemcpy(h_sizes.data(), block_sizes, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+                int max_size = 0;
+                for (int s : h_sizes) max_size = (s > max_size) ? s : max_size;
+                if (max_size > MAX_N)
+                {
+                    std::printf("[CholeskyFactorizeHost] SingleTiled requires block_size <= %d, got %d\n", MAX_N, max_size);
+                    return;
+                }
+            }
+            CUDA_CHECK(cudaFuncSetAttribute(
+                CholeskyFactorizeSingleTile<MAX_N, NTHREADS, T>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                static_cast<int>(smem_bytes)));
+
+            CUDA_LAUNCH_AND_CHECK((CholeskyFactorizeSingleTile<MAX_N, NTHREADS, T>
+                <<<blocks, NTHREADS, smem_bytes>>>(
+                    A, L, block_offsets, block_sizes, num_blocks)));
+            return;
+        }
+
+        case CholeskyMethod::UniformTiled:
+        {
+            int block_size;
+            cudaMemcpy(&block_size, block_sizes, sizeof(int), cudaMemcpyDeviceToHost);
+            if (check_validity)
+            {
+                std::vector<int> h_sizes(num_blocks);
+                std::vector<int> h_offsets(num_blocks);
+                CUDA_CHECK(cudaMemcpy(h_sizes.data(), block_sizes, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+                CUDA_CHECK(cudaMemcpy(h_offsets.data(), block_offsets, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+
+                const int block_size = h_sizes[0];
+                for (int b = 1; b < num_blocks; ++b)
+                {
+                    if (h_sizes[b] != block_size)
+                    {
+                        std::printf("[CholeskyFactorizeHost] UniformTiled requires all block_sizes equal\n");
+                        return;
+                    }
+                }
+                for (int b = 0; b < num_blocks; ++b)
+                {
+                    int expected = b * block_size * block_size;
+                    if (h_offsets[b] != expected)
+                    {
+                        std::printf("[CholeskyFactorizeHost] UniformTiled requires contiguous block_offsets\n");
+                        return;
+                    }
+                }
+                if (block_size % 32 != 0)
+                {
+                    std::printf("[CholeskyFactorizeHost] UniformTiled requires block_size multiple of 32\n");
+                    return;
+                }
+
+                if (A != L)
+                {
+                    size_t n = static_cast<size_t>(num_blocks) * block_size * block_size;
+                    CUDA_CHECK(cudaMemcpy(L, A, n * sizeof(T), cudaMemcpyDeviceToDevice));
+                }
+            }
+            size_t smem_bytes = 4 * NTILES * NTILES * sizeof(T); // shared memory size for 4 tiles
+
+        CUDA_LAUNCH_AND_CHECK((CholeskyFactorizeUniformBlockTile<NTILES, NTHREADS, T>
+            <<<num_blocks, NTHREADS, smem_bytes>>>(
+                L, block_size, num_blocks)));
+            return;
+        }
+
+        case CholeskyMethod::PaddedTiled:
+        {
+            size_t smem_bytes = 4 * NTILES * NTILES * sizeof(T);
+            CUDA_LAUNCH_AND_CHECK((CholeskyFactorizeVariableBlockTile<NTILES, NTHREADS, T>
+                <<<num_blocks, NTHREADS, smem_bytes>>>(
+                    A,
+                    L,
+                    block_sizes,
+                    block_offsets,
+                    num_blocks)));
+            return;
+        }
+        default:
+            std::printf("[CholeskyFactorizeHost] Unknown method = %d\n", static_cast<int>(method));
+            return;
+        }
+    }
+
+    template<typename T>
+    void CholeskySolveHost(
+        const T* L,
+        T* x,
+        const int* block_sizes,
+        const int* block_offsets,
+        const int* x_offsets,
+        int num_blocks,
+        CholeskyMethod method)
+    {
+        if (num_blocks <= 0)
+            return;
+        // check validity of block sizes and offsets for each method, for debug
+        bool check_validity = false;
+
+        // for tiled methods
+        constexpr int NTILES = 32; // tile size of 32x32
+        constexpr int NTHREADS = 128; // number of threads per block
+
+        switch (method)
+        {
+        case CholeskyMethod::Simplest:
+        {
+            const int threads = 128;
+            const int blocks = (num_blocks + threads - 1) / threads;
+            BatchCholeskySolve<T><<<blocks, threads>>>(L, x, block_sizes, block_offsets, x_offsets, num_blocks);
+            cudaDeviceSynchronize();
+            return;
+        }
+        
+        case CholeskyMethod::SingleTiled:
+        {
+            constexpr int MAX_N = 96;
+            constexpr int NTHREADS = 128;
+            size_t smem_bytes = MAX_N * MAX_N * sizeof(T) + MAX_N * sizeof(T);
+            const int blocks = num_blocks;
+
+            if(check_validity)
+            {
+                std::vector<int> h_sizes(num_blocks);
+                CUDA_CHECK(cudaMemcpy(h_sizes.data(), block_sizes, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+                int max_size = 0;
+                for (int s : h_sizes) max_size = (s > max_size) ? s : max_size;
+                if (max_size > MAX_N)
+                {
+                    std::printf("[CholeskySolveHost] SingleTiled requires block_size <= %d, got %d\n", MAX_N, max_size);
+                    return;
+                }
+            }
+
+            CUDA_CHECK(cudaFuncSetAttribute(
+                LowerSolveInplaceSingleTile<MAX_N, NTHREADS, T>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                static_cast<int>(smem_bytes)));
+
+            CUDA_LAUNCH_AND_CHECK((LowerSolveInplaceSingleTile<MAX_N, NTHREADS, T>
+                <<<blocks, NTHREADS, smem_bytes>>>(
+                    L, x, block_offsets, block_sizes, x_offsets, num_blocks)));
+
+            CUDA_CHECK(cudaFuncSetAttribute(
+                UpperSolveInplaceSingleTile<MAX_N, NTHREADS, T>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                static_cast<int>(smem_bytes)));
+
+            CUDA_LAUNCH_AND_CHECK((UpperSolveInplaceSingleTile<MAX_N, NTHREADS, T>
+                <<<blocks, NTHREADS, smem_bytes>>>(
+                    L, x, block_offsets, block_sizes, x_offsets, num_blocks)));
+            return;
+        }
+
+        case CholeskyMethod::UniformTiled:
+        {
+            int block_size;
+            cudaMemcpy(&block_size, block_sizes, sizeof(int), cudaMemcpyDeviceToHost);
+            if (check_validity)
+            {
+                std::vector<int> h_sizes(num_blocks);
+                std::vector<int> h_offsets(num_blocks);
+                std::vector<int> h_x_offsets(num_blocks);
+                CUDA_CHECK(cudaMemcpy(h_sizes.data(), block_sizes, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+                CUDA_CHECK(cudaMemcpy(h_offsets.data(), block_offsets, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+                CUDA_CHECK(cudaMemcpy(h_x_offsets.data(), x_offsets, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost));
+
+                for (int b = 1; b < num_blocks; ++b)
+                {
+                    if (h_sizes[b] != block_size)
+                    {
+                        std::printf("[CholeskySolveHost] UniformTiled requires all block_sizes equal\n");
+                        return;
+                    }
+                }
+                
+                for (int b = 0; b < num_blocks; ++b)
+                {
+                    int expected_mat = b * block_size * block_size;
+                    int expected_vec = b * block_size;
+                    if (h_offsets[b] != expected_mat || h_x_offsets[b] != expected_vec)
+                    {
+                        std::printf("[CholeskySolveHost] UniformTiled requires contiguous block_offsets/x_offsets\n");
+                        return;
+                    }
+                }
+                if (block_size % 32 != 0)
+                {
+                    std::printf("[CholeskySolveHost] UniformTiled requires block_size multiple of 32\n");
+                    return;
+                }
+            }
+            
+            size_t smem_bytes = 2 * (NTILES * NTILES  + NTILES) * sizeof(T); // shared memory size
+
+            CUDA_LAUNCH_AND_CHECK((LowerSolveUniformBlockTile<NTILES, NTHREADS, T>
+                <<<num_blocks, NTHREADS, smem_bytes>>>(
+                    const_cast<T*>(L), x, block_size, num_blocks)));
+            
+            CUDA_LAUNCH_AND_CHECK((UpperSolveUniformBlockTile<NTILES, NTHREADS, T>
+                <<<num_blocks, NTHREADS, smem_bytes>>>(
+                    const_cast<T*>(L), x, block_size, num_blocks)));
+            return;
+        }
+
+        case CholeskyMethod::PaddedTiled:
+        {
+            constexpr int NTILES = 32;
+            constexpr int NTHREADS = 128;
+            size_t smem_bytes = 2 * (NTILES * NTILES + NTILES) * sizeof(T);
+
+            CUDA_LAUNCH_AND_CHECK((LowerSolveVariableBlockTile<NTILES, NTHREADS, T>
+                <<<num_blocks, NTHREADS, smem_bytes>>>(
+                    L,
+                    x,
+                    block_sizes,
+                    block_offsets,
+                    x_offsets,
+                    num_blocks)));
+
+            CUDA_LAUNCH_AND_CHECK((UpperSolveVariableBlockTile<NTILES, NTHREADS, T>
+                <<<num_blocks, NTHREADS, smem_bytes>>>(
+                    L,
+                    x,
+                    block_sizes,
+                    block_offsets,
+                    x_offsets,
+                    num_blocks)));
+            return;
+        } 
+        default:
+            std::printf("[CholeskySolveHost] Unknown method = %d\n", static_cast<int>(method));
+            return;
+        }
     }
 
 
@@ -1494,26 +1734,26 @@ namespace dyno
         const double*, double*, const int*, const int*, const int*, int);
 
     template void dyno::BatchBlockCholeskyFactorizeHost<float>(
-        const dyno::DArray<float>, dyno::DArray<float>, dyno::DArray<int>, dyno::DArray<int>, int);
-
-    template void dyno::BatchBlockCholeskyFactorizeHost<double>(
-        const dyno::DArray<double>, dyno::DArray<double>, dyno::DArray<int>, dyno::DArray<int>, int);
-
-    template void dyno::BatchBlockCholeskyFactorizeHost<float>(
         const float*, float*, const int*, const int*, int);
 
     template void dyno::BatchBlockCholeskyFactorizeHost<double>(
         const double*, double*, const int*, const int*, int);
 
     template void dyno::BatchBlockCholeskySolveHost<float>(
-        const dyno::DArray<float>, dyno::DArray<float>, dyno::DArray<int>, dyno::DArray<int>, dyno::DArray<int>, int);
-
-    template void dyno::BatchBlockCholeskySolveHost<double>(
-        const dyno::DArray<double>, dyno::DArray<double>, dyno::DArray<int>, dyno::DArray<int>, dyno::DArray<int>, int);
-
-    template void dyno::BatchBlockCholeskySolveHost<float>(
         const float*, float*, const int*, const int*, const int*, int);
 
     template void dyno::BatchBlockCholeskySolveHost<double>(
         const double*, double*, const int*, const int*, const int*, int);
+
+    template void dyno::CholeskyFactorizeHost<float>(
+        const float*, float*, const int*, const int*, int, dyno::CholeskyMethod);
+
+    template void dyno::CholeskyFactorizeHost<double>(
+        const double*, double*, const int*, const int*, int, dyno::CholeskyMethod);
+
+    template void dyno::CholeskySolveHost<float>(
+        const float*, float*, const int*, const int*, const int*, int, dyno::CholeskyMethod);
+
+    template void dyno::CholeskySolveHost<double>(
+        const double*, double*, const int*, const int*, const int*, int, dyno::CholeskyMethod);
 } // namespace dyno

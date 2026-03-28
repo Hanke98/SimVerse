@@ -119,14 +119,6 @@ namespace dyno
         __syncthreads();
     }
 
-    // 更新A_ij
-    // 每次调用计算A_ik(sB) = A_ik(sB) - L_ij(sC) * L_kj^T(sD) 其中的4行(4个warp分别负责1行)
-    template<unsigned NTILES, unsigned NTHREADS, class T>
-    __device__ void PanelGemmNTSub(T* sB, const T* sC, const T* sD, int tile_stride)
-    {
-
-    }
-
     // solve L_ik * L_kk^T = A_ik for L_ik
     // sA存L_kk，sB存A_ik，结果写回sB
     template<unsigned NTILES, unsigned NTHREADS, class T>

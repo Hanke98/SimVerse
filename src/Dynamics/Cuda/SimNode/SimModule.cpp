@@ -1,4 +1,6 @@
 #include "SimModule.h"
+#include "Utils/cholesky.h"
+
 
 namespace dyno
 {
@@ -8,8 +10,7 @@ namespace dyno
     SimModule<TDataType>::SimModule() : ComputeModule()
     {
         spdlog::info("SimModule constructor called.");
-
-        
+        TestII();
     }
 
     template<typename TDataType>

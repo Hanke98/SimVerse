@@ -55,10 +55,15 @@ tmp
 
 *.so
 
-/examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/*.bmp
-/examples/Cuda/RigidBody/NMQ_test/screenSave/
-/examples/Cuda/RigidBody/RobotArm_Collision/screenSave/
-
-/.github/*
+examples/Cuda/RigidBody/RobotArm_Impulse/screenSave/*.bmp
+save_picture
+save_picture_256envs
+save_picture_ctlFreq1
+save_picture_torque
 
 .clangd
+/screenshots/*
+
+examples/Cuda/SimNode/SimNodeInit/screen_record
+.github
+examples/Cuda/SimNode/SimNodeInit/screen_record

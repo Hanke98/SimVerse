@@ -3,6 +3,7 @@
 #include "SimArray.h"
 
 #include <vector>
+#include <iostream>
 
 namespace dyno
 {
@@ -261,6 +262,58 @@ namespace dyno
             return true;
         }
 
+        bool Assign(const std::vector<T>& host_data, const std::vector<int>& rows, const std::vector<int>& cols,
+            const std::vector<int>& offsets)
+        {
+            data_.Assign(host_data);
+            rows_.Assign(rows);
+            cols_.Assign(cols);
+            offsets_.Assign(offsets);
+            num_blocks_ = static_cast<int>(rows.size());
+            total_size_ = static_cast<int>(host_data.size());
+            return true;
+        }
+
+        bool Assign(const std::vector<std::vector<T>>& block_data, const std::vector<std::pair<int, int>>& block_dims)
+        {
+            if(block_data.size() != block_dims.size())
+            {
+                std::cout << "Block data size " << block_data.size() << " does not match block dims size " << block_dims.size() << std::endl;
+                return false;
+            }
+
+            std::vector<T> all_data;
+            std::vector<int> rows(block_data.size());
+            std::vector<int> cols(block_data.size());
+            std::vector<int> offsets(block_data.size());
+            int total_size = 0;
+
+            for(int i = 0; i < block_data.size(); i++)
+            {
+                const auto& data = block_data[i];
+                const auto& dim = block_dims[i];
+                if(dim.first <= 0 || dim.second <= 0)
+                {
+                    std::cout << "Block " << i << " has invalid dims " << dim.first << "x" << dim.second << std::endl;
+                    return false;
+                }
+
+                if(data.size() != dim.first * dim.second)
+                {
+                    std::cout << "Block " << i << " data size " << data.size() << " does not match block dims " << dim.first << "x" << dim.second << std::endl;
+                    return false;
+                }
+
+                all_data.insert(all_data.end(), data.begin(), data.end());
+                rows[i] = dim.first;
+                cols[i] = dim.second;
+                offsets[i] = total_size;
+                total_size += data.size();
+            }
+
+            return Assign(all_data, rows, cols, offsets);
+        }
+
         bool Download(HostArr<T>& host_data) const
         {
             host_data.Assign(data_);
@@ -327,6 +380,16 @@ namespace dyno
             if (offsets_.Size() != num_blocks_) return false;
             if (data_.Size() != total_size_) return false;
             return true;
+        }
+
+        T* operator[](int block_id)
+        {
+            return data_.Begin() + offsets_[block_id];
+        }
+
+        T& operator()(int bid, int row, int col)
+        {
+            return AtBlock(bid, row, col);
         }
 
     private:

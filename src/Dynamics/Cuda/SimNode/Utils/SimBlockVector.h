@@ -3,6 +3,7 @@
 #include "SimArray.h"
 
 #include <vector>
+#include <iostream>
 
 namespace dyno
 {
@@ -201,6 +202,42 @@ namespace dyno
             return true;
         }
 
+        bool Assign(const std::vector<T>& host_data, const std::vector<int>& sizes)
+        {
+            if(sizes.size() == 0)
+            {
+                std::cout << "Sizes vector is empty." << std::endl;
+                return false;
+            }
+            if(host_data.size() == 0)
+            {
+                std::cout << "Data vector is empty." << std::endl;
+                return false;
+            }
+
+            std::vector<int> offsets(sizes.size());
+            int total = 0;
+            for (size_t b = 0; b < sizes.size(); ++b)
+            {
+                offsets[b] = total;
+                total += sizes[b];
+            }    
+
+            if(total != host_data.size())
+            {
+                std::cout << "Total size calculated from sizes " << total << " does not match host data size " << host_data.size() << std::endl;
+                return false;
+            }
+            
+            data_.Assign(host_data);
+            sizes_.Assign(sizes);
+            offsets_.Assign(offsets);
+            num_blocks_ = static_cast<int>(sizes.size());
+            total_size_ = total;
+
+            return true;
+        }
+
         bool Download(HostArr<T>& host_data) const
         {
             host_data.Assign(data_);
@@ -260,6 +297,28 @@ namespace dyno
             if (offsets_.Size() != num_blocks_) return false;
             if (data_.Size() != total_size_) return false;
             return true;
+        }
+
+        SIM_GPU_FUNC inline T* operator[](int block_id)
+        {
+            return data_.Begin() + offsets_.Begin()[block_id];
+        }
+
+        SIM_GPU_FUNC inline const T* operator[](int block_id) const
+        {
+            return data_.Begin() + offsets_.Begin()[block_id];
+        }
+
+        SIM_GPU_FUNC inline T& operator()(int block_id, int index)
+        {
+            const int base = offsets_.Begin()[block_id];
+            return data_.Begin()[base + index];
+        }
+
+        SIM_GPU_FUNC inline const T& operator()(int block_id, int index) const
+        {
+            const int base = offsets_.Begin()[block_id];
+            return data_.Begin()[base + index];
         }
 
     private:

@@ -3,7 +3,9 @@
 #include "Collision/CollisionData.h"
 
 #include "../PhysicalField.h"
-#include "../../Utils/Constraints.h"
+#include "Utils/Constraints.h"
+#include "Utils/SimBlockMatrix.h"
+#include "Utils/SimBlockVector.h"
 #include "../Rendering/GUI/WtGUI/NodeEditor/json.hpp"
 #include <spdlog/spdlog.h>
 

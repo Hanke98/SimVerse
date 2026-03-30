@@ -382,12 +382,12 @@ namespace dyno
             return true;
         }
 
-        T* operator[](int block_id)
+        SIM_GPU_FUNC T* operator[](int block_id)
         {
             return data_.Begin() + offsets_[block_id];
         }
 
-        T& operator()(int bid, int row, int col)
+        SIM_GPU_FUNC T& operator()(int bid, int row, int col)
         {
             return AtBlock(bid, row, col);
         }

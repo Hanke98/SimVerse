@@ -89,8 +89,40 @@ namespace dyno
         explicit DevArr(int num) { Resize(num); }
         ~DevArr() { Clear(); }
 
-        DevArr(const DevArr&) = delete;
-        DevArr& operator=(const DevArr&) = delete;
+        DevArr(const DevArr& other)
+        {
+            if (other.mSize <= 0 || other.mData == nullptr)
+            {
+                return;
+            }
+
+            mSize = other.mSize;
+            mCapacity = other.mCapacity;
+            SIM_CUDA_CALL(cudaMalloc(&mData, mCapacity * sizeof(T)));
+            SIM_CUDA_CALL(cudaMemcpy(mData, other.mData, mSize * sizeof(T), cudaMemcpyDeviceToDevice));
+        }
+
+        DevArr& operator=(const DevArr& other)
+        {
+            if (this == &other) return *this;
+
+            if (other.mSize <= 0 || other.mData == nullptr)
+            {
+                Clear();
+                return *this;
+            }
+
+            if (mData == nullptr || mCapacity < other.mSize || other.mSize <= mCapacity / 2)
+            {
+                Clear();
+                mCapacity = other.mCapacity;
+                SIM_CUDA_CALL(cudaMalloc(&mData, mCapacity * sizeof(T)));
+            }
+
+            mSize = other.mSize;
+            SIM_CUDA_CALL(cudaMemcpy(mData, other.mData, mSize * sizeof(T), cudaMemcpyDeviceToDevice));
+            return *this;
+        }
 
         DevArr(DevArr&& other) noexcept
         {

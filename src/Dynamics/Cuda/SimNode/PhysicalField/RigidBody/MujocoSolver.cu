@@ -2461,7 +2461,6 @@ namespace dyno
         }
     }
 
-        
 }
 
 
@@ -2605,8 +2604,6 @@ namespace dyno
         cudaDeviceSynchronize();
         CalculateSubtreeMassKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
-
-        // TODO: init constraint data
 
         spdlog::info("[MujocoSolver Solver] Initialization complete. Number of environments: {}", env_infos->num_envs);
 

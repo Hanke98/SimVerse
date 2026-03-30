@@ -59,6 +59,8 @@ if(PERIDYNO_LIBRARY_SIMNODE)
     build_library(SimNode LIB_DEPENDENCY)
     if(TARGET SimNode)
         target_include_directories(SimNode PUBLIC
+            $<BUILD_INTERFACE:${PERIDYNO_ROOT}/src/Dynamics/Cuda/SimNode>
+            $<INSTALL_INTERFACE:${PERIDYNO_INC_INSTALL_DIR}/src/Dynamics/Cuda/SimNode>
             $<BUILD_INTERFACE:${PERIDYNO_ROOT}/external/spdlog/include>
             $<INSTALL_INTERFACE:${PERIDYNO_INC_INSTALL_DIR}/external/spdlog/include>
             $<BUILD_INTERFACE:${PERIDYNO_ROOT}/external/rapidobj/include>

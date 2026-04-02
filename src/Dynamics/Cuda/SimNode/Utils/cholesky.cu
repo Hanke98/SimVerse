@@ -4,6 +4,7 @@
 #include "SimBlockMatrix.h"
 #include <cstddef>
 #include <cstdio>
+#include <iterator>
 #include <vector>
 
 
@@ -494,13 +495,21 @@ namespace dyno
     // __launch_bounds__指定了每个block的最大线程数为NTHREADS，便于编译器优化
     // 这是一个每个block对应的size是uniform的版本，也就是A矩阵的每个diagonal的block是一个block_size * block_size的矩阵
     template<unsigned NTILES, unsigned NTHREADS, class T>
-    __global__  __launch_bounds__(NTHREADS) void CholeskyFactorizeUniformBlockTile(T* A, int block_size, int num_blocks)
+    __global__  __launch_bounds__(NTHREADS) void CholeskyFactorizeUniformBlockTile(
+        T* A, 
+        int* is_converged,
+        int block_size, 
+        int num_blocks)
     {
         int env_id = blockIdx.x;
         if (env_id >= num_blocks) 
         {
             return;
         }
+
+        if (is_converged[env_id])
+            return;
+
         int tile_stride = NTILES; // tile在shared memory中是紧凑存储的，所以tile_stride等于NTILES
 
         T* A_block = A + env_id * block_size * block_size;
@@ -561,6 +570,7 @@ namespace dyno
     template<unsigned NTILES, unsigned NTHREADS, class T>
     __global__ __launch_bounds__(NTHREADS) void CholeskyFactorizeVariableBlockTile(
         T* A,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         int num_blocks)
@@ -568,7 +578,8 @@ namespace dyno
         int env_id = blockIdx.x;
         if (env_id >= num_blocks)
             return;
-
+        if (is_converged[env_id])
+            return;
         const int block_size = block_sizes[env_id];
         if (block_size <= 0)
             return;
@@ -621,10 +632,17 @@ namespace dyno
     }
 
     template<unsigned NTILES, unsigned NTHREADS, class T>
-    __global__  __launch_bounds__(NTHREADS) void DiagPotrf(T* A, int block_size, int num_blocks, int k_tile)
+    __global__  __launch_bounds__(NTHREADS) void DiagPotrf(
+        T* A, 
+        int* is_converged,
+        int block_size, 
+        int num_blocks, 
+        int k_tile)
     {
         int env_id = blockIdx.x;
         if (env_id >= num_blocks)
+            return;
+        if (is_converged[env_id])
             return;
 
         T* A_block = A + env_id * block_size * block_size;
@@ -655,12 +673,17 @@ namespace dyno
 
 
     template<unsigned NTILES, unsigned NTHREADS, class T>
-    __global__  __launch_bounds__(NTHREADS) void PanelTrsm(T* A, int block_size, int num_blocks, int k_tile)
+    __global__  __launch_bounds__(NTHREADS) void PanelTrsm(
+        T* A, 
+        int* is_converged,
+        int block_size, 
+        int num_blocks, 
+        int k_tile)
     {
         int env_id = blockIdx.x;
         int i_tile = k_tile + 1 + blockIdx.y;
         int num_tiles = (block_size + NTILES - 1) / NTILES;
-        if (env_id >= num_blocks || i_tile >= num_tiles)
+        if (env_id >= num_blocks || i_tile >= num_tiles || is_converged[env_id])
             return;
 
         T* A_block = A + env_id * block_size * block_size;
@@ -681,13 +704,18 @@ namespace dyno
 
     
     template<unsigned NTILES, unsigned NTHREADS, class T>
-    __global__ __launch_bounds__(NTHREADS) void PanelTrailGemm(T* A, int block_size, int num_blocks, int k_tile)
+    __global__ __launch_bounds__(NTHREADS) void PanelTrailGemm(
+        T* A, 
+        int* is_converged,
+        int block_size, 
+        int num_blocks, 
+        int k_tile)
     {
         int env_id   = blockIdx.x;
         int i_tile   = k_tile + 1 + blockIdx.y;
         int j_tile   = k_tile + 1 + blockIdx.z;
         int num_tiles = (block_size + NTILES - 1) / NTILES;
-        if (env_id >= num_blocks || i_tile >= num_tiles || j_tile >= num_tiles) 
+        if (env_id >= num_blocks || is_converged[env_id] || i_tile >= num_tiles || j_tile >= num_tiles) 
             return;
         if (i_tile < j_tile) 
             return; // 只算下三角
@@ -722,10 +750,15 @@ namespace dyno
 
     // 与上面的cholesky分解配套的Lower和Upper solve函数
     template<unsigned NTILES, unsigned NTHREADS, class T>
-    __global__  __launch_bounds__(NTHREADS) void LowerSolveUniformBlockTile(const T* L, T* x, int block_size, int num_blocks)
+    __global__  __launch_bounds__(NTHREADS) void LowerSolveUniformBlockTile(
+        const T* L, 
+        T* x, 
+        int* is_converged,
+        int block_size, 
+        int num_blocks)
     {
         int env_id = blockIdx.x;
-        if (env_id >= num_blocks) 
+        if (env_id >= num_blocks || is_converged[env_id]) 
         {
             return;
         }
@@ -770,10 +803,15 @@ namespace dyno
     }
 
     template<unsigned NTILES, unsigned NTHREADS, class T>
-    __global__  __launch_bounds__(NTHREADS) void UpperSolveUniformBlockTile(const T* L, T* x, int block_size, int num_blocks)
+    __global__  __launch_bounds__(NTHREADS) void UpperSolveUniformBlockTile(
+        const T* L, 
+        T* x, 
+        int* is_converged,
+        int block_size, 
+        int num_blocks)
     {
         int env_id = blockIdx.x;
-        if (env_id >= num_blocks) 
+        if (env_id >= num_blocks || is_converged[env_id]) 
         {
             return;
         }
@@ -820,6 +858,7 @@ namespace dyno
     __global__ __launch_bounds__(NTHREADS) void LowerSolveVariableBlockTile(
         const T* L,
         T* x,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         const int* x_offsets,
@@ -828,7 +867,8 @@ namespace dyno
         int env_id = blockIdx.x;
         if (env_id >= num_blocks)
             return;
-
+        if (is_converged[env_id])
+            return;
         const int block_size = block_sizes[env_id];
         if (block_size <= 0)
             return;
@@ -868,6 +908,7 @@ namespace dyno
     __global__ __launch_bounds__(NTHREADS) void UpperSolveVariableBlockTile(
         const T* L,
         T* x,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         const int* x_offsets,
@@ -876,7 +917,8 @@ namespace dyno
         int env_id = blockIdx.x;
         if (env_id >= num_blocks)
             return;
-
+        if (is_converged[env_id])
+            return;
         const int block_size = block_sizes[env_id];
         if (block_size <= 0)
             return;
@@ -916,6 +958,7 @@ namespace dyno
     __global__ __launch_bounds__(NTHREADS) void LowerDiagSolve(
         const T* L,
         T* x,
+        int* is_converged,
         int block_size,
         int num_blocks,
         int k_tile)
@@ -923,7 +966,7 @@ namespace dyno
         int env_id = blockIdx.x;
 
         const int num_tiles = (block_size + NTILES - 1) / NTILES;
-        if (env_id >= num_blocks || k_tile >= num_tiles || block_size <= 0)
+        if (env_id >= num_blocks || is_converged[env_id] || k_tile >= num_tiles || block_size <= 0)
             return;
 
         const int tile_stride = NTILES;
@@ -945,6 +988,7 @@ namespace dyno
     __global__ __launch_bounds__(NTHREADS) void LowerUpdatePanel(
         const T* L,
         T* x,
+        int* is_converged,
         int block_size,
         int num_blocks,
         int k_tile)
@@ -953,7 +997,7 @@ namespace dyno
         int i_tile = blockIdx.y + k_tile + 1;
 
         const int num_tiles = (block_size + NTILES - 1) / NTILES;
-        if (env_id >= num_blocks || i_tile >= num_tiles || block_size <= 0)
+        if (env_id >= num_blocks || is_converged[env_id] || i_tile >= num_tiles || block_size <= 0)
             return;
         const int tile_stride = NTILES;
 
@@ -976,6 +1020,7 @@ namespace dyno
     __global__ __launch_bounds__(NTHREADS) void UpperDiagSolve(
         const T* L,
         T* x,
+        int* is_converged,
         int block_size,
         int num_blocks,
         int k_tile)
@@ -983,7 +1028,7 @@ namespace dyno
         int env_id = blockIdx.x;
 
         const int num_tiles = (block_size + NTILES - 1) / NTILES;
-        if (env_id >= num_blocks || k_tile >= num_tiles || block_size <= 0)
+        if (env_id >= num_blocks || is_converged[env_id] || k_tile >= num_tiles || block_size <= 0)
             return;
 
         const int tile_stride = NTILES;
@@ -1005,6 +1050,7 @@ namespace dyno
     __global__ __launch_bounds__(NTHREADS) void UpperUpdatePanel(
         const T* L,
         T* x,
+        int* is_converged,
         int block_size,
         int num_blocks,
         int k_tile)
@@ -1013,7 +1059,7 @@ namespace dyno
         int i_tile = k_tile - blockIdx.y - 1;
 
         const int num_tiles = (block_size + NTILES - 1) / NTILES;
-        if (env_id >= num_blocks || i_tile < 0 || block_size <= 0)
+        if (env_id >= num_blocks || is_converged[env_id] || i_tile < 0 || block_size <= 0)
             return;
         const int tile_stride = NTILES;
 
@@ -1037,13 +1083,23 @@ namespace dyno
     // 在矩阵A的每个env对应block的size比较小的时候，不必再分成很多个tile来处理
     // 直接调用单矩阵Cholesky分解的kernel来处理每个block
     template<unsigned MAX_N, int NTHREADS, class T>
-    __global__ void CholeskyFactorizeSingleTile(const T* A, T* L, const int* block_offsets, const int* block_sizes, int num_blocks)
+    __global__ void CholeskyFactorizeSingleTile(
+        const T* A, 
+        T* L, 
+        int* is_converged, 
+        const int* block_offsets, 
+        const int* block_sizes, 
+        int num_blocks)
     {
         int env_id = blockIdx.x;
         if (env_id >= num_blocks) 
         {
             return;
         }
+
+        if (is_converged[env_id])
+            return;
+
         int block_size = block_sizes[env_id];
         if (block_size > MAX_N) 
         {
@@ -1112,10 +1168,17 @@ namespace dyno
 
 
     template<unsigned MAX_N, int NTHREADS, class T>
-    __global__ void LowerSolveInplaceSingleTile(const T* L, T* x, const int* block_offsets, const int* block_sizes, const int* x_offsets,int num_blocks)
+    __global__ void LowerSolveInplaceSingleTile(
+        const T* L, 
+        T* x, 
+        int* is_converged,
+        const int* block_offsets, 
+        const int* block_sizes, 
+        const int* x_offsets,
+        int num_blocks)
     {
         int env_id = blockIdx.x;
-        if (env_id >= num_blocks) 
+        if (env_id >= num_blocks || is_converged[env_id]) 
         {
             return;
         }
@@ -1169,10 +1232,17 @@ namespace dyno
 
 
     template<unsigned MAX_N, int NTHREADS, class T>
-    __global__ void UpperSolveInplaceSingleTile(const T* L, T* x, const int* block_offsets, const int* block_sizes, const int* x_offsets,int num_blocks)
+    __global__ void UpperSolveInplaceSingleTile(
+        const T* L, 
+        T* x, 
+        int* is_converged,
+        const int* block_offsets, 
+        const int* block_sizes, 
+        const int* x_offsets,
+        int num_blocks)
     {
         int env_id = blockIdx.x;
-        if (env_id >= num_blocks) 
+        if (env_id >= num_blocks || is_converged[env_id]) 
         {
             return;
         }
@@ -1280,12 +1350,13 @@ namespace dyno
     template<typename T>
     __global__ void BatchCholeskyFactorize(
         const T* A, T* L, 
+        int* is_converged,
         const int* block_sizes, 
         const int* block_offsets, 
         int num_blocks)
     {
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
-        if (tid >= num_blocks)
+        if (tid >= num_blocks || is_converged[tid])
             return;
         int block_size = block_sizes[tid];
         int offset = block_offsets[tid];
@@ -1295,13 +1366,14 @@ namespace dyno
     template<typename T>
     __global__ void BatchCholeskySolve(
         const T* L, T* x, 
+        int* is_converged,
         const int* block_sizes, 
         const int* block_offsets,
         const int* x_offsets, 
         int num_blocks)
     {
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
-        if (tid >= num_blocks)
+        if (tid >= num_blocks || is_converged[tid])
             return;
         int block_size = block_sizes[tid];
         int L_offset = block_offsets[tid];
@@ -1314,18 +1386,20 @@ namespace dyno
     template<typename T>
     void CholeskyFactorizeSimplestHost(
         T* A,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         int num_blocks)
     {
         const int threads = 128;
         const int blocks = (num_blocks + threads - 1) / threads;
-        cuSafeCall((BatchCholeskyFactorize<T><<<blocks, threads>>>(A, A, block_sizes, block_offsets, num_blocks)));
+        cuSafeCall((BatchCholeskyFactorize<T><<<blocks, threads>>>(A, A, is_converged, block_sizes, block_offsets, num_blocks)));
     }
 
     template<typename T>
     void CholeskyFactorizeSingleTiledHost(
         T* A,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         int num_blocks)
@@ -1370,12 +1444,13 @@ namespace dyno
 
         cuSafeCall((CholeskyFactorizeSingleTile<MAX_N, NTHREADS, T>
             <<<blocks, NTHREADS, smem_bytes>>>(
-                A, A, block_offsets, block_sizes, num_blocks)));
+                A, A, is_converged, block_offsets, block_sizes, num_blocks)));
     }
 
     template<typename T>
     void CholeskyFactorizeUniformTiledHost(
         T* A,
+        int* is_converged,
         int block_size,
         int num_blocks)
     {
@@ -1385,12 +1460,13 @@ namespace dyno
         size_t smem_bytes = 4 * NTILES * NTILES * sizeof(T);
         cuSafeCall((CholeskyFactorizeUniformBlockTile<NTILES, NTHREADS, T>
             <<<num_blocks, NTHREADS, smem_bytes>>>(
-                A, block_size, num_blocks)));
+                A, is_converged, block_size, num_blocks)));
     }
 
     template<typename T>
     void CholeskyFactorizePaddedTiledHost(
         T* A,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         int num_blocks)
@@ -1401,12 +1477,13 @@ namespace dyno
         size_t smem_bytes = 4 * NTILES * NTILES * sizeof(T);
         cuSafeCall((CholeskyFactorizeVariableBlockTile<NTILES, NTHREADS, T>
             <<<num_blocks, NTHREADS, smem_bytes>>>(
-                A, block_sizes, block_offsets, num_blocks)));
+                A, is_converged, block_sizes, block_offsets, num_blocks)));
     }
 
     template<typename T>
     void CholeskyFactorizeWavefrontTiledHost(
         T* A,
+        int* is_converged,
         int block_size,
         int num_blocks,
         cudaStream_t stream)
@@ -1433,6 +1510,7 @@ namespace dyno
             DiagPotrf<NTILES, NTHREADS, T>
             <<<num_blocks, NTHREADS, smem_diag, stream>>>(
                 A,          // in-place matrix buffer
+                is_converged,   // whether env is converged
                 block_size, // 单个矩阵维度
                 num_blocks,
                 k); 
@@ -1446,6 +1524,7 @@ namespace dyno
                 PanelTrsm<NTILES, NTHREADS, T>
                     <<<grid_panel, NTHREADS, smem_panel, stream>>>(
                         A,
+                        is_converged,
                         block_size,
                         num_blocks,
                         k);
@@ -1458,7 +1537,7 @@ namespace dyno
 
                 PanelTrailGemm<NTILES, NTHREADS, T>
                     <<<grid, NTHREADS, smem_trail, stream>>>(
-                        A, block_size, num_blocks, k);
+                        A, is_converged, block_size, num_blocks, k);
             }
         }
 
@@ -1470,6 +1549,7 @@ namespace dyno
     void CholeskySolveSimplestHost(
         const T* L,
         T* x,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         const int* x_offsets,
@@ -1477,13 +1557,15 @@ namespace dyno
     {
         const int threads = 128;
         const int blocks = (num_blocks + threads - 1) / threads;
-        cuSafeCall((BatchCholeskySolve<T><<<blocks, threads>>>(L, x, block_sizes, block_offsets, x_offsets, num_blocks)));
+        cuSafeCall((BatchCholeskySolve<T><<<blocks, threads>>>
+            (L, x, is_converged, block_sizes, block_offsets, x_offsets, num_blocks)));
     }
 
     template<typename T>
     void CholeskySolveSingleTiledHost(
         const T* L,
         T* x,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         const int* x_offsets,
@@ -1516,7 +1598,7 @@ namespace dyno
 
         cuSafeCall((LowerSolveInplaceSingleTile<MAX_N, NTHREADS, T>
             <<<blocks, NTHREADS, smem_bytes>>>(
-                L, x, block_offsets, block_sizes, x_offsets, num_blocks)));
+                L, x, is_converged, block_offsets, block_sizes, x_offsets, num_blocks)));
 
         cuSafeCall(cudaFuncSetAttribute(
             UpperSolveInplaceSingleTile<MAX_N, NTHREADS, T>,
@@ -1525,13 +1607,14 @@ namespace dyno
 
         cuSafeCall((UpperSolveInplaceSingleTile<MAX_N, NTHREADS, T>
             <<<blocks, NTHREADS, smem_bytes>>>(
-                L, x, block_offsets, block_sizes, x_offsets, num_blocks)));
+                L, x, is_converged, block_offsets, block_sizes, x_offsets, num_blocks)));
     }
 
     template<typename T>
     void CholeskySolveUniformTiledHost(
         const T* L,
         T* x,
+        int* is_converged,
         const int block_size,
         int num_blocks)
     {
@@ -1541,17 +1624,18 @@ namespace dyno
         size_t smem_bytes = 2 * (NTILES * NTILES + NTILES) * sizeof(T);
         cuSafeCall((LowerSolveUniformBlockTile<NTILES, NTHREADS, T>
             <<<num_blocks, NTHREADS, smem_bytes>>>(
-                L, x, block_size, num_blocks)));
+                L, x, is_converged, block_size, num_blocks)));
 
         cuSafeCall((UpperSolveUniformBlockTile<NTILES, NTHREADS, T>
             <<<num_blocks, NTHREADS, smem_bytes>>>(
-                L, x, block_size, num_blocks)));
+                L, x, is_converged, block_size, num_blocks)));
     }
 
     template<typename T>
     void CholeskySolvePaddedTiledHost(
         const T* L,
         T* x,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         const int* x_offsets,
@@ -1563,17 +1647,18 @@ namespace dyno
 
         cuSafeCall((LowerSolveVariableBlockTile<NTILES, NTHREADS, T>
             <<<num_blocks, NTHREADS, smem_bytes>>>(
-                L, x, block_sizes, block_offsets, x_offsets, num_blocks)));
+                L, x, is_converged, block_sizes, block_offsets, x_offsets, num_blocks)));
 
         cuSafeCall((UpperSolveVariableBlockTile<NTILES, NTHREADS, T>
             <<<num_blocks, NTHREADS, smem_bytes>>>(
-                L, x, block_sizes, block_offsets, x_offsets, num_blocks)));
+                L, x, is_converged, block_sizes, block_offsets, x_offsets, num_blocks)));
     }
 
     template<typename T>
     void CholeskySolveWavefrontTiledHost(
         const T* L,
         T* x,
+        int* is_converged,
         const int block_size,
         int num_blocks,
         cudaStream_t stream)
@@ -1594,7 +1679,7 @@ namespace dyno
             // Solve y_k with L_kk y_k = b_k
             LowerDiagSolve<NTILES, NTHREADS, T>
                 <<<num_blocks, NTHREADS, smem_diag, stream>>>
-                (L, x, block_size, num_blocks, k);
+                (L, x, is_converged, block_size, num_blocks, k);
 
             // Update b_i
             // right-looking更新的是未来的b_i(i > k)
@@ -1604,7 +1689,7 @@ namespace dyno
                 dim3 grid_panel(num_blocks, panel_tiles, 1);
                 LowerUpdatePanel<NTILES, NTHREADS, T>
                     <<<grid_panel, NTHREADS, smem_panel, stream>>>(
-                        L, x, block_size, num_blocks, k);
+                        L, x, is_converged, block_size, num_blocks, k);
             }
 
         }
@@ -1615,7 +1700,7 @@ namespace dyno
             // Solve y_k with L_kk y_k = b_k
             UpperDiagSolve<NTILES, NTHREADS, T>
                 <<<num_blocks, NTHREADS, smem_diag, stream>>>
-                (L, x, block_size, num_blocks, k);
+                (L, x, is_converged, block_size, num_blocks, k);
 
             // Update b_i
             // right-looking更新的是未来的b_i(i > k)
@@ -1625,7 +1710,7 @@ namespace dyno
                 dim3 grid_panel(num_blocks, panel_tiles, 1);
                 UpperUpdatePanel<NTILES, NTHREADS, T>
                     <<<grid_panel, NTHREADS, smem_panel, stream>>>(
-                        L, x, block_size, num_blocks, k);
+                        L, x, is_converged, block_size, num_blocks, k);
             }
         }
 
@@ -1674,6 +1759,7 @@ namespace dyno
     template<typename T>
     bool BatchedCholeskySolver<T>::Factorize(
         T* A,
+        int* is_converged,
         const int* block_sizes,
         const int* block_offsets,
         int num_blocks,
@@ -1701,7 +1787,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] invalid input offset/size pointers\n");
                 return false;
             }
-            CholeskyFactorizeSimplestHost(A, block_sizes, block_offsets, num_blocks);
+            CholeskyFactorizeSimplestHost(A, is_converged, block_sizes, block_offsets, num_blocks);
             return true;
 
         case CholeskyMethod::SingleTiled:
@@ -1710,7 +1796,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] invalid input offset/size pointers\n");
                 return false;
             }
-            CholeskyFactorizeSingleTiledHost(A, block_sizes, block_offsets, num_blocks);
+            CholeskyFactorizeSingleTiledHost(A, is_converged, block_sizes, block_offsets, num_blocks);
             return true;
 
         case CholeskyMethod::UniformTiled:
@@ -1719,7 +1805,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Factorize] UniformTiled requires uniform_block_size > 0\n");
                 return false;
             }
-            CholeskyFactorizeUniformTiledHost(A, uniform_block_size, num_blocks);
+            CholeskyFactorizeUniformTiledHost(A, is_converged, uniform_block_size, num_blocks);
             return true;
 
         case CholeskyMethod::PaddedTiled:
@@ -1728,7 +1814,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] invalid input offset/size pointers\n");
                 return false;
             }
-            CholeskyFactorizePaddedTiledHost(A, block_sizes, block_offsets, num_blocks);
+            CholeskyFactorizePaddedTiledHost(A, is_converged, block_sizes, block_offsets, num_blocks);
             return true;
 
         case CholeskyMethod::WavefrontTiled:
@@ -1739,9 +1825,9 @@ namespace dyno
             }
             // CholeskyFactorizeWavefrontTiledHost(A, uniform_block_size, num_blocks, stream_);
             if (use_graph)
-                FactorizeWavefrontWithGraph(A, uniform_block_size, num_blocks);
+                FactorizeWavefrontWithGraph(A, is_converged, uniform_block_size, num_blocks);
             else
-                CholeskyFactorizeWavefrontTiledHost(A, uniform_block_size, num_blocks, stream_);
+                CholeskyFactorizeWavefrontTiledHost(A, is_converged, uniform_block_size, num_blocks, stream_);
             return true;
 
         default:
@@ -1753,6 +1839,7 @@ namespace dyno
     template<typename T>
     bool BatchedCholeskySolver<T>::Factorize(
         DevBlockMatrix<T>& A_blocks,
+        DArray<int> is_converged,
         CholeskyMethod method,
         int uniform_block_size,
         bool use_graph)
@@ -1774,6 +1861,7 @@ namespace dyno
 
         return Factorize(
             A_blocks.Data().Begin(),
+            is_converged.begin(),
             A_blocks.Rows().Begin(),
             A_blocks.Offsets().Begin(),
             A_blocks.NumBlocks(),
@@ -1785,6 +1873,7 @@ namespace dyno
     template<typename T>
     bool BatchedCholeskySolver<T>::FactorizeWavefrontWithGraph(
 		T* A, 
+        int* is_converged,
 		const int block_size, 
 		int num_blocks)
     {
@@ -1802,7 +1891,8 @@ namespace dyno
         factorize_graph_cache_.A_ptr != A ||
         factorize_graph_cache_.block_size != block_size ||
         factorize_graph_cache_.num_blocks != num_blocks ||
-        factorize_graph_cache_.stream != stream_;
+        factorize_graph_cache_.stream != stream_ ||
+        factorize_graph_cache_.is_converged != is_converged;
 
         if (need_rebuild)
         {
@@ -1823,6 +1913,7 @@ namespace dyno
                 DiagPotrf<NTILES, NTHREADS, T>
                 <<<num_blocks, NTHREADS, smem_diag, stream_>>>(
                     A,          // in-place matrix buffer
+                    is_converged, // env是否已经收敛
                     block_size, // 单个矩阵维度
                     num_blocks,
                     k); 
@@ -1836,6 +1927,7 @@ namespace dyno
                     PanelTrsm<NTILES, NTHREADS, T>
                         <<<grid_panel, NTHREADS, smem_panel, stream_>>>(
                             A,
+                            is_converged,
                             block_size,
                             num_blocks,
                             k);
@@ -1848,7 +1940,11 @@ namespace dyno
 
                     PanelTrailGemm<NTILES, NTHREADS, T>
                         <<<grid, NTHREADS, smem_trail, stream_>>>(
-                            A, block_size, num_blocks, k);
+                            A, 
+                            is_converged, 
+                            block_size, 
+                            num_blocks, 
+                            k);
                 }
             }
 
@@ -1869,6 +1965,7 @@ namespace dyno
     bool BatchedCholeskySolver<T>::Solve(
         const T* L,
 		T* x,
+        int* is_converged,
 		const int* block_sizes,
 		const int* block_offsets,
 		const int* x_offsets,
@@ -1895,7 +1992,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] invalid input offset/size pointers\n");
                 return false;
             }
-            CholeskySolveSimplestHost(L, x, block_sizes, block_offsets, x_offsets, num_blocks);
+            CholeskySolveSimplestHost(L, x, is_converged, block_sizes, block_offsets, x_offsets, num_blocks);
             return true;
 
         case CholeskyMethod::SingleTiled:
@@ -1904,7 +2001,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] invalid input offset/size pointers\n");
                 return false;
             }
-            CholeskySolveSingleTiledHost(L, x, block_sizes, block_offsets, x_offsets, num_blocks);
+            CholeskySolveSingleTiledHost(L, x, is_converged, block_sizes, block_offsets, x_offsets, num_blocks);
             return true;
 
         case CholeskyMethod::UniformTiled:
@@ -1913,7 +2010,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] UniformTiled requires uniform_block_size > 0\n");
                 return false;
             }
-            CholeskySolveUniformTiledHost(L, x, uniform_block_size, num_blocks);
+            CholeskySolveUniformTiledHost(L, x, is_converged, uniform_block_size, num_blocks);
             return true;
 
         case CholeskyMethod::PaddedTiled:
@@ -1922,7 +2019,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] invalid input offset/size pointers\n");
                 return false;
             }
-            CholeskySolvePaddedTiledHost(L, x, block_sizes, block_offsets, x_offsets, num_blocks);
+            CholeskySolvePaddedTiledHost(L, x, is_converged, block_sizes, block_offsets, x_offsets, num_blocks);
             return true;
 
         case CholeskyMethod::WavefrontTiled:
@@ -1931,7 +2028,7 @@ namespace dyno
                 std::printf("[BatchedCholeskySolver::Solve] WavefrontTiled requires uniform_block_size > 0\n");
                 return false;
             }
-            CholeskySolveWavefrontTiledHost(L, x, uniform_block_size, num_blocks, stream_);
+            CholeskySolveWavefrontTiledHost(L, x, is_converged, uniform_block_size, num_blocks, stream_);
             return true;
 
         default:
@@ -1944,6 +2041,7 @@ namespace dyno
     bool BatchedCholeskySolver<T>::Solve(
         DevBlockMatrix<T>& L_blocks,
         DevBlockVector<T>& x_blocks,
+        DArray<int> is_converged,
         CholeskyMethod method,
         int uniform_block_size)
     {
@@ -1951,6 +2049,7 @@ namespace dyno
         return Solve(
             L_blocks.Data().Begin(),
             x_blocks.Data().Begin(),
+            is_converged.begin(),
             L_blocks.Rows().Begin(),
             L_blocks.Offsets().Begin(),
             x_blocks.Offsets().Begin(),

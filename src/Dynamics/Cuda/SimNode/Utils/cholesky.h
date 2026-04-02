@@ -17,6 +17,7 @@ namespace dyno
 
 		T* A_ptr = nullptr;
 		T* x_ptr = nullptr;
+		int* is_converged = nullptr;
 		int block_size = -1;
 		int num_blocks = -1;
 		cudaStream_t stream = nullptr;
@@ -67,6 +68,7 @@ namespace dyno
 		// In-place factorization: A -> L (stored in A)
 		bool Factorize(
 			T* A,
+			int* is_converged,
 			const int* block_sizes,
 			const int* block_offsets,
 			int num_blocks,
@@ -78,12 +80,14 @@ namespace dyno
         // infer block dimension n from rows/cols and require square blocks (rows == cols).
         bool Factorize(
             DevBlockMatrix<T>& A_blocks,
+			DArray<int> is_converged,
             CholeskyMethod method,
             int uniform_block_size = -1,
             bool use_graph = false);
 
 		bool FactorizeWavefrontWithGraph(
 			T* A, 
+			int* is_converged,
 			const int block_size, 
 			int num_blocks);
 
@@ -91,6 +95,7 @@ namespace dyno
 		bool Solve(
 			const T* L,
 			T* x,
+			int* is_converged,
 			const int* block_sizes,
 			const int* block_offsets,
 			const int* x_offsets,
@@ -101,6 +106,7 @@ namespace dyno
 		bool Solve(
             DevBlockMatrix<T>& L_blocks,
 			DevBlockVector<T>& x_blocks,
+			DArray<int> is_converged,
             CholeskyMethod method,
             int uniform_block_size = -1);
 

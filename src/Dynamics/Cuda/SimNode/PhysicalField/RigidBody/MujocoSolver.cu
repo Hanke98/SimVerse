@@ -2786,12 +2786,13 @@ namespace dyno
         // Solve qM * q_ex_acc = q_ex_force by Cholesky factorization instead of explicitly forming qM^{-1}.        
         rigid_body_system->batch_qM_L.Assign(rigid_body_system->batch_qM);
         auto& qM_L= rigid_body_system->batch_qM_L;
-        cholesky_solver->Factorize(qM_L.Begin(), rigid_body_system->batch_nv.begin(), 
+        cholesky_solver->Factorize(qM_L.Begin(), rigid_body_system->is_converged.begin(),rigid_body_system->batch_nv.begin(), 
             qM_L.Offsets().Begin(), env_infos->num_envs, CholeskyMethod::PaddedTiled);
             
         DevArr2D<Real> q_ex_force_bak;
         q_ex_force_bak.Assign(rigid_body_system->batch_q_ex_force);
         cholesky_solver->Solve(qM_L.Begin(), q_ex_force_bak.Begin(),
+            rigid_body_system->is_converged.begin(),
             rigid_body_system->batch_nv.begin(), qM_L.Offsets().Begin(), 
             rigid_body_system->batch_q_ex_acc.Offsets().Begin(),
             env_infos->num_envs, CholeskyMethod::PaddedTiled);
@@ -3537,12 +3538,13 @@ namespace dyno
         auto& H = rigid_body_system->batch_H;
         auto& grad = rigid_body_system->batch_grad_cpy;
         auto& x = rigid_body_system->batch_dx; // reuse qacc as solution
+        auto& is_converged = rigid_body_system->is_converged;
 
         grad.Assign(rigid_body_system->batch_grad);
-        cholesky_solver->Factorize(H.Begin(), rigid_body_system->batch_nv.begin(), 
+        cholesky_solver->Factorize(H.Begin(), is_converged.begin(), rigid_body_system->batch_nv.begin(), 
             H.Offsets().Begin(), env_infos->num_envs, CholeskyMethod::PaddedTiled);
             
-        cholesky_solver->Solve(H.Begin(), grad.Begin(),
+        cholesky_solver->Solve(H.Begin(), grad.Begin(), is_converged.begin(),
             rigid_body_system->batch_nv.begin(), H.Offsets().Begin(), 
             grad.Offsets().Begin(),
             env_infos->num_envs, CholeskyMethod::PaddedTiled);

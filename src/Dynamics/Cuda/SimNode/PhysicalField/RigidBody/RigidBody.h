@@ -13,6 +13,7 @@
 using json = nlohmann::json;
 
 namespace dyno {
+
     template<typename TDataType>
     struct RigidBody : public PhysicalFieldData<TDataType>
     {
@@ -26,6 +27,7 @@ namespace dyno {
         DArray<int>         batch_body_offset; // [env_id] flattened rigid body offset in topo position/rotation arrays
     
         DArray<int>         batch_nv;      // [env_id] num of generalized DoFs
+        DevArr2D<int>       batch_nv_offset;       // [env_id, body_id] num of generalized DoFs of each body
         DArray2D<int>       nv_offset;     // [env_id, body_idx] 
         
         
@@ -149,7 +151,13 @@ namespace dyno {
         DArray2D<int>           rigid_body_2_rendering_idx_mapping; // [env_id, body_id] -> idx of its pos in topo state
 
         // 一个env内的一个group的物体的local id是连续的
-        DevBlockVector<Pair<int, int>> groups;  // [envid, <body_begin, begin_count>]
+        DevArr2D<Pair<int, int>> batch_groups;  // [envid, <body_begin, begin_count>]
+
+        // Mapping info for flattening the batch of environments
+        DArray<int> flatten_group_to_env; // [flatten_group_id] -> env_id
+        DArray<int> flatten_body_to_env;  // [flatten_body_id] -> env_id
+        DArray<Pair<int, int>> flatten_q_to_env_body;    // [flatten_q_id] -> [env_id, body_id]
+
     public:
         void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num,
             int joint_limit_max, int connect_max, int fl_max);

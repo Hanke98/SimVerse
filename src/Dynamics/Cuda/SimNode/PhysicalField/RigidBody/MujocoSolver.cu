@@ -1,10 +1,13 @@
 #include "MujocoSolver.h"
 #include <spdlog/spdlog.h>
 #include <thrust/device_ptr.h>
+#include <thrust/reduce.h>
+#include <thrust/execution_policy.h> 
+
 #include "../../Utils/utils.h"
 #include "Algorithm.h"
 #include <Eigen/Dense>
-#include "kernel.cuh"
+// #include "kernel.cuh"
 
 #define NV_TMP 256
 
@@ -107,13 +110,16 @@ namespace dyno
         DevArr2D<int> is_isolated,
         DArray2D<int> joint_type_all,
         DArray<int>   batch_nv,
-        int num_envs, DArray<int> qpos_num)
+        int num_envs, 
+        DArray<int> qpos_num,
+        DArray<int> num_groups)
     {
         int env_id = blockIdx.x * blockDim.x + threadIdx.x;
         if(env_id >= num_envs)
             return;
 
         int env_self_bodies = batch_bodies[env_id];
+        int group_count = 0;
 
         printf("Env %d: num_bodies = %d\n", env_id, env_self_bodies);
         int nv = 0;         // num of generalised DoFs for this env.
@@ -127,6 +133,7 @@ namespace dyno
             if (parent_idx == -1)
             {
                 is_isolated(env_id, bid) = 1;
+                group_count++;
                 if(is_static)
                     continue;   // Static root body, no DoFs
 
@@ -167,8 +174,111 @@ namespace dyno
         }
         batch_nv[env_id] = nv;
         qpos_num[env_id] = nqpos;
+        num_groups[env_id] = group_count;
+        
 
     }
+
+    __global__ void BuildGlobalDofOffsetKernel(
+    DArray<int> batch_bodies,          // [env]
+    DevArr2D<int> q_lengths,           // [env, body]
+    DevArr2D<int> batch_nv_offset,     // [env, body] 输出：全局q起始offset
+    DArray<int> batch_nv,              // [env] 可选：做一致性检查
+    int num_envs)
+    {
+        if (blockIdx.x != 0 || threadIdx.x != 0) return;
+
+        int global_q = 0;
+        for (int env_id = 0; env_id < num_envs; ++env_id)
+        {
+            const int num_bodies = batch_bodies[env_id];
+
+            for (int bid = 0; bid < num_bodies; ++bid)
+            {
+                int qn = q_lengths(env_id, bid);
+                if (qn < 0) qn = 0; 
+                batch_nv_offset(env_id, bid) = global_q; // 这个body的全局q起点
+                global_q += qn;
+            }
+        }
+    }
+
+
+    __global__ void FillGroupKernel(
+        DArray<int> batch_bodies,
+        DArray2D<int> parent_idx,
+        DevArr2D<Pair<int, int>> groups,
+        int num_envs)
+    {
+        int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if (env_id >= num_envs)
+            return;
+
+        const int num_bodies = batch_bodies[env_id];
+        auto group_ptr = groups.BlockPtr(env_id);
+
+        int gid = 0;
+        int group_begin = -1;
+
+        for (int bid = 0; bid < num_bodies; ++bid)
+        {
+            if (parent_idx(env_id, bid) == -1)
+            {
+                if (group_begin != -1)
+                {
+                    group_ptr[gid] = Pair<int, int>(group_begin, bid - group_begin);
+                    ++gid;
+                }
+                group_begin = bid;
+            }
+        }
+
+        if (group_begin != -1)
+        {
+            group_ptr[gid] = Pair<int, int>(group_begin, num_bodies - group_begin);
+        }
+    }
+
+    __global__ void FillFlattenMappingInfoKernel(
+        DArray<int> batch_bodies,
+        DArray<int> batch_bodies_offset,
+        DevArr2D<int> q_length,
+        DevArr2D<int> nv_offset,
+        DevArr2D<Pair<int, int>> groups,
+        DArray<int> flatten_group_to_env,
+        DArray<int> flatten_body_to_env,
+        DArray<Pair<int, int>> flatten_q_to_env_body,
+        int num_envs)
+    {
+        int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if (env_id >= num_envs)
+            return;
+
+        const int num_bodies = batch_bodies[env_id];
+        auto group_ptr = groups.BlockPtr(env_id);
+
+        for (int local_gid = 0; local_gid < groups.BlockSize(env_id); ++local_gid)
+        {
+            flatten_group_to_env[local_gid + groups.BlockOffset(env_id)] = env_id;
+            printf("Env %d, Group %d, flatten_group_id: %d\n", env_id, local_gid, local_gid + groups.BlockOffset(env_id));
+        }
+
+        for (int bid = 0; bid < num_bodies; ++bid)
+        {
+            flatten_body_to_env[bid + batch_bodies_offset[env_id]] = env_id;
+            printf("Env %d, Body %d, flatten_body_id: %d\n", env_id, bid, bid + batch_bodies_offset[env_id]);
+            const int q_num = q_length(env_id, bid);
+            const int q_off = nv_offset(env_id, bid);
+            printf("Env %d, Body %d, q_num: %d, q_off: %d\n", env_id, bid, q_num, q_off);
+            for (int i = 0; i < q_num; ++i)
+            {
+                flatten_q_to_env_body[q_off + i] = Pair<int, int>(env_id, bid);
+                printf("Env %d, Body %d, num_bodies: %d, q_num: %d, flatten_q_id: %d\n", env_id, bid, num_bodies, q_num, q_off + i);
+            }
+        }
+
+    }
+
 
     __global__ void InitInertiaKernel(DArray<int> batch_bodies, DevArr2D<Vec3f> batch_inertia,
         DArray2D<Real> batch_mass, DArray2D<SphereInfo> spheres, DArray2D<BoxInfo> boxes,
@@ -1601,6 +1711,7 @@ namespace dyno
             is_converged[env_id] = 1;
     }
 
+
     template<typename TDataType>
     __global__ void ForwardKinematicsKernel(
         DArray<int> batch_bodies,
@@ -2655,12 +2766,63 @@ namespace dyno
         
         // Calculate the DoFs and establish index
         DArray<int> num_qpos(num_envs);
+        DArray<int> num_groups(num_envs);
+
+        rigid_body_system->batch_nv_offset.BuildFromSizes(num_bodies_host);
+
         DofCountAndBuildIndexKernel<<<32, 512>>>(
             rigid_body_system->batch_bodies, rigid_body_system->q_offset, rigid_body_system->q_lengths, 
             rigid_body_system->qpos_offset, rigid_body_system->parent_idx, rigid_body_system->is_static,
             rigid_body_system->is_isolated, rigid_body_system->joint_type,
-            rigid_body_system->batch_nv, num_envs, num_qpos);
+            rigid_body_system->batch_nv, num_envs, num_qpos, num_groups);
         cudaDeviceSynchronize();
+        
+        // single thread build batch_nv_offset
+        BuildGlobalDofOffsetKernel<<<1,1>>>(
+        rigid_body_system->batch_bodies,
+        rigid_body_system->q_lengths,
+        rigid_body_system->batch_nv_offset,
+        rigid_body_system->batch_nv,
+        num_envs);
+        cudaDeviceSynchronize();
+
+        rigid_body_system->batch_groups.BuildFromSizes(num_groups);
+
+        FillGroupKernel<<<32, 512>>>(
+            rigid_body_system->batch_bodies, rigid_body_system->parent_idx, rigid_body_system->batch_groups, num_envs);
+        cudaDeviceSynchronize();
+
+        
+
+        // 暂时用thrust来reduce出total_bodies和total_nv, 后续改成cpu上统计
+        int total_bodies_, total_groups_, total_nv_;
+
+        total_groups_ = rigid_body_system->batch_groups.TotalSize();
+
+        total_bodies_ = thrust::reduce(
+            thrust::device,
+            rigid_body_system->batch_bodies.begin(),
+            rigid_body_system->batch_bodies.begin() + num_envs,
+            0
+        );
+
+        total_nv_ = thrust::reduce(
+            thrust::device,
+            rigid_body_system->batch_nv.begin(),
+            rigid_body_system->batch_nv.begin() + num_envs,
+            0
+        );
+
+        INIT_DYNO_ARRAY(rigid_body_system->flatten_group_to_env, total_groups_);
+        INIT_DYNO_ARRAY(rigid_body_system->flatten_body_to_env, total_bodies_);
+        INIT_DYNO_ARRAY(rigid_body_system->flatten_q_to_env_body, total_nv_);
+
+
+        FillFlattenMappingInfoKernel<<<32, 512>>>(
+            rigid_body_system->batch_bodies, rigid_body_system->batch_body_offset, 
+            rigid_body_system->q_lengths,rigid_body_system->batch_nv_offset, rigid_body_system->batch_groups, 
+            rigid_body_system->flatten_group_to_env, rigid_body_system->flatten_body_to_env, 
+            rigid_body_system->flatten_q_to_env_body, num_envs);
 
         // 2. malloc the solver states based on the DoF count
         rigid_body_system->batch_qpos.BuildFromSizes(num_qpos);

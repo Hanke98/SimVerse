@@ -100,6 +100,7 @@ namespace dyno
 
         CArray2D<int> is_static_host(env_num, body_max_num);
         CArray2D<Real> mass_host(env_num, body_max_num);
+        
 
         std::vector<int> num_constraints_host;
         std::vector<Vec4i> num_each_constraint_host;

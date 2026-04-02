@@ -158,101 +158,104 @@ namespace device_kernel
         printf("[device-readback] env %d group 0: %d, %d\n", env_id, g.first, g.second);
     }
     
+    
+
     template<typename TDataType>
     __global__ void ForwardKinematicsKernel(
-        DevBlockVector<Pair<int, int>> groups,
-        DArray2D<int> parent_idx_arr,
-        DArray2D<Quat<typename TDataType::Real>> batch_quat,
+        DevArr2D<Pair<int, int>> batch_groups,
+        DArray<int> flatten_group_to_env,
+        DArray2D<Quat<Real>> batch_quat,
         DArray2D<Mat3f> batch_rot,
-        DArray2D<Vec3f> batch_pos,
+        DArray2D<int> parent_idx,
         DArray2D<Vec3f> joint_axis_ref,
         DArray2D<Vec3f> joint_anchor_ref,
-        DArray2D<int> joint_type_arr,
-        DArray2D<typename TDataType::Real> joint_qpos,
-        DArray2D<typename TDataType::Real> joint_qpos_ref,
+        DArray2D<int> joint_type,
+        DArray2D<Real> joint_qpos,
+        DArray2D<Real> joint_qpos_ref,
         DArray2D<int> joint_qpos_offset,
+        DArray2D<Vec3f> batch_pos,
+        DArray2D<Quat<Real>> joint_rel_quat,
+        DevArr2D<Vec3f> joint_axis,
         DArray2D<Vec3f> joint_rel_pos,
-        DArray2D<Quat<typename TDataType::Real>> joint_rel_quat,
-        DArray2D<Vec3f> joint_axis,
-        DArray2D<Vec3f> joint_anchor,
-        int num_envs,
+        DevArr2D<Vec3f> joint_anchor,
+        DevArr2D<Vec3f> global_com_pos,
+        DevArr2D<Vec3f> local_com_pos,
+        DevArr2D<Quat<Real>> local_com_quat,
+        DevArr2D<Mat3f> com_rot,
         int num_groups)
     {
-        using Real = typename TDataType::Real;
-
         int group_id = blockIdx.x * blockDim.x + threadIdx.x;
-
         if (group_id >= num_groups)
             return;
 
-        int env_id = BinarySearchLEArray(groups.Offsets(), num_envs, group_id);
+        const int env_id = flatten_group_to_env[group_id];
+        const int local_gid = group_id - batch_groups.BlockOffset(env_id);
+        const Pair<int, int> group = batch_groups(env_id, local_gid);
+        const int body_begin = group.first;
+        const int body_count = group.second;
 
-        if (env_id >= num_envs)
-            return;
-
-        const int local_gid = group_id - groups.Offsets()[env_id];
-        const auto group = groups[env_id][local_gid];
-
-        const int group_begin = group.first;
-        const int group_count = group.second;
-
-        for(int local = 0; local < group_count; ++local)
+        for (int local_bid = 0; local_bid < body_count; ++local_bid)
         {
-            const int bid = group_begin + local;
-            const int parent_idx = parent_idx_arr(env_id, bid);
-
-            if (parent_idx == -1)
+            const int bid = body_begin + local_bid;
+            const int pidx = parent_idx(env_id, bid);
+            if(pidx == -1)
             {
                 batch_rot(env_id, bid) = batch_quat(env_id, bid).toMatrix3x3();
+                continue;
             }
-            else {
-                const auto& parent_quat = batch_quat(env_id, parent_idx);
-                const auto& parent_rot = batch_rot(env_id, parent_idx);
-                const auto& local_axis = joint_axis_ref(env_id, bid);
-                const auto& local_anchor = joint_anchor_ref(env_id, bid);
-                const int& joint_type = joint_type_arr(env_id, bid);
-                const auto& joint_qpos_start = joint_qpos_offset(env_id, bid);
-                
 
-                Quat<Real> xquat_p = parent_quat * joint_rel_quat(env_id, bid);
-                joint_axis(env_id, bid) = RotateVector(local_axis, xquat_p);
-                Vec3f xanchor = RotateVector(local_anchor, xquat_p);
-                Vec3f xpos = parent_rot * joint_rel_pos(env_id, bid) + batch_pos(env_id, parent_idx);
-                xanchor += xpos;
-                joint_anchor(env_id, bid) = xanchor;
+            const auto& parent_quat = batch_quat(env_id, pidx);
+            const auto& parent_rot = batch_rot(env_id, pidx);
+            const auto& local_axis = joint_axis_ref(env_id, bid);
+            const auto& local_anchor = joint_anchor_ref(env_id, bid);
+            const int jt = joint_type(env_id, bid);
+            const int jqpos_start = joint_qpos_offset(env_id, bid);
 
+            Quat<Real> xquat_p = parent_quat * joint_rel_quat(env_id, bid);
+            joint_axis(env_id, bid) = RotateVector(local_axis, xquat_p);
+            Vec3f xanchor = RotateVector(local_anchor, xquat_p);
+            Vec3f xpos = parent_rot * joint_rel_pos(env_id, bid) + batch_pos(env_id, pidx);
+            xanchor += xpos;
+            joint_anchor(env_id, bid) = xanchor;
 
-                if(joint_type == 2)     // Slide
-                {
-                    batch_quat(env_id, bid) = xquat_p;
-                    batch_rot(env_id, bid) = xquat_p.toMatrix3x3();
-                    batch_pos(env_id, bid) = xpos + (joint_qpos(env_id, joint_qpos_start) - joint_qpos_ref(env_id, joint_qpos_start)) * joint_axis(env_id, bid);
-                }
-                else
-                {
-                    Quat<Real> quat_local;
-                    if(joint_type == 1)     // Hinge
-                        quat_local = QuatFromAxisAngle(local_axis, joint_qpos(env_id, joint_qpos_start) - joint_qpos_ref(env_id, joint_qpos_start));
-                    else if (joint_type == 3)   // Ball
-                    {
-                        Quat<Real> ball_quat = Quat<Real>(
-                            joint_qpos(env_id, joint_qpos_start),
-                            joint_qpos(env_id, joint_qpos_start + 1),
-                            joint_qpos(env_id, joint_qpos_start + 2),
-                            joint_qpos(env_id, joint_qpos_start + 3));
-                        ball_quat.normalize();
-                        quat_local = ball_quat;
-                    }
-
-                    Quat<Real> xquat_c = xquat_p * quat_local;
-                    Quat<Real> xquat_c_bak = xquat_c;
-                    xquat_c_bak.normalize();
-                    batch_quat(env_id, bid) = xquat_c_bak;
-                    batch_rot(env_id, bid) = xquat_c.toMatrix3x3();
-                    xpos = RotateVector(local_anchor, xquat_c);
-                    batch_pos(env_id, bid) = xanchor - xpos;
-                }
+            if(jt == 2)     // Slide
+            {
+                batch_quat(env_id, bid) = xquat_p;
+                batch_rot(env_id, bid) = xquat_p.toMatrix3x3();
+                batch_pos(env_id, bid) = xpos + (joint_qpos(env_id, jqpos_start) - joint_qpos_ref(env_id, jqpos_start)) * joint_axis(env_id, bid);
             }
+            else
+            {
+                Quat<Real> quat_local;
+                if(jt == 1)  // Hinge
+                {
+                    quat_local = QuatFromAxisAngle(local_axis, joint_qpos(env_id, jqpos_start) - joint_qpos_ref(env_id, jqpos_start));
+                }
+                else         // Ball
+                {
+                    Quat<Real> ball_quat = Quat<Real>(
+                        joint_qpos(env_id, jqpos_start),
+                        joint_qpos(env_id, jqpos_start + 1),
+                        joint_qpos(env_id, jqpos_start + 2),
+                        joint_qpos(env_id, jqpos_start + 3));
+                    ball_quat.normalize();
+                    quat_local = ball_quat;
+                }
+
+                Quat<Real> xquat_c = xquat_p * quat_local;
+                Quat<Real> xquat_c_norm = xquat_c;
+                xquat_c_norm.normalize();
+                batch_quat(env_id, bid) = xquat_c_norm;
+                batch_rot(env_id, bid) = xquat_c.toMatrix3x3();
+                xpos = RotateVector(local_anchor, xquat_c);
+                batch_pos(env_id, bid) = xanchor - xpos;
+            }
+
+            global_com_pos(env_id, bid) = batch_rot(env_id, bid) * local_com_pos(env_id, bid) + batch_pos(env_id, bid);
+            global_com_pos(env_id, bid) += batch_pos(env_id, bid);
+
+            Quat<Real> quat_tmp = batch_quat(env_id, bid) * local_com_quat(env_id, bid);
+            com_rot(env_id, bid) = quat_tmp.toMatrix3x3();
         }
     }
 
@@ -823,6 +826,25 @@ namespace host_interface
         BuildGroupsTemp(rigid_body_system, num_envs);
 
         int num_groups = rigid_body_system.groups.TotalSize();
+        if (num_groups <= 0)
+            return;
+
+        HostArr<int> h_group_sizes(num_envs);
+        HostArr<int> h_group_offsets(num_envs);
+        h_group_sizes.Assign(rigid_body_system.groups.Sizes());
+        h_group_offsets.Assign(rigid_body_system.groups.Offsets());
+
+        CArray<int> h_flatten_group_to_env(num_groups);
+        for (int env_id = 0; env_id < num_envs; ++env_id)
+        {
+            const int offset = h_group_offsets[env_id];
+            const int count = h_group_sizes[env_id];
+            for (int i = 0; i < count; ++i)
+            {
+                h_flatten_group_to_env[offset + i] = env_id;
+            }
+        }
+        rigid_body_system.flatten_group_to_env.assign(h_flatten_group_to_env);
 
         // printf("num_groups: %d\n", num_groups);
 
@@ -831,21 +853,25 @@ namespace host_interface
         
         device_kernel::ForwardKinematicsKernel<TDataType><<<blocks, threads>>>(
             rigid_body_system.groups,
-            rigid_body_system.parent_idx,
+            rigid_body_system.flatten_group_to_env,
             rigid_body_system.batch_quat,
             rigid_body_system.batch_rot,
-            rigid_body_system.batch_pos,
+            rigid_body_system.parent_idx,
             rigid_body_system.joint_axis_ref,
             rigid_body_system.joint_anchor_ref,
             rigid_body_system.joint_type,
             rigid_body_system.joint_qpos,
             rigid_body_system.joint_qpos_ref,
             rigid_body_system.joint_qpos_offset,
-            rigid_body_system.joint_rel_pos,
+            rigid_body_system.batch_pos,
             rigid_body_system.joint_rel_quat,
             rigid_body_system.joint_axis,
+            rigid_body_system.joint_rel_pos,
             rigid_body_system.joint_anchor,
-            num_envs,
+            rigid_body_system.batch_global_com_pos,
+            rigid_body_system.batch_local_com_pos,
+            rigid_body_system.batch_local_com_quat,
+            rigid_body_system.batch_com_rot,
             num_groups);
     
     }

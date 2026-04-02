@@ -4,6 +4,7 @@
 #include "../../Utils/utils.h"
 #include "Algorithm.h"
 #include <Eigen/Dense>
+#include "kernel.cuh"
 
 #define NV_TMP 256
 
@@ -2759,14 +2760,17 @@ namespace dyno
         const auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
 
-        ForwardKinematicsKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        // ForwardKinematicsKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        host_interface::ForwardKinematicsHost(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
-        SubtreeComKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        // SubtreeComKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        host_interface::SubtreeComHost(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
         // rigid_body_system->batch_cdof.reset();
-        ComputeCdofKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        // ComputeCdofKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        host_interface::ComputeCdofHost(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
         spdlog::info("INIT TEST");
@@ -2776,10 +2780,12 @@ namespace dyno
         // Crb 
         rigid_body_system->batch_crb.reset();
         // 1. Calculate the global inertia matrix of each rigid body when the center of mass of the corresponding kinematic tree is taken as the reference point.
-        SubtreeInertialKernel<<<32, 512>>>(*rigid_body_system, num_envs);
+        // SubtreeInertialKernel<<<32, 512>>>(*rigid_body_system, num_envs);
+        host_interface::SubtreeInertial(*rigid_body_system, num_envs);
         // 2. Calculate the global inertia matrix of each sub-tree.
         cudaDeviceSynchronize();
-        AccumulateSubtreeInertialKernel<<<32, 128>>>(*rigid_body_system, num_envs);
+        host_interface::AccumulateSubtreeInertialHost(*rigid_body_system, num_envs);
+        // AccumulateSubtreeInertialKernel<<<32, 128>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
 
@@ -2787,12 +2793,14 @@ namespace dyno
         rigid_body_system->batch_qM.reset();
         auto& q_chain = rigid_body_system->batch_q_chain;
         cudaMemset((void*)q_chain.begin(), -1, q_chain.pitch() * q_chain.ny());
-        UpdateGeneralizedInertialMatrixKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        host_interface::UpdateGeneralizedInertialMatrixHost(*rigid_body_system, num_envs);
+        // UpdateGeneralizedInertialMatrixKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
 
         rigid_body_system->subtree_com_vel.reset();
         // rigid_body_system->batch_cdof_dot.reset();
-        ComputeComVelKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        // ComputeComVelKernel<TDataType><<<32, 512>>>(*rigid_body_system, num_envs);
+        host_interface::ComputeComVelHost(*rigid_body_system, num_envs);
         cudaDeviceSynchronize();
         // Compute RNE
         rigid_body_system->batch_cacc.reset();

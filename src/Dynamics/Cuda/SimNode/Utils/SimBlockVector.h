@@ -16,6 +16,14 @@ namespace dyno
 #define SIM_BLOCKVECTOR_LOCAL_GPU_FUNC
 #endif
 
+#ifndef SIM_DYN_FUNC
+#ifdef __CUDACC__
+#define SIM_DYN_FUNC __host__ __device__
+#else
+#define SIM_DYN_FUNC
+#endif
+#endif
+
     template<typename T>
     class DevBlockVector;
 
@@ -254,13 +262,13 @@ namespace dyno
         inline int TotalSize() const { return total_size_; }
         inline bool Empty() const { return num_blocks_ == 0 || total_size_ == 0; }
 
-        inline const DevArr<int>& Sizes() const { return sizes_; }
-        inline DevArr<int>& Sizes() { return sizes_; }
-        inline const DevArr<int>& Offsets() const { return offsets_; }
-        inline DevArr<int>& Offsets() { return offsets_; }
+        SIM_DYN_FUNC inline const DevArr<int>& Sizes() const { return sizes_; }
+        SIM_DYN_FUNC inline DevArr<int>& Sizes() { return sizes_; }
+        SIM_DYN_FUNC inline const DevArr<int>& Offsets() const { return offsets_; }
+        SIM_DYN_FUNC inline DevArr<int>& Offsets() { return offsets_; }
 
-        inline const DevArr<T>& Data() const { return data_; }
-        inline DevArr<T>& Data() { return data_; }
+        SIM_DYN_FUNC inline const DevArr<T>& Data() const { return data_; }
+        SIM_DYN_FUNC inline DevArr<T>& Data() { return data_; }
 
         inline const T* Begin() const { return data_.Begin(); }
         inline T* Begin() { return data_.Begin(); }
@@ -332,5 +340,6 @@ namespace dyno
 #ifdef SIM_BLOCKVECTOR_LOCAL_GPU_FUNC
 #undef SIM_GPU_FUNC
 #undef SIM_BLOCKVECTOR_LOCAL_GPU_FUNC
+#undef SIM_DYN_FUNC
 #endif
 }

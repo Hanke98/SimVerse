@@ -91,36 +91,24 @@ namespace dyno
 
         DevArr(const DevArr& other)
         {
-            if (other.mSize <= 0 || other.mData == nullptr)
-            {
-                return;
-            }
-
+            // Shallow-copy as a non-owning view. This avoids expensive deep copies
+            // and stale temporary buffers when objects are passed by value to kernels.
+            mData = other.mData;
             mSize = other.mSize;
             mCapacity = other.mCapacity;
-            SIM_CUDA_CALL(cudaMalloc(&mData, mCapacity * sizeof(T)));
-            SIM_CUDA_CALL(cudaMemcpy(mData, other.mData, mSize * sizeof(T), cudaMemcpyDeviceToDevice));
+            mOwner = false;
         }
 
         DevArr& operator=(const DevArr& other)
         {
             if (this == &other) return *this;
 
-            if (other.mSize <= 0 || other.mData == nullptr)
-            {
-                Clear();
-                return *this;
-            }
-
-            if (mData == nullptr || mCapacity < other.mSize || other.mSize <= mCapacity / 2)
-            {
-                Clear();
-                mCapacity = other.mCapacity;
-                SIM_CUDA_CALL(cudaMalloc(&mData, mCapacity * sizeof(T)));
-            }
-
+            Clear();
+            // Keep assignment semantics aligned with copy-ctor: lightweight non-owning view.
+            mData = other.mData;
             mSize = other.mSize;
-            SIM_CUDA_CALL(cudaMemcpy(mData, other.mData, mSize * sizeof(T), cudaMemcpyDeviceToDevice));
+            mCapacity = other.mCapacity;
+            mOwner = false;
             return *this;
         }
 
@@ -129,9 +117,11 @@ namespace dyno
             mData = other.mData;
             mSize = other.mSize;
             mCapacity = other.mCapacity;
+            mOwner = other.mOwner;
             other.mData = nullptr;
             other.mSize = 0;
             other.mCapacity = 0;
+            other.mOwner = true;
         }
 
         DevArr& operator=(DevArr&& other) noexcept
@@ -141,9 +131,11 @@ namespace dyno
             mData = other.mData;
             mSize = other.mSize;
             mCapacity = other.mCapacity;
+            mOwner = other.mOwner;
             other.mData = nullptr;
             other.mSize = 0;
             other.mCapacity = 0;
+            other.mOwner = true;
             return *this;
         }
 
@@ -161,7 +153,7 @@ namespace dyno
             constexpr int kLargeExtra = 10000;
 
             // Reallocate only when growing beyond capacity or shrinking too much.
-            if (n > mCapacity || n <= mCapacity / 2)
+            if (!mOwner || n > mCapacity || n <= mCapacity / 2)
             {
                 int bound = n;
                 if (n > kPow2Threshold)
@@ -178,6 +170,7 @@ namespace dyno
                 mSize = n;
                 mCapacity = bound;
                 SIM_CUDA_CALL(cudaMalloc(&mData, mCapacity * sizeof(T)));
+                mOwner = true;
             }
             else
             {
@@ -187,13 +180,14 @@ namespace dyno
 
         void Clear()
         {
-            if (mData != nullptr)
+            if (mData != nullptr && mOwner)
             {
                 SIM_CUDA_CALL(cudaFree(mData));
             }
             mData = nullptr;
             mSize = 0;
             mCapacity = 0;
+            mOwner = true;
         }
 
         void Reset()
@@ -274,6 +268,7 @@ namespace dyno
         T* mData = nullptr;
         int mSize = 0;
         int mCapacity = 0;
+        bool mOwner = true;
     };
 
     template<typename T>

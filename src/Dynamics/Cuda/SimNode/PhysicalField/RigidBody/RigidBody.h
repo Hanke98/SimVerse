@@ -3,6 +3,7 @@
 #include "Collision/CollisionData.h"
 
 #include "../PhysicalField.h"
+#include "STL/Pair.h"
 #include "Utils/Constraints.h"
 #include "Utils/SimBlockMatrix.h"
 #include "Utils/SimBlockVector.h"
@@ -138,6 +139,8 @@ namespace dyno {
         DArray<Vec3i>           rendering_idx_2_rigid_body_mapping; // [env_id, shape_type, shape_idx]
         DArray2D<int>           rigid_body_2_rendering_idx_mapping; // [env_id, body_id] -> idx of its pos in topo state
 
+        // 一个env内的一个group的物体的local id是连续的
+        DevBlockVector<Pair<int, int>> groups;  // [envid, <body_begin, begin_count>]
     public:
         void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num,
             int joint_limit_max, int connect_max, int fl_max);

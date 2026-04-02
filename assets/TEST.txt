@@ -1,0 +1,133 @@
+{
+  "envs": [
+    {
+      "env_id": 0,
+      "time_step": 0.006,
+      "gravity": [0, -9.81, 0],
+      "rigid_body": [
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": true,
+          "size": [0.15, 0.05, 0.15],
+          "density": 1000,
+          "friction": 0.6,
+          "pos": [0, 0.05, 0],
+          "quat": [0, 0, 0, 1]
+        },
+        {
+          "type": "primitive",
+          "ID": 2,
+          "is_static": false,
+          "size": [0.05, 0.15],
+          "density": 500,
+          "friction": 0.6,
+          "pos": [0, 0.2, 0],
+          "quat": [0, 0, 0, 1],
+          "joint": {
+            "parent": 0,
+            "type": 3,
+            "anchor": [0, -0.15, 0],
+            "axis": [0, 1, 0],
+            "orientation_ref": [0, 0, 0, 1],
+            "orientation": [0, 0, 0, 1],
+            "upper": 0.8
+          }
+        },
+        {
+          "type": "primitive",
+          "ID": 2,
+          "is_static": false,
+          "size": [0.05, 0.1],
+          "density": 400,
+          "friction": 0.6,
+          "pos": [0, 0.25, 0],
+          "quat": [0, 0, 0, 1],
+          "joint": {
+            "parent": 1,
+            "type": 1,
+            "anchor": [0, -0.1, 0],
+            "axis": [0, 0, 1],
+            "angle_ref": [0],
+            "angle": [1.5708],
+            "upper": 1.6,
+            "lower": -1.6
+          }
+        },
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.05, 0.2, 0.05],
+          "density": 400,
+          "friction": 0.6,
+          "pos": [0, 0.15, 0],
+          "quat": [0.707, 0, 0, 0.707],
+          "joint": {
+            "parent": 2,
+            "type": 1,
+            "anchor": [0, 0, 0],
+            "axis": [0, 0, 1],
+            "angle_ref": [0],
+            "angle": [0]
+          }
+        },
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.025, 0.025, 0.1],
+          "density": 400,
+          "friction": 0.6,
+          "pos": [0, 0.175, -0.15],
+          "quat": [0, 0, 0, 1],
+          "joint": {
+            "parent": 3,
+            "type": 2,
+            "anchor": [0, 0, 0],
+            "axis": [0, 1, 0],
+            "displacement_ref": [0],
+            "displacement": [0],
+            "upper": 0,
+            "lower": -0.1
+          },
+          "sol_paras": [0.02, 0.9, 0.95, 0.9, 0.001, 0.5, 2]
+        },
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.025, 0.025, 0.1],
+          "density": 500,
+          "friction": 0.6,
+          "pos": [0, -0.175, -0.15],
+          "quat": [0, 0, 0, 1],
+          "joint": {
+            "parent": 3,
+            "type": 2,
+            "anchor": [0, 0, 0],
+            "axis": [0, 1, 0],
+            "displacement_ref": [0],
+            "displacement": [0],
+            "upper": 0.1,
+            "lower": 0
+          }
+        }
+      ],
+      "friction_loss": [
+        {
+          "dof_id": 0,
+          "resistance": 8
+        },
+        {
+          "dof_id": 1,
+          "resistance": 8
+        },
+        {
+          "dof_id": 2,
+          "resistance": 8
+        }
+      ]
+    }
+  ]
+}

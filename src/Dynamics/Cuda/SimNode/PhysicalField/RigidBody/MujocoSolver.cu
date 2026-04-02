@@ -1619,6 +1619,10 @@ namespace dyno
         DevArr2D<Vec3f> joint_axis,
         DArray2D<Vec3f> joint_rel_pos,
         DevArr2D<Vec3f> joint_anchor,
+        DevArr2D<Vec3f> global_com_pos,
+        DevArr2D<Vec3f> local_com_pos,
+        DevArr2D<Quat<Real>> local_com_quat,
+        DevArr2D<Mat3f> com_rot,
         int num_envs)
     {
         int env_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1681,7 +1685,15 @@ namespace dyno
                 xpos = RotateVector(local_anchor, xquat_c);
                 batch_pos(env_id, bid) = xanchor - xpos;
             }
+
+            global_com_pos(env_id, bid) = batch_rot(env_id, bid) * local_com_pos(env_id, bid) + batch_pos(env_id, bid);
+            global_com_pos(env_id, bid) += batch_pos(env_id, bid);
+
+            Quat<Real> quat_tmp = batch_quat(env_id, bid) * local_com_quat(env_id, bid);
+            com_rot(env_id, bid) = quat_tmp.toMatrix3x3();
         }
+
+
     }
 
     template<typename TDataType>
@@ -2446,6 +2458,10 @@ namespace dyno
         rigid_body_system->batch_weight_inv.BuildFromSizes(num_bodies_host);
         rigid_body_system->joint_axis.BuildFromSizes(num_bodies_host);
         rigid_body_system->joint_anchor.BuildFromSizes(num_bodies_host);
+        rigid_body_system->batch_global_com_pos.BuildFromSizes(num_bodies_host);
+        rigid_body_system->batch_com_rot.BuildFromSizes(num_bodies_host);
+        rigid_body_system->batch_local_com_pos.BuildFromSizes(num_bodies_host);
+        rigid_body_system->batch_local_com_quat.BuildFromSizes(num_bodies_host);
 
         // ==========================  Num Bodies * 6   ===========================
         rigid_body_system->subtree_com_vel.BuildFromSizes(num_bodies6_host);
@@ -2774,6 +2790,10 @@ namespace dyno
             rigid_body_system->joint_axis,
             rigid_body_system->joint_rel_pos,
             rigid_body_system->joint_anchor,
+            rigid_body_system->batch_global_com_pos,
+            rigid_body_system->batch_local_com_pos,
+            rigid_body_system->batch_local_com_quat,
+            rigid_body_system->batch_com_rot,
             num_envs);
         cudaDeviceSynchronize();
 

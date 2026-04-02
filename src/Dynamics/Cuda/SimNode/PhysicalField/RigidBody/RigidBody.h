@@ -56,11 +56,17 @@ namespace dyno {
         DevArr2D<Real>      batch_crb;     // dense vec num_bodies * 10
         DevArr2D<int>       batch_q_chain_new;
 
-        DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body
-        DArray2D<Mat3f>     batch_rot;     // [env_id, body_id] world rotation of rigid body (as rotation matrix)
-        DArray2D<Quat<Real>> batch_quat;    // [env_id, body_id] world rotation of rigid body (as quaternion)
-        DArray2D<Real>      batch_mass;    // [env_id, body_id] mass of rigid body
+        DArray2D<Vec3f>       batch_pos;     // [env_id, body_id] world position of rigid body
+        DArray2D<Mat3f>       batch_rot;     // [env_id, body_id] world rotation of rigid body (as rotation matrix)
+        DArray2D<Quat<Real>>  batch_quat;    // [env_id, body_id] world rotation of rigid body (as quaternion)
+        DArray2D<Real>        batch_mass;    // [env_id, body_id] mass of rigid body
+        DevArr2D<Vec3f>       batch_global_com_pos;
+        DevArr2D<Vec3f>       batch_local_com_pos;
+        DevArr2D<Quat<Real>>  batch_local_com_quat;
+        DevArr2D<Mat3f>       batch_com_rot;
         
+
+
         DArray<Vec3f>       topo_pos_cache; // flattened body positions for topology update
         DArray<Mat3f>       topo_rot_cache; // flattened body rotations for topology update
 

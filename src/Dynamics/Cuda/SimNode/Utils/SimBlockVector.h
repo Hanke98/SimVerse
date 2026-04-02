@@ -4,6 +4,7 @@
 
 #include <vector>
 #include <iostream>
+#include <Array/Array.h>
 
 namespace dyno
 {
@@ -158,6 +159,11 @@ namespace dyno
             total_size_ = 0;
         }
 
+        void Reset()
+        {
+            data_.Reset();
+        }
+
         bool BuildFromSizes(const std::vector<int>& sizes)
         {
             HostBlockVector<T> h;
@@ -169,6 +175,17 @@ namespace dyno
         {
             HostBlockVector<T> h;
             if (!h.BuildFromSizes(sizes)) return false;
+            return Upload(h.Sizes(), h.Offsets(), h.NumBlocks(), h.TotalSize());
+        }
+
+        bool BuildFromSizes(const DArray<int>& sizes)
+        {
+            CArray<int> h_sizes;
+            h_sizes.assign(sizes);
+
+            std::vector<int> h_sizes_vec(h_sizes.begin(), h_sizes.begin() + h_sizes.size());
+            HostBlockVector<T> h;
+            if (!h.BuildFromSizes(h_sizes_vec)) return false;
             return Upload(h.Sizes(), h.Offsets(), h.NumBlocks(), h.TotalSize());
         }
 
@@ -270,18 +287,18 @@ namespace dyno
         SIM_DYN_FUNC inline const DevArr<T>& Data() const { return data_; }
         SIM_DYN_FUNC inline DevArr<T>& Data() { return data_; }
 
-        inline const T* Begin() const { return data_.Begin(); }
-        inline T* Begin() { return data_.Begin(); }
+        __device__ __host__ inline const T* Begin() const { return data_.Begin(); }
+        __device__ __host__ inline T* Begin() { return data_.Begin(); }
 
-        inline int BlockOffset(int block_id) const { return offsets_.Begin()[block_id]; }
-        inline int BlockSize(int block_id) const { return sizes_.Begin()[block_id]; }
+        __device__ __host__ inline int BlockOffset(int block_id) const { return offsets_.Begin()[block_id]; }
+        __device__ __host__ inline int BlockSize(int block_id) const { return sizes_.Begin()[block_id]; }
 
-        SIM_GPU_FUNC inline const T* BlockPtr(int block_id) const
+        __device__ __host__ inline const T* BlockPtr(int block_id) const
         {
             return data_.Begin() + offsets_.Begin()[block_id];
         }
 
-        SIM_GPU_FUNC inline T* BlockPtr(int block_id)
+        __device__ __host__ inline T* BlockPtr(int block_id)
         {
             return data_.Begin() + offsets_.Begin()[block_id];
         }
@@ -319,14 +336,12 @@ namespace dyno
 
         SIM_GPU_FUNC inline T& operator()(int block_id, int index)
         {
-            const int base = offsets_.Begin()[block_id];
-            return data_.Begin()[base + index];
+            return AtBlock(block_id, index);
         }
 
         SIM_GPU_FUNC inline const T& operator()(int block_id, int index) const
         {
-            const int base = offsets_.Begin()[block_id];
-            return data_.Begin()[base + index];
+            return AtBlock(block_id, index);
         }
 
     private:
@@ -336,6 +351,9 @@ namespace dyno
         int num_blocks_ = 0;
         int total_size_ = 0;
     };
+
+    template<typename T>
+    using DevArr2D = DevBlockVector<T>;
 
 #ifdef SIM_BLOCKVECTOR_LOCAL_GPU_FUNC
 #undef SIM_GPU_FUNC

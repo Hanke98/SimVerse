@@ -401,6 +401,9 @@ namespace dyno
         int total_size_ = 0;
     };
 
+    template<typename T>
+    using DevMat2D = DevBlockMatrix<T>;
+
 #ifdef SIM_BLOCKMATRIX_LOCAL_GPU_FUNC
 #undef SIM_GPU_FUNC
 #undef SIM_BLOCKMATRIX_LOCAL_GPU_FUNC

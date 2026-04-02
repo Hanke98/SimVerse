@@ -20,7 +20,7 @@ namespace dyno {
 
         int                 max_bodies;
         DArray2D<int>       is_static;      // [env_id, body_id] whether the rigid body is static or dynamic
-        DArray2D<int>       is_isolated;    // [env_id, body_id] whether the rigid body is isolated (not in contact with any other body)
+        DevArr2D<int>       is_isolated;    // [env_id, body_id] whether the rigid body is isolated (not in contact with any other body)
 
         DArray<int>         batch_bodies;  // [env_id] num of rigid bodies in each environment
         DArray<int>         batch_body_offset; // [env_id] flattened rigid body offset in topo position/rotation arrays
@@ -29,8 +29,11 @@ namespace dyno {
         DArray2D<int>       nv_offset;     // [env_id, body_idx] 
         
         
-        DArray2D<int>       q_lengths;      // [env_id, body_id] num of generalized DoFs
-        DArray2D<int>       q_offset;       // [env_id, body_id] offset of generalized DoFs;
+        DevArr2D<int>       q_lengths;      // [env_id, body_id] num of generalized DoFs
+        DevArr2D<int>       q_offset;       // [env_id, body_id] offset of generalized DoFs;
+        DevArr2D<int>       qpos_offset;
+        DevArr2D<Real>      batch_qpos;     // [env_id, dof_idx] generalized position
+        
         DArray2D<Real>      batch_qacc;    // [env_id, dof_idx] generalized acceleration
         DArray2D<Real>      batch_qvel;    // [env_id, dof_idx] generalized velocity
         DArray2D<Real>      batch_aref;    // nc * 1
@@ -43,20 +46,15 @@ namespace dyno {
         DArray2D<Real>      batch_H;
         DArray2D<Real>      batch_dx;    // [env_id, dof_idx] delta for current Newton iteration
 
-
-        DArray2D<int>       qpos_lengths;       // [env_id, body_id] num of generalized position
-        DArray2D<int>       qpos_offset;
-        DArray2D<Real>      batch_qpos;     // [env_id, dof_idx] generalized position
-        
         DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
-        DArray2D<Vec3f>     batch_inertia;
+        DevArr2D<Vec3f>     batch_inertia;
         DArray2D<Real>      batch_qM_inv;
 
         DArray2D<Real>      batch_qM_diag_elem;
         DArray<Real>        batch_scale;
-        DArray2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
-        DArray2D<Real>      batch_cdof_dot; // [env_id, dof_idx] projection basis time derivative
-        DArray2D<Real>      batch_crb;     // dense vec num_bodies * 10
+        DevArr2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
+        DevArr2D<Real>      batch_cdof_dot; // [env_id, dof_idx] projection basis time derivative
+        DevArr2D<Real>      batch_crb;     // dense vec num_bodies * 10
         DArray2D<int>       batch_q_chain;
 
         DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body
@@ -69,11 +67,11 @@ namespace dyno {
 
         // For articulated bodies
         DArray2D<int>       parent_idx;   // [env_id, body_id] parent body index (-1 for root)
-        DArray2D<int>       root_idx;     // [env_id, body_id] root body index
-        DArray2D<Real>      subtree_mass;   // [env_id, body_id] mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
-        DArray2D<Vec3f>     subtree_com;    // [env_id, body_id] center of mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
-        DArray2D<Real>      subtree_inertia;
-        DArray2D<Real>      subtree_com_vel;
+        DevArr2D<int>       root_idx;     // [env_id, body_id] root body index
+        DevArr2D<Real>      subtree_mass;   // [env_id, body_id] mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
+        DevArr2D<Vec3f>     subtree_com;    // [env_id, body_id] center of mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
+        DevArr2D<Real>      subtree_inertia;
+        DevArr2D<Real>      subtree_com_vel;
 
         // solving cache
         DArray2D<Real>      batch_q_inner_force;
@@ -81,7 +79,7 @@ namespace dyno {
         DArray2D<Real>      batch_q_ex_acc;
         DArray2D<Real>      batch_Ma;       // qM * qacc
         DArray2D<Real>      batch_grad;     // nv * 1, Newton gradient: Ma - q_ex_force - J^T * constraint_force
-        DArray2D<Real>      batch_weight_inv;    // nbody * 1
+        DevArr2D<Real>      batch_weight_inv;    // nbody * 1
         DArray2D<Real>      batch_dof_weight_inv; // nv * 1
         DArray2D<Real>      batch_dA;       // nc * 1
         DArray2D<Real>      batch_D;        // nc * 1
@@ -111,12 +109,12 @@ namespace dyno {
         DArray2D<int>           joint_qpos_offset;
         DArray2D<Vec3f>         joint_rel_pos;
         DArray2D<Quat<Real>>    joint_rel_quat;
-        DArray2D<Vec3f>         joint_axis;     // [env_id, body_id] joint axis for hinge and slide joint, or initial relative rotation axis for ball joint
+        DevArr2D<Vec3f>         joint_axis;     // [env_id, body_id] joint axis for hinge and slide joint, or initial relative rotation axis for ball joint
         DArray2D<Vec3f>         joint_axis_ref;
-        DArray2D<Vec3f>         joint_anchor;   // [env_id, body_id] joint anchor in the local frame of the body
+        DevArr2D<Vec3f>         joint_anchor;   // [env_id, body_id] joint anchor in the local frame of the body
         DArray2D<Vec3f>         joint_anchor_ref;
-        DArray2D<Real>          batch_cacc;
-        DArray2D<Real>          batch_cforce;
+        DevArr2D<Real>          batch_cacc;
+        DevArr2D<Real>          batch_cforce;
 
 
         // Shape information for rendering and collision handling

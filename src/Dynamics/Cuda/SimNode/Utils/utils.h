@@ -5,6 +5,8 @@
 #include <thrust/device_ptr.h>
 #include <thrust/extrema.h>
 #include "Quat.h"
+#include "SimBlockVector.h"
+#include "SimBlockMatrix.h"
 
 namespace dyno
 {
@@ -254,6 +256,19 @@ namespace dyno
             printf("%f\t", vec[i]);
         printf("\n");
     }
+
+    template<typename T>
+    __global__ void PrintVector(DevArr2D<T> vec, int sys_id)
+    {
+        if(threadIdx.x != 0)
+            return;
+        int length = vec.Sizes()[sys_id];
+
+        printf("PrintVector[%d]: ", sys_id);
+        for(int i = 0; i < length; i++)
+            printf("%f\t", vec(sys_id, i));
+        printf("\n\n");
+    }   
 
     template<typename T>
     __global__ void SumArray2D(DArray2D<T> arr_src1, DArray2D<T> arr_src2, DArray2D<T> arr_dst, int sys_num, DArray<int> lengths, bool is_sum=true)

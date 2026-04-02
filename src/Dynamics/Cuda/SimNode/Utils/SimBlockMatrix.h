@@ -4,6 +4,7 @@
 
 #include <vector>
 #include <iostream>
+#include <Array/Array.h>
 
 namespace dyno
 {
@@ -216,6 +217,17 @@ namespace dyno
             return Upload(h.Rows(), h.Cols(), h.Offsets(), h.NumBlocks(), h.TotalSize());
         }
 
+        bool BuildFromSquares(const DArray<int>& dims)
+        {
+            CArray<int> h_dims;
+            h_dims.assign(dims);
+
+            std::vector<int> h_dims_vec(h_dims.begin(), h_dims.begin() + h_dims.size());
+            HostBlockMatrix<T> h;
+            if (!h.BuildFromSquares(h_dims_vec)) return false;
+            return Upload(h.Rows(), h.Cols(), h.Offsets(), h.NumBlocks(), h.TotalSize());
+        }
+
         bool Upload(
             const HostArr<int>& rows,
             const HostArr<int>& cols,
@@ -343,8 +355,8 @@ namespace dyno
         inline const T* Begin() const { return data_.Begin(); }
         inline T* Begin() { return data_.Begin(); }
 
-        inline int BlockRows(int block_id) const { return rows_.Begin()[block_id]; }
-        inline int BlockCols(int block_id) const { return cols_.Begin()[block_id]; }
+        SIM_GPU_FUNC inline int BlockRows(int block_id) const { return rows_.Begin()[block_id]; }
+        SIM_GPU_FUNC inline int BlockCols(int block_id) const { return cols_.Begin()[block_id]; }
         inline int BlockLength(int block_id) const { return rows_.Begin()[block_id] * cols_.Begin()[block_id]; }
         inline int BlockOffset(int block_id) const { return offsets_.Begin()[block_id]; }
 
@@ -391,6 +403,13 @@ namespace dyno
         {
             return AtBlock(bid, row, col);
         }
+
+        SIM_GPU_FUNC const T& operator()(int bid, int row, int col) const
+        {
+            return AtBlock(bid, row, col);
+        }
+
+        void Reset() { data_.Reset(); }
 
     private:
         DevArr<T> data_;

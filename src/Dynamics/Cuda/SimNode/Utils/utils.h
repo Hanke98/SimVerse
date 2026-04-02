@@ -304,6 +304,64 @@ namespace dyno
         }
     }
 
+    template<typename T>
+    __global__ void SumBatchArray(DevArr2D<T> arr_src1, DevArr2D<T> arr_src2, 
+        DevArr2D<T> arr_dst, bool is_sum=true)
+    {
+        int sys_id = blockIdx.x;
+        int sys_num = arr_src1.NumBlocks();
+        if(sys_id >= sys_num)
+            return;
+        if(arr_src1.NumBlocks() != arr_src2.NumBlocks() || arr_src1.NumBlocks() != arr_dst.NumBlocks())
+        {
+            printf("Error: NumBlocks mismatch in SumBatchArray\n");
+            return;
+        }
+        if(arr_src1.Sizes()[sys_id] != arr_src2.Sizes()[sys_id] || arr_src1.Sizes()[sys_id] != arr_dst.Sizes()[sys_id])
+        {
+            printf("Error: Sizes mismatch for sys_id %d in SumBatchArray\n", sys_id);
+            return;
+        }
+
+        int len = arr_src1.Sizes()[sys_id];
+        for(int i = threadIdx.x; i < len; i += blockDim.x)
+        {
+            T a = arr_src1(sys_id, i);
+            T b = arr_src2(sys_id, i);
+            arr_dst(sys_id, i) = is_sum ? (a + b) : (a - b);
+        }
+    }
+
+    template<typename T>
+    __global__ void SumBatchArray(DevArr2D<T> arr_src1, DevArr2D<T> arr_src2, 
+        DevArr2D<T> arr_dst, DArray<int> skip_flag, bool is_sum=true)
+    {
+        int sys_id = blockIdx.x;
+        int sys_num = arr_src1.NumBlocks();
+        if(sys_id >= sys_num)
+            return;
+        if(arr_src1.NumBlocks() != arr_src2.NumBlocks() || arr_src1.NumBlocks() != arr_dst.NumBlocks())
+        {
+            printf("Error: NumBlocks mismatch in SumBatchArray\n");
+            return;
+        }
+        if(arr_src1.Sizes()[sys_id] != arr_src2.Sizes()[sys_id] || arr_src1.Sizes()[sys_id] != arr_dst.Sizes()[sys_id])
+        {
+            printf("Error: Sizes mismatch for sys_id %d in SumBatchArray\n", sys_id);
+            return;
+        }
+        if(skip_flag[sys_id])
+            return;
+
+        int len = arr_src1.Sizes()[sys_id];
+        for(int i = threadIdx.x; i < len; i += blockDim.x)
+        {
+            T a = arr_src1(sys_id, i);
+            T b = arr_src2(sys_id, i);
+            arr_dst(sys_id, i) = is_sum ? (a + b) : (a - b);
+        }
+    }
+
     // Variable-size batched Cholesky solve for compact row-major storage.
     // DArray2D index meaning here:
     // - first index: system/environment id
@@ -318,5 +376,27 @@ namespace dyno
         DArray2D<Real> x_packed,         // [sys, leading_dim]
         const DArray<int> n_list,        // [env], actual n for each environment
         int num_envs, DArray<int> skip_flag=DArray<int>());
+
+    __global__ void BatchCholeskySolveVarSizeKernel(
+        DArray2D<Real> A_packed,         // [sys, leading_dim * leading_dim], row-major, overwritten by L
+        const DevArr2D<Real> b_packed,   // [sys, leading_dim]
+        DevArr2D<Real> x_packed,         // [sys, leading_dim]
+        const DArray<int> n_list,        // [env], actual n for each environment
+        int num_envs, DArray<int> skip_flag=DArray<int>());
+
+    __global__ void BatchCholeskySolveVarSizeKernel(
+        DevMat2D<Real> A_packed,         // [sys, leading_dim * leading_dim], row-major, overwritten by L
+        const DevArr2D<Real> b_packed,   // [sys, leading_dim]
+        DevArr2D<Real> x_packed,         // [sys, leading_dim]
+        DArray<int> skip_flag=DArray<int>());
+
+    
+    template<typename T>
+    __global__ void BatchDenseMatrixVectorMul(DevMat2D<T> mat, DevArr2D<T> vec, DevArr2D<T> out, 
+        DArray<int> rows, DArray<int> cols, bool is_incremental=false, DArray<int> skip_flag=DArray<int>());
+
+    template<typename T>
+    __global__ void BatchDenseMatrixVectorMul(DArray2D<T> mat, DevArr2D<T> vec, DevArr2D<T> out, 
+        DArray<int> rows, DArray<int> cols, int num_sys, bool is_incremental=false, DArray<int> skip_flag = DArray<int>());
     
 }

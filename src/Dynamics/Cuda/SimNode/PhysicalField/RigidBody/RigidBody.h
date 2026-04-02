@@ -34,28 +34,27 @@ namespace dyno {
         DevArr2D<int>       qpos_offset;
         DevArr2D<Real>      batch_qpos;     // [env_id, dof_idx] generalized position
         
-        DArray2D<Real>      batch_qacc;    // [env_id, dof_idx] generalized acceleration
-        DArray2D<Real>      batch_qvel;    // [env_id, dof_idx] generalized velocity
-        DArray2D<Real>      batch_aref;    // nc * 1
-        DArray2D<Real>      batch_Jaref;   // J * qacc
-        DArray2D<Real>      batch_imp;
+        DevArr2D<Real>      batch_qacc;    // [env_id, dof_idx] generalized acceleration
+        DevArr2D<Real>      batch_qvel;    // [env_id, dof_idx] generalized velocity
+        DevArr2D<Real>      batch_aref;    // nc * 1
+        DevArr2D<Real>      batch_Jaref;   // J * qacc
+        DevArr2D<Real>      batch_imp;
         DArray<Real>        batch_energy;
         DArray<Real>        batch_energy_ref;
-        DArray2D<Real>      batch_constraint_energy;    
-        DArray2D<int>       batch_unquads;   // [env_id, constraint_idx]
-        DArray2D<Real>      batch_H;
-        DArray2D<Real>      batch_dx;    // [env_id, dof_idx] delta for current Newton iteration
+        DevArr2D<Real>      batch_constraint_energy;    
+        DevArr2D<int>       batch_unquads;   // [env_id, constraint_idx]
+        DevMat2D<Real>      batch_H;
+        DevArr2D<Real>      batch_dx;    // [env_id, dof_idx] delta for current Newton iteration
 
-        DArray2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
+        DevMat2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
         DevArr2D<Vec3f>     batch_inertia;
-        DArray2D<Real>      batch_qM_inv;
+        DevMat2D<Real>      batch_qM_inv;
 
-        DArray2D<Real>      batch_qM_diag_elem;
         DArray<Real>        batch_scale;
         DevArr2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
         DevArr2D<Real>      batch_cdof_dot; // [env_id, dof_idx] projection basis time derivative
         DevArr2D<Real>      batch_crb;     // dense vec num_bodies * 10
-        DArray2D<int>       batch_q_chain;
+        DevArr2D<int>       batch_q_chain_new;
 
         DArray2D<Vec3f>     batch_pos;     // [env_id, body_id] world position of rigid body
         DArray2D<Mat3f>     batch_rot;     // [env_id, body_id] world rotation of rigid body (as rotation matrix)
@@ -74,25 +73,25 @@ namespace dyno {
         DevArr2D<Real>      subtree_com_vel;
 
         // solving cache
-        DArray2D<Real>      batch_q_inner_force;
-        DArray2D<Real>      batch_q_ex_force;
-        DArray2D<Real>      batch_q_ex_acc;
-        DArray2D<Real>      batch_Ma;       // qM * qacc
-        DArray2D<Real>      batch_grad;     // nv * 1, Newton gradient: Ma - q_ex_force - J^T * constraint_force
+        DevArr2D<Real>      batch_q_inner_force;
+        DevArr2D<Real>      batch_q_ex_force;
+        DevArr2D<Real>      batch_q_ex_acc;
+        DevArr2D<Real>      batch_Ma;       // qM * qacc
+        DevArr2D<Real>      batch_grad;     // nv * 1, Newton gradient: Ma - q_ex_force - J^T * constraint_force
         DevArr2D<Real>      batch_weight_inv;    // nbody * 1
-        DArray2D<Real>      batch_dof_weight_inv; // nv * 1
-        DArray2D<Real>      batch_dA;       // nc * 1
-        DArray2D<Real>      batch_D;        // nc * 1
+        DevArr2D<Real>      batch_dof_weight_inv; // nv * 1
+        DevArr2D<Real>      batch_dA;       // nc * 1
+        DevArr2D<Real>      batch_D;        // nc * 1
         DArray<int>         is_converged;
         DArray<Real>        sys_alpha;
 
         // For constraints
-        DArray2D<Real>               batch_J;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints   nc * nv
+        DevMat2D<Real>               batch_J_new;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints   nc * nv
         DArray<int>                  num_constraints;   // [env_id] number of constraints in each environment = num_collision_constraints + num_topo_invariant_constraints
         DArray<Vec4i>                num_each_constraint; // [env_id] num of each type of constraint (Vec4i: [0] anchor, [1] friction loss, [2] joint limit, [3] collision_constraints)
         DArray<Vec4i>                constraint_offset;   // [env_id] offset of each type of constraint in the batch_J (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
-        DArray2D<Real>               batch_constraint_vel;
-        DArray2D<Real>               batch_constraint_force;
+        DevArr2D<Real>               batch_constraint_vel;
+        DevArr2D<Real>               batch_constraint_force;
 
         BatchAnchorConstraints          anchor_constraints;
         BatchFrictionLossConstraints    friction_loss_constraints;

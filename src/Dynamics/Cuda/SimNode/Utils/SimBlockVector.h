@@ -275,7 +275,7 @@ namespace dyno
             return true;
         }
 
-        inline int NumBlocks() const { return num_blocks_; }
+        __device__ __host__ inline int NumBlocks() const { return num_blocks_; }
         inline int TotalSize() const { return total_size_; }
         inline bool Empty() const { return num_blocks_ == 0 || total_size_ == 0; }
 

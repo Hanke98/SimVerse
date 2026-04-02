@@ -17,7 +17,7 @@ namespace dyno
         DevArr2D<int> qpos_offset,
         DevArr2D<int> q_offset,
         DevArr2D<Real> batch_qpos,
-        DArray2D<Real> batch_qvel,
+        DevArr2D<Real> batch_qvel,
         DArray2D<int> joint_type,
         DArray<Real> dts,
         int num_envs)
@@ -309,8 +309,8 @@ namespace dyno
 
     __global__ void UpdateGeneralizedVelKernel(
         DArray<int> batch_nv,
-        DArray2D<Real> batch_qvel,
-        DArray2D<Real> batch_qacc,
+        DevArr2D<Real> batch_qvel,
+        DevArr2D<Real> batch_qacc,
         DArray<Real> timesteps,
         int num_envs)
     {
@@ -549,7 +549,7 @@ namespace dyno
         BatchCollisionConstraints collisions,
         DArray<int> batch_nv,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_J,
+        DevMat2D<Real> batch_J,
         DevArr2D<int> root_idx,
         DevArr2D<Vec3f> subtree_com,
         DevArr2D<Real> batch_cdof,
@@ -614,10 +614,10 @@ namespace dyno
             const Real j1j = jacB[num_nv + i];
             const Real j2j = jacB[2 * num_nv + i];
 
-            MatrixAt(batch_J, env_id, row0 + 0, 0, i, Vec2i(1, num_nv)) = j0j + mu * j1j;
-            MatrixAt(batch_J, env_id, row0 + 1, 0, i, Vec2i(1, num_nv)) = j0j - mu * j1j;
-            MatrixAt(batch_J, env_id, row0 + 2, 0, i, Vec2i(1, num_nv)) = j0j + mu * j2j;
-            MatrixAt(batch_J, env_id, row0 + 3, 0, i, Vec2i(1, num_nv)) = j0j - mu * j2j;
+            batch_J(env_id, row0, i) = j0j + mu * j1j;
+            batch_J(env_id, row0 + 1, i) = j0j - mu * j1j;
+            batch_J(env_id, row0 + 2, i) = j0j + mu * j2j;
+            batch_J(env_id, row0 + 3, i) = j0j - mu * j2j;
         }
     }
 
@@ -626,7 +626,7 @@ namespace dyno
         BatchAnchorConstraints batch_anchor,
         DArray<Vec4i> num_each_constraint,
         DArray<int> batch_nv,
-        DArray2D<Real> batch_J,
+        DevMat2D<Real> batch_J,
         DevArr2D<int> root_idx,
         DevArr2D<Vec3f> subtree_com,
         DevArr2D<Real> batch_cdof,
@@ -660,7 +660,7 @@ namespace dyno
             for(int j = 0; j < nv; j++)
             {
                 int row = anchor_idx * 3 + i;
-                batch_J(env_id, row * nv + j) = jacA[(i + 3) * nv + j] - jacB[(i + 3) * nv + j];
+                batch_J(env_id, row, j) = jacA[(i + 3) * nv + j] - jacB[(i + 3) * nv + j];
             }
     }
 
@@ -669,7 +669,7 @@ namespace dyno
         DArray<Vec4i> num_each_constraint,
         DArray<Vec4i> constraint_offset,
         DArray<int> batch_nv,
-        DArray2D<Real> batch_J,
+        DevMat2D<Real> batch_J,
         BatchFrictionLossConstraints friction_loss_constraints,
         int num_envs)
     {
@@ -685,7 +685,7 @@ namespace dyno
         const int constraint_start = constraint_offset[env_id][1];
         const int nv = batch_nv[env_id];
         const int nv_idx = friction_loss_constraints.dof_idxs(env_id, cidx);
-        batch_J(env_id, (constraint_start + cidx) * nv + nv_idx) = 1.f;
+        batch_J(env_id, constraint_start + cidx, nv_idx) = 1.f;
     }
 
     template<typename TDataType>
@@ -696,7 +696,7 @@ namespace dyno
         DArray2D<int> joint_type,
         DArray<Vec4i> constraint_offset,
         DArray<int> batch_nv,
-        DArray2D<Real> batch_J,
+        DevMat2D<Real> batch_J,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -717,12 +717,12 @@ namespace dyno
         const int nv = batch_nv[env_id];
 
         if(jt < 3)
-            batch_J(env_id, row_idx * nv + q_start) = pos_err < 0.f ? 1.f : -1.f;
+            batch_J(env_id, row_idx, q_start) = pos_err < 0.f ? 1.f : -1.f;
         else
         {
             const Vec3f& axis = constraints.limit_extern(env_id, jl_cid);
             for(int i = 0; i < 3; i++)
-                batch_J(env_id, row_idx * nv + q_start + i) = -axis[i];
+                batch_J(env_id, row_idx, q_start + i) = -axis[i];
         }
     }
 
@@ -780,9 +780,9 @@ namespace dyno
     __global__ void ComputeAnchorAref(
         BatchAnchorConstraints anchor_constraints,
         DArray<Vec4i> num_each_constraint,
-        DArray2D<Real> batch_constraint_vel,
-        DArray2D<Real> batch_aref,
-        DArray2D<Real> batch_imp,
+        DevArr2D<Real> batch_constraint_vel,
+        DevArr2D<Real> batch_aref,
+        DevArr2D<Real> batch_imp,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -819,9 +819,9 @@ namespace dyno
         BatchFrictionLossConstraints friction_loss_constraints,
         DArray<Vec4i> num_each_constraint,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_constraint_vel,
-        DArray2D<Real> batch_imp,
-        DArray2D<Real> batch_aref,
+        DevArr2D<Real> batch_constraint_vel,
+        DevArr2D<Real> batch_imp,
+        DevArr2D<Real> batch_aref,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -851,9 +851,9 @@ namespace dyno
         BatchJointLimitConstraints joint_limit_constraints,
         DArray<Vec4i> num_each_constraint,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_constraint_vel,
-        DArray2D<Real> batch_imp,
-        DArray2D<Real> batch_aref,
+        DevArr2D<Real> batch_constraint_vel,
+        DevArr2D<Real> batch_imp,
+        DevArr2D<Real> batch_aref,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -936,10 +936,10 @@ namespace dyno
     __global__ void ComputeContactAref(
         BatchCollisionConstraints collision_constraints,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_constraint_vel,
+        DevArr2D<Real> batch_constraint_vel,
         DArray2D<Real> contact_weights,
-        DArray2D<Real> batch_imp,
-        DArray2D<Real> batch_aref,
+        DevArr2D<Real> batch_imp,
+        DevArr2D<Real> batch_aref,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -998,7 +998,7 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
         DArray2D<int> parent_idx,
-        DArray2D<Real> batch_qM_inv,
+        DevMat2D<Real> batch_qM_inv,
         DevArr2D<Real> batch_weight_inv,
         int num_envs)
     {
@@ -1037,9 +1037,9 @@ namespace dyno
             {
                 Real sum = jac[r * nv + i];
                 for(int k = 0; k < i; k++)
-                    sum -= MatrixAt(L, env_id, i, k, Vec2i(nv, nv)) * j_tmp[r * nv + k];
+                    sum -= L(env_id, i, k) * j_tmp[r * nv + k];
 
-                const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                const Real lii = L(env_id, i, i);
                 j_tmp[r * nv + i] = sum / lii;
             }
 
@@ -1047,9 +1047,9 @@ namespace dyno
             {
                 Real sum = j_tmp[r * nv + i];
                 for(int k = i + 1; k < nv; k++)
-                    sum -= MatrixAt(L, env_id, k, i, Vec2i(nv, nv)) * j_tmp[r * nv + k];
+                    sum -= L(env_id, k, i) * j_tmp[r * nv + k];
 
-                const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                const Real lii = L(env_id, i, i);
                 j_tmp[r * nv + i] = sum / lii;
             }
         }
@@ -1074,8 +1074,8 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
         DArray2D<int> joint_type,
-        DArray2D<Real> batch_qM_inv,
-        DArray2D<Real> batch_dof_weight_inv,
+        DevMat2D<Real> batch_qM_inv,
+        DevArr2D<Real> batch_dof_weight_inv,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1106,8 +1106,8 @@ namespace dyno
             {
                 Real sum = x[i];
                 for(int k = 0; k < i; k++)
-                    sum -= MatrixAt(L, env_id, i, k, Vec2i(nv, nv)) * x[k];
-                const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                    sum -= L(env_id, i, k) * x[k];
+                const Real lii = L(env_id, i, i);
                 x[i] = sum / lii;
             }
 
@@ -1115,8 +1115,8 @@ namespace dyno
             {
                 Real sum = x[i];
                 for(int k = i + 1; k < nv; k++)
-                    sum -= MatrixAt(L, env_id, k, i, Vec2i(nv, nv)) * x[k];
-                const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                    sum -= L(env_id, k, i) * x[k];
+                const Real lii = L(env_id, i, i);
                 x[i] = sum / lii;
             }
 
@@ -1136,8 +1136,8 @@ namespace dyno
                 {
                     Real sum = x[i];
                     for(int k = 0; k < i; k++)
-                        sum -= MatrixAt(L, env_id, i, k, Vec2i(nv, nv)) * x[k];
-                    const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                        sum -= L(env_id, i, k) * x[k];
+                    const Real lii = L(env_id, i, i);
                     x[i] = sum / lii;
                 }
 
@@ -1145,8 +1145,8 @@ namespace dyno
                 {
                     Real sum = x[i];
                     for(int k = i + 1; k < nv; k++)
-                        sum -= MatrixAt(L, env_id, k, i, Vec2i(nv, nv)) * x[k];
-                    const Real lii = MatrixAt(L, env_id, i, i, Vec2i(nv, nv));
+                        sum -= L(env_id, k, i) * x[k];
+                    const Real lii = L(env_id, i, i);
                     x[i] = sum / lii;
                 }
 
@@ -1165,7 +1165,7 @@ namespace dyno
         DArray<Vec4i> num_each_constraint,
         BatchAnchorConstraints anchor_constraints,
         DevArr2D<Real> batch_weight_inv,
-        DArray2D<Real> batch_dA,
+        DevArr2D<Real> batch_dA,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1189,8 +1189,8 @@ namespace dyno
         DArray<Vec4i> num_each_constraint,
         BatchFrictionLossConstraints friction_loss_constraints,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_dof_weight_inv,
-        DArray2D<Real> batch_dA,
+        DevArr2D<Real> batch_dof_weight_inv,
+        DevArr2D<Real> batch_dA,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1212,8 +1212,8 @@ namespace dyno
         BatchJointLimitConstraints joint_limit_constraints,
         DevArr2D<int> q_offset,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_dof_weight_inv,
-        DArray2D<Real> batch_dA,
+        DevArr2D<Real> batch_dof_weight_inv,
+        DevArr2D<Real> batch_dA,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1236,7 +1236,7 @@ namespace dyno
         BatchCollisionConstraints collision_constraints,
         DevArr2D<Real> batch_weight_inv,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_dA,
+        DevArr2D<Real> batch_dA,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1264,9 +1264,9 @@ namespace dyno
     __global__ void ComputeRKernel(
         DArray<int> num_constraints,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_D,
-        DArray2D<Real> batch_imp,
-        DArray2D<Real> batch_dA,
+        DevArr2D<Real> batch_D,
+        DevArr2D<Real> batch_imp,
+        DevArr2D<Real> batch_dA,
         BatchCollisionConstraints collision_constraints,
         int num_envs)
     {
@@ -1289,7 +1289,7 @@ namespace dyno
     }
 
     template<typename TDataType>
-    __global__ void ComputeDKernel(DArray<int> num_constraints, DArray2D<Real> batch_D, int num_envs)
+    __global__ void ComputeDKernel(DArray<int> num_constraints, DevArr2D<Real> batch_D, int num_envs)
     {
         int env_id = blockIdx.x;
         if(env_id >= num_envs)
@@ -1307,10 +1307,10 @@ namespace dyno
     __global__ void AnchorEnergyKernel(
         DArray<int> is_converged,
         DArray<Vec4i> num_each_constraint,
-        DArray2D<Real> batch_constraint_force,
-        DArray2D<Real> batch_constraint_energy,
-        DArray2D<Real> batch_D,
-        DArray2D<Real> batch_Jaref,
+        DevArr2D<Real> batch_constraint_force,
+        DevArr2D<Real> batch_constraint_energy,
+        DevArr2D<Real> batch_D,
+        DevArr2D<Real> batch_Jaref,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1333,12 +1333,12 @@ namespace dyno
         DArray<int> is_converged,
         DArray<Vec4i> num_each_constraint,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_constraint_force,
-        DArray2D<Real> batch_constraint_energy,
-        DArray2D<Real> batch_D,
-        DArray2D<Real> batch_Jaref,
+        DevArr2D<Real> batch_constraint_force,
+        DevArr2D<Real> batch_constraint_energy,
+        DevArr2D<Real> batch_D,
+        DevArr2D<Real> batch_Jaref,
         BatchFrictionLossConstraints friction_loss_constraints,
-        DArray2D<int> batch_unquads,
+        DevArr2D<int> batch_unquads,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1382,11 +1382,11 @@ namespace dyno
         DArray<int> is_converged,
         DArray<int> num_constraints,
         DArray<Vec4i> constraint_offset,
-        DArray2D<Real> batch_constraint_force,
-        DArray2D<Real> batch_constraint_energy,
-        DArray2D<Real> batch_Jaref,
-        DArray2D<Real> batch_D,
-        DArray2D<int> batch_unquads,
+        DevArr2D<Real> batch_constraint_force,
+        DevArr2D<Real> batch_constraint_energy,
+        DevArr2D<Real> batch_Jaref,
+        DevArr2D<Real> batch_D,
+        DevArr2D<int> batch_unquads,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1416,10 +1416,10 @@ namespace dyno
     __global__ void InertialEnergyKernel(
         DArray<int> is_converged,
         DArray<int> batch_nv,
-        DArray2D<Real> batch_Ma,
-        DArray2D<Real> batch_q_ex_force,
-        DArray2D<Real> batch_qacc,
-        DArray2D<Real> batch_q_ex_acc,
+        DevArr2D<Real> batch_Ma,
+        DevArr2D<Real> batch_q_ex_force,
+        DevArr2D<Real> batch_qacc,
+        DevArr2D<Real> batch_q_ex_acc,
         DArray<Real> batch_energy,
         int num_envs)
     {
@@ -1442,7 +1442,7 @@ namespace dyno
     __global__ void ReduceConstraintEnergyKernel(
         DArray<int> is_converged,
         DArray<int> num_constraints,
-        DArray2D<Real> batch_constraint_energy,
+        DevArr2D<Real> batch_constraint_energy,
         DArray<Real> batch_energy,
         int num_envs)
     {
@@ -1477,11 +1477,11 @@ namespace dyno
         DArray<int> is_converged,
         DArray<int> batch_nv,
         DArray<int> num_constraints,
-        DArray2D<Real> batch_J,
-        DArray2D<Real> batch_D,
-        DArray2D<int> batch_unquads,
-        DArray2D<Real> batch_qM,
-        DArray2D<Real> batch_H,
+        DevMat2D<Real> batch_J,
+        DevArr2D<Real> batch_D,
+        DevArr2D<int> batch_unquads,
+        DevMat2D<Real> batch_qM,
+        DevMat2D<Real> batch_H,
         int num_envs)
     {
         const int env_id = blockIdx.x;
@@ -1506,15 +1506,15 @@ namespace dyno
                 continue;
 
             const Real d = batch_D(env_id, cidx);
-            const Real jr = MatrixAt(batch_J, env_id, cidx, row, Vec2i(nc, nv));
-            const Real jc = MatrixAt(batch_J, env_id, cidx, col, Vec2i(nc, nv));
+            const Real jr = batch_J(env_id, cidx, row);
+            const Real jc = batch_J(env_id, cidx, col);
             sum += jr * d * jc;
         }
 
-        const Real h = MatrixAt(batch_qM, env_id, row, col, Vec2i(nv, nv)) + sum;
-        MatrixAt(batch_H, env_id, row, col, Vec2i(nv, nv)) = h;
+        const Real h = batch_qM(env_id, row, col) + sum;
+        batch_H.AtBlock(env_id, row, col) = h;
         if(col != row)
-            MatrixAt(batch_H, env_id, col, row, Vec2i(nv, nv)) = h;
+            batch_H.AtBlock(env_id, col, row) = h;
     }
 
     template<typename TDataType>
@@ -1522,11 +1522,11 @@ namespace dyno
         DArray<int> is_converged,
         DArray<int> batch_nv,
         DArray<int> num_constraints,
-        DArray2D<Real> batch_J,
-        DArray2D<Real> batch_constraint_force,
-        DArray2D<Real> batch_Ma,
-        DArray2D<Real> batch_q_ex_force,
-        DArray2D<Real> batch_grad,
+        DevMat2D<Real> batch_J,
+        DevArr2D<Real> batch_constraint_force,
+        DevArr2D<Real> batch_Ma,
+        DevArr2D<Real> batch_q_ex_force,
+        DevArr2D<Real> batch_grad,
         int num_envs)
     {
         const int env_id = blockIdx.x;
@@ -1544,7 +1544,7 @@ namespace dyno
         Real jt_f = 0.f;
         for(int cidx = 0; cidx < nc; cidx++)
         {
-            const Real j = MatrixAt(batch_J, env_id, cidx, dof_idx, Vec2i(nc, nv));
+            const Real j = batch_J(env_id, cidx, dof_idx);
             jt_f += j * batch_constraint_force(env_id, cidx);
         }
 
@@ -1557,38 +1557,26 @@ namespace dyno
     template<typename TDataType>
     __global__ void ComputeScale(
         DArray<int> batch_nv,
-        DArray2D<Real> batch_qM,
-        DArray2D<Real> batch_qM_diag_elem,
+        DevMat2D<Real> batch_qM,
         DArray<Real> batch_scale,
         int num_envs)
     {
-        int env_id = blockIdx.x;
+        int env_id = threadIdx.x;
         if(env_id >= num_envs)
             return;
 
-        int qidx = threadIdx.x;
         int nv = batch_nv[env_id];
-        if(qidx >= nv)
-            return;
-
-        batch_qM_diag_elem(env_id, qidx) = batch_qM(env_id, qidx * nv + qidx);
-
-        __syncthreads();
-
-        if(qidx == 0)
-        {
-            Real sum_qM_diag = 0.f;
-            for(int i = 0; i < nv; i++)
-                sum_qM_diag += batch_qM_diag_elem(env_id, i);
-            batch_scale[env_id] = 1.f / sum_qM_diag;
-        }
+        Real sum_qM_diag = 0.f;
+        for(int i = 0; i < nv; i++)
+            sum_qM_diag += batch_qM(env_id, i, i);
+        batch_scale[env_id] = 1.f / sum_qM_diag;
     }
     
     template<typename TDataType>
     __global__ void CheckConvergenceKernel(
         DArray<int> is_converged,
         DArray<Real> batch_scale,
-        DArray2D<Real> batch_grad,
+        DevArr2D<Real> batch_grad,
         DArray<int> batch_nv,
         DArray<Real> batch_energy_ref,
         DArray<Real> batch_energy,
@@ -1952,7 +1940,7 @@ namespace dyno
     template<typename TDataType>
     __global__ void UpdateGeneralizedInertialMatrixKernel(
         DArray<int> batch_bodies,
-        DArray2D<Real> batch_qM,
+        DevMat2D<Real> batch_qM,
         DArray<int> batch_nv,
         DevArr2D<int> is_isolated,
         DArray2D<int> is_static,
@@ -1960,7 +1948,7 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
         DevArr2D<Real> batch_cdof,
-        DArray2D<int> batch_q_chain,
+        DevArr2D<int> batch_q_chain,
         DevArr2D<Real> batch_crb,
         DevArr2D<Vec3f> batch_inertia,
         DArray2D<Real> batch_mass,
@@ -2014,8 +2002,8 @@ namespace dyno
                         for(int n = 0; n < 6; n++)
                             val += batch_cdof(env_id, i1 * 6 + n) * Icdof[n];
 
-                        batch_qM(env_id, qidx * nv + i1) = val;
-                        batch_qM(env_id, i1 * nv + qidx) = val;
+                        batch_qM(env_id, qidx, i1) = val;
+                        batch_qM(env_id, i1, qidx) = val;
                     }
                 }
             }
@@ -2023,20 +2011,20 @@ namespace dyno
             {
                 for(int i = 0; i < 6; i++)
                     for(int j = 0; j < 6; j++)
-                        batch_qM(env_id, (q_start + i) * nv + (q_start + j)) = 0.f;
+                        batch_qM(env_id, q_start + i, q_start + j) = 0.f;
 
-                batch_qM(env_id, (q_start + 0) * nv + (q_start + 0)) = batch_mass(env_id, bid);
-                batch_qM(env_id, (q_start + 1) * nv + (q_start + 1)) = batch_mass(env_id, bid);
-                batch_qM(env_id, (q_start + 2) * nv + (q_start + 2)) = batch_mass(env_id, bid);
-                batch_qM(env_id, (q_start + 3) * nv + (q_start + 3)) = batch_inertia(env_id, bid).x;
-                batch_qM(env_id, (q_start + 4) * nv + (q_start + 4)) = batch_inertia(env_id, bid).y;
-                batch_qM(env_id, (q_start + 5) * nv + (q_start + 5)) = batch_inertia(env_id, bid).z;
+                batch_qM(env_id, q_start + 0, q_start + 0) = batch_mass(env_id, bid);
+                batch_qM(env_id, q_start + 1, q_start + 1) = batch_mass(env_id, bid);
+                batch_qM(env_id, q_start + 2, q_start + 2) = batch_mass(env_id, bid);
+                batch_qM(env_id, q_start + 3, q_start + 3) = batch_inertia(env_id, bid).x;
+                batch_qM(env_id, q_start + 4, q_start + 4) = batch_inertia(env_id, bid).y;
+                batch_qM(env_id, q_start + 5, q_start + 5) = batch_inertia(env_id, bid).z;
             }
         }
     }
 
     template<typename T>
-    __device__ void ComputeComVel(const DevArr2D<T>& cdof, const DArray2D<T>& qvel, DevArr2D<T>& com_vel,
+    __device__ void ComputeComVel(const DevArr2D<T>& cdof, const DevArr2D<T>& qvel, DevArr2D<T>& com_vel,
         int env_id, int bid, int q_start, int offset)
     {
         for(int r = 0; r < 6; r++)
@@ -2080,7 +2068,7 @@ namespace dyno
     __global__ void ComputeComVelKernel(
         DArray<int> batch_bodies,
         DevArr2D<Real> batch_cdof,
-        DArray2D<Real> batch_qvel,
+        DevArr2D<Real> batch_qvel,
         DevArr2D<Real> subtree_com_vel,
         DevArr2D<Real> batch_cdof_dot,
         DArray2D<int> parent_idx,
@@ -2133,7 +2121,7 @@ namespace dyno
     }
 
     template<typename T>
-    __device__ void ComputeCACC(const DevArr2D<T>& cdof_dot, const DArray2D<T>& qvel, DevArr2D<T>& cacc,
+    __device__ void ComputeCACC(const DevArr2D<T>& cdof_dot, const DevArr2D<T>& qvel, DevArr2D<T>& cacc,
         int env_id, int bid, int q_start, int q_length)
     {
         for(int r = 0; r < 6; r++)
@@ -2176,10 +2164,10 @@ namespace dyno
         const DArray<Vec3f> gravities,
         DevArr2D<Real> batch_cacc,
         DevArr2D<Real> batch_cforce,
-        DArray2D<Real> batch_q_inner_force,
+        DevArr2D<Real> batch_q_inner_force,
         DevArr2D<Real> batch_cdof,
         DevArr2D<Real> batch_cdof_dot,
-        DArray2D<Real> batch_qvel,
+        DevArr2D<Real> batch_qvel,
         DevArr2D<int> q_offset,
         DevArr2D<Real> subtree_inertia,
         DevArr2D<Real> subtree_com_vel,
@@ -2490,42 +2478,44 @@ namespace dyno
 
         // 2. malloc the solver states based on the DoF count
         rigid_body_system->batch_qpos.BuildFromSizes(num_qpos);
+        
 
         // ==========================  Num Nv  ===========================
-        rigid_body_system->batch_cdof.BuildFromSizes(rigid_body_system->batch_nv);
-        rigid_body_system->batch_cdof_dot.BuildFromSizes(rigid_body_system->batch_nv);
+        std::vector<int> batch_nv_host(num_envs);
+        cudaMemcpy(batch_nv_host.data(), rigid_body_system->batch_nv.begin(), num_envs * sizeof(int), cudaMemcpyDeviceToHost);
+        rigid_body_system->batch_cdof.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_cdof_dot.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_qacc.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_q_ex_acc.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_dx.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_qvel.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_q_inner_force.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_q_ex_force.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_grad.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_dof_weight_inv.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_Ma.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_q_chain_new.BuildFromSizes(batch_nv_host);
 
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_qacc, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_qvel, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_aref, num_envs, num_max_constraints);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_imp, num_envs, num_max_constraints);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_Jaref, num_envs, num_max_constraints);
+        // ====================  Num Max Constraints  ====================
+        std::vector<int> max_constraints_host(num_envs, num_max_constraints);
+        rigid_body_system->batch_aref.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_imp.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_Jaref.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_constraint_energy.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_unquads.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_dA.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_D.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_constraint_vel.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_constraint_force.BuildFromSizes(max_constraints_host);
+
+        // ===============  Dense Matrices of size Nv * Nv  ==============
+        rigid_body_system->batch_H.BuildFromSquares(rigid_body_system->batch_nv);
+        rigid_body_system->batch_qM.BuildFromSquares(rigid_body_system->batch_nv);
+        rigid_body_system->batch_qM_inv.BuildFromSquares(rigid_body_system->batch_nv);
+
+        // ===============  Dense Matrices of size Nc * Nv  ==============
+        rigid_body_system->batch_J_new.BuildFromShapes(max_constraints_host, batch_nv_host);
         
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_energy, num_envs, num_max_constraints);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_unquads, num_envs, num_max_constraints);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_H, num_envs, max_nv * max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_dx, num_envs, max_nv);
-
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM, num_envs, max_nv * max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM_inv, num_envs, max_nv * max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_qM_diag_elem, num_envs, max_nv);
-
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_chain, num_envs, max_nv * max_bodies);
-
-        // INIT_DYNO_ARRAY2D(rigid_body_system.batch_qpos, num_envs, max_bodies * 7);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_inner_force, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_ex_force, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_q_ex_acc, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_Ma, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_grad, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_dof_weight_inv, num_envs, max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_dA, num_envs, num_max_constraints);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_D, num_envs, num_max_constraints);
-        
-
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_J, num_envs, num_max_constraints * max_nv);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_vel, num_envs, num_max_constraints);
-        INIT_DYNO_ARRAY2D(rigid_body_system->batch_constraint_force, num_envs, num_max_constraints);
 
         INIT_DYNO_ARRAY(rigid_body_system->collision_constraints.collision_nums, num_envs);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.body_idxs, num_envs, 1024);
@@ -2575,9 +2565,9 @@ namespace dyno
         const auto& rigid_body_system = this->rigid_body;
         
         // 1. Reset forces and accelerations
-        rigid_body_system->batch_q_inner_force.reset();
-        rigid_body_system->batch_q_ex_force.reset();
-        rigid_body_system->batch_q_ex_acc.reset();
+        rigid_body_system->batch_q_inner_force.Reset();
+        rigid_body_system->batch_q_ex_force.Reset();
+        rigid_body_system->batch_q_ex_acc.Reset();
         rigid_body_system->is_converged.reset();
         // Update forward kinematics and subtree com
         ForwardKinematics();
@@ -2585,24 +2575,22 @@ namespace dyno
         MakeConstraints();
 
         // q_ex_force = -q_inner_force
-        SumArray2D<<<32, 128>>>(rigid_body_system->batch_q_ex_force, rigid_body_system->batch_q_inner_force,
-            rigid_body_system->batch_q_ex_force, env_infos->num_envs, rigid_body_system->batch_nv, false);
+        SumBatchArray<<<32, 128>>>(rigid_body_system->batch_q_ex_force, rigid_body_system->batch_q_inner_force,
+            rigid_body_system->batch_q_ex_force, false);
         cudaDeviceSynchronize();
 
         // Solve qM * q_ex_acc = q_ex_force by Cholesky factorization instead of explicitly forming qM^{-1}.
         // BatchCholeskySolveVarSizeKernel factorizes in-place, so copy qM to a temporary buffer first.
-        rigid_body_system->batch_qM_inv.assign(rigid_body_system->batch_qM);
+        rigid_body_system->batch_qM_inv.Assign(rigid_body_system->batch_qM);
         
         BatchCholeskySolveVarSizeKernel<<<env_infos->num_envs, 1>>>(
             rigid_body_system->batch_qM_inv,
             rigid_body_system->batch_q_ex_force,
             rigid_body_system->batch_q_ex_acc,
-            rigid_body_system->batch_nv,
-            env_infos->num_envs,
             rigid_body_system->is_converged);
         cudaDeviceSynchronize();
 
-        rigid_body_system->batch_qacc.assign(rigid_body_system->batch_q_ex_acc);
+        rigid_body_system->batch_qacc.Assign(rigid_body_system->batch_q_ex_acc);
 
         NewtonSolver();
 
@@ -2628,10 +2616,9 @@ namespace dyno
         UpdateGradient();
         SolveSystem();
 
-        ComputeScale<TDataType><<<32, 512>>>(
+        ComputeScale<TDataType><<<1, num_envs>>>(
             rigid_body_system->batch_nv,
             rigid_body_system->batch_qM,
-            rigid_body_system->batch_qM_diag_elem,
             rigid_body_system->batch_scale,
             num_envs);
         
@@ -2645,27 +2632,27 @@ namespace dyno
 
 
             // Update qacc      qacc += α * dx
-            SumArray2D<<<32, 128>>>(rigid_body_system->batch_qacc, rigid_body_system->batch_dx,
-                rigid_body_system->batch_qacc, num_envs, rigid_body_system->batch_nv, rigid_body_system->is_converged);
+            SumBatchArray<<<32, 128>>>(rigid_body_system->batch_qacc, rigid_body_system->batch_dx,
+                rigid_body_system->batch_qacc, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
 
             // Update Ma        Ma += α * qM * dx
             BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_dx, rigid_body_system->batch_Ma,
-                rigid_body_system->batch_nv, rigid_body_system->batch_nv, num_envs, true, rigid_body_system->is_converged);
+                rigid_body_system->batch_nv, rigid_body_system->batch_nv, true, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
             // Update Jaref     Jaref += α * J * dx
-            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref,
-                rigid_body_system->num_constraints, rigid_body_system->batch_nv, num_envs, true, rigid_body_system->is_converged);
+            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref,
+                rigid_body_system->num_constraints, rigid_body_system->batch_nv, true, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
             spdlog::info("qacc in newton");
-            PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0, 6);
+            PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0);
             cuSynchronize();
             spdlog::info("Ma in newton");
-            PrintVector<<<1, 1>>>(rigid_body_system->batch_Ma, 0, 6);
+            PrintVector<<<1, 1>>>(rigid_body_system->batch_Ma, 0);
             cuSynchronize();
-            spdlog::info("Jaref in newton");
-            PrintVector<<<1, 1>>>(rigid_body_system->batch_Jaref, 0, 4);
-            cuSynchronize();
+            // spdlog::info("Jaref in newton");
+            // PrintVector<<<1, 1>>>(rigid_body_system->batch_Jaref, 0);
+            // cuSynchronize();
 
             rigid_body_system->batch_energy_ref.assign(rigid_body_system->batch_energy);
             ComputeEnergy();
@@ -2725,7 +2712,7 @@ namespace dyno
         cudaDeviceSynchronize();
 
         spdlog::info("Qvel:");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_qvel, 0, 6);
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_qvel, 0);
         cudaDeviceSynchronize();
         spdlog::info("QPOS:");
         PrintVector<<<1, 1>>>(rigid_body_system->batch_qpos, 0);
@@ -2843,9 +2830,9 @@ namespace dyno
 
 
         // 3. Construct the system inertia matrix in the generalized coordinate system.
-        rigid_body_system->batch_qM.reset();
-        auto& q_chain = rigid_body_system->batch_q_chain;
-        cudaMemset((void*)q_chain.begin(), -1, q_chain.pitch() * q_chain.ny());
+        rigid_body_system->batch_qM.Reset();
+        auto& q_chain = rigid_body_system->batch_q_chain_new;
+        cudaMemset((void*)q_chain.Begin(), -1, q_chain.TotalSize() * sizeof(int));
         UpdateGeneralizedInertialMatrixKernel<TDataType><<<32, 512>>>(
             rigid_body_system->batch_bodies,
             rigid_body_system->batch_qM,
@@ -2856,7 +2843,7 @@ namespace dyno
             rigid_body_system->q_offset,
             rigid_body_system->q_lengths,
             rigid_body_system->batch_cdof,
-            rigid_body_system->batch_q_chain,
+            rigid_body_system->batch_q_chain_new,
             rigid_body_system->batch_crb,
             rigid_body_system->batch_inertia,
             rigid_body_system->batch_mass,
@@ -2956,12 +2943,12 @@ namespace dyno
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
 
-        rigid_body_system->batch_J.reset();
+        rigid_body_system->batch_J_new.Reset();
         ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(
             rigid_body_system->collision_constraints,
             rigid_body_system->batch_nv,
             rigid_body_system->constraint_offset,
-            rigid_body_system->batch_J,
+            rigid_body_system->batch_J_new,
             rigid_body_system->root_idx,
             rigid_body_system->subtree_com,
             rigid_body_system->batch_cdof,
@@ -2977,7 +2964,7 @@ namespace dyno
             rigid_body_system->anchor_constraints,
             rigid_body_system->num_each_constraint,
             rigid_body_system->batch_nv,
-            rigid_body_system->batch_J,
+            rigid_body_system->batch_J_new,
             rigid_body_system->root_idx,
             rigid_body_system->subtree_com,
             rigid_body_system->batch_cdof,
@@ -2993,7 +2980,7 @@ namespace dyno
             rigid_body_system->num_each_constraint,
             rigid_body_system->constraint_offset,
             rigid_body_system->batch_nv,
-            rigid_body_system->batch_J,
+            rigid_body_system->batch_J_new,
             rigid_body_system->friction_loss_constraints,
             num_envs);
         cudaDeviceSynchronize();
@@ -3006,18 +2993,18 @@ namespace dyno
             rigid_body_system->joint_type,
             rigid_body_system->constraint_offset,
             rigid_body_system->batch_nv,
-            rigid_body_system->batch_J,
+            rigid_body_system->batch_J_new,
             num_envs);
         cudaDeviceSynchronize();
         
 
-        spdlog::info("Jacobian: ");
-        PrintJacobian<TDataType><<<1, 1>>>(
-            rigid_body_system->batch_J,
-            rigid_body_system->num_constraints,
-            rigid_body_system->batch_nv,
-            0);
-        cudaDeviceSynchronize();
+        // spdlog::info("Jacobian: ");
+        // PrintJacobian<TDataType><<<1, 1>>>(
+        //     rigid_body_system->batch_J,
+        //     rigid_body_system->num_constraints,
+        //     rigid_body_system->batch_nv,
+        //     0);
+        // cudaDeviceSynchronize();
 
     }
 
@@ -3029,8 +3016,8 @@ namespace dyno
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
 
-        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_qvel, rigid_body_system->batch_constraint_vel,
-            rigid_body_system->num_constraints, rigid_body_system->batch_nv, num_envs);
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_qvel, rigid_body_system->batch_constraint_vel,
+            rigid_body_system->num_constraints, rigid_body_system->batch_nv);
         cudaDeviceSynchronize();
 
         ComputeAnchorAref<TDataType><<<32, 512>>>(
@@ -3066,37 +3053,36 @@ namespace dyno
             num_envs);
         cudaDeviceSynchronize();
         
-        printf("Aref:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_aref, 0, 16);
-        cudaDeviceSynchronize();
+        // printf("Aref:\n");
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_aref, 0);
+        // cudaDeviceSynchronize();
 
-        printf("Imp:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_imp, 0, 16);
-        cudaDeviceSynchronize();
+        // printf("Imp:\n");
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_imp, 0);
+        // cudaDeviceSynchronize();
 
         // Compute constraint residuals Jaref
         BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_qacc,
-            rigid_body_system->batch_Ma, rigid_body_system->batch_nv, rigid_body_system->batch_nv, num_envs);
+            rigid_body_system->batch_Ma, rigid_body_system->batch_nv, rigid_body_system->batch_nv);
         cudaDeviceSynchronize();
         printf("Ma!!!:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_Ma, 0, 3);
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_Ma, 0);
         cudaDeviceSynchronize();
 
         printf("qacc!!!:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0, 3);
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0);
         cudaDeviceSynchronize();
 
-        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_qacc,
-            rigid_body_system->batch_Jaref, rigid_body_system->num_constraints, rigid_body_system->batch_nv, num_envs);
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_qacc,
+            rigid_body_system->batch_Jaref, rigid_body_system->num_constraints, rigid_body_system->batch_nv);
         cudaDeviceSynchronize();
 
-        SumArray2D<<<32, 128>>>(rigid_body_system->batch_Jaref, rigid_body_system->batch_aref, rigid_body_system->batch_Jaref,
-            num_envs, rigid_body_system->num_constraints, false);
+        SumBatchArray<<<32, 128>>>(rigid_body_system->batch_Jaref, rigid_body_system->batch_aref, rigid_body_system->batch_Jaref, false);
         cudaDeviceSynchronize();
 
-        printf("Jaref:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_Jaref, 0, 16);
-        cudaDeviceSynchronize();
+        // printf("Jaref:\n");
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_Jaref, 0);
+        // cudaDeviceSynchronize();
 
 
     }
@@ -3135,7 +3121,7 @@ namespace dyno
             num_envs);
         cudaDeviceSynchronize();
 
-        rigid_body_system->batch_dA.reset();
+        rigid_body_system->batch_dA.Reset();
 
         ComputeAnchor_dAKernel<TDataType><<<32, 512>>>(
             rigid_body_system->num_each_constraint,
@@ -3176,9 +3162,9 @@ namespace dyno
             num_envs);
         cudaDeviceSynchronize();
 
-        printf("R:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0, 16);
-        cudaDeviceSynchronize();
+        // printf("R:\n");
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0);
+        // cudaDeviceSynchronize();
 
         ComputeDKernel<TDataType><<<32, 512>>>(
             rigid_body_system->num_constraints,
@@ -3186,9 +3172,9 @@ namespace dyno
             num_envs);
         cudaDeviceSynchronize();
 
-        printf("D:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0, 16);
-        cudaDeviceSynchronize();
+        // printf("D:\n");
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_D, 0);
+        // cudaDeviceSynchronize();
 
     }
 
@@ -3200,8 +3186,8 @@ namespace dyno
         const int num_envs = env_infos->num_envs;
         
         rigid_body_system->batch_energy.reset();
-        rigid_body_system->batch_constraint_energy.reset();
-        rigid_body_system->batch_unquads.reset();
+        rigid_body_system->batch_constraint_energy.Reset();
+        rigid_body_system->batch_unquads.Reset();
 
         AnchorEnergyKernel<TDataType><<<num_envs, 512>>>(
             rigid_body_system->is_converged,
@@ -3242,9 +3228,9 @@ namespace dyno
             num_envs);
         cudaDeviceSynchronize();
         
-        spdlog::info("Constraint force:");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_constraint_force, 0, 16);
-        cudaDeviceSynchronize();
+        // spdlog::info("Constraint force:");
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_constraint_force, 0);
+        // cudaDeviceSynchronize();
 
         spdlog::info("s: ");
         PrintVector<<<1, 1>>>(rigid_body_system->batch_energy, 1);
@@ -3272,7 +3258,7 @@ namespace dyno
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
 
-        rigid_body_system->batch_H.reset();
+        rigid_body_system->batch_H.Reset();
 
         const int max_nv = rigid_body_system->max_bodies * 6;
         dim3 block(16, 16, 1);
@@ -3284,7 +3270,7 @@ namespace dyno
             rigid_body_system->is_converged,
             rigid_body_system->batch_nv,
             rigid_body_system->num_constraints,
-            rigid_body_system->batch_J,
+            rigid_body_system->batch_J_new,
             rigid_body_system->batch_D,
             rigid_body_system->batch_unquads,
             rigid_body_system->batch_qM,
@@ -3292,9 +3278,9 @@ namespace dyno
             num_envs);
         cudaDeviceSynchronize();
         
-        printf("Hessian:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_H, 0, 6 * 6);
-        cudaDeviceSynchronize();
+        // printf("Hessian:\n");
+        // PrintVector<<<1, 1>>>(rigid_body_system->batch_H, 0, 6 * 6);
+        // cudaDeviceSynchronize();
     }
 
     template<typename TDataType>
@@ -3304,13 +3290,13 @@ namespace dyno
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
 
-        rigid_body_system->batch_grad.reset();
+        rigid_body_system->batch_grad.Reset();
 
         UpdateGradientKernel<TDataType><<<num_envs, 512>>>(
             rigid_body_system->is_converged,
             rigid_body_system->batch_nv,
             rigid_body_system->num_constraints,
-            rigid_body_system->batch_J,
+            rigid_body_system->batch_J_new,
             rigid_body_system->batch_constraint_force,
             rigid_body_system->batch_Ma,
             rigid_body_system->batch_q_ex_force,
@@ -3319,7 +3305,7 @@ namespace dyno
         cudaDeviceSynchronize();
 
         printf("Gradient:\n");
-        PrintVector<<<1, 1>>>(rigid_body_system->batch_grad, 0, 6);
+        PrintVector<<<1, 1>>>(rigid_body_system->batch_grad, 0);
         cudaDeviceSynchronize();
     }
 
@@ -3329,18 +3315,18 @@ namespace dyno
         auto& env_infos = this->env_infos;
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
-        rigid_body_system->batch_dx.reset();
+        rigid_body_system->batch_dx.Reset();
 
         auto& H = rigid_body_system->batch_H;
         auto& grad = rigid_body_system->batch_grad;
         auto& x = rigid_body_system->batch_dx; // reuse qacc as solution
 
         
-        BatchCholeskySolveVarSizeKernel<<<num_envs, 1>>>(H, grad, x, rigid_body_system->batch_nv, num_envs, rigid_body_system->is_converged);
+        BatchCholeskySolveVarSizeKernel<<<num_envs, 1>>>(H, grad, x, rigid_body_system->is_converged);
         cudaDeviceSynchronize();
 
         printf("dx (solution):\n");
-        PrintVector<<<1, 1>>>(x, 0, 6);
+        PrintVector<<<1, 1>>>(x, 0);
         cudaDeviceSynchronize();
     }
 

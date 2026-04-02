@@ -91,6 +91,11 @@ namespace dyno {
         DevArr2D<Real>      batch_D;        // nc * 1
         DArray<int>         is_converged;
         DArray<Real>        sys_alpha;
+        DArray<Real>        alpha_cands;
+        DevArr2D<Real>      batch_alpha_energies;
+        DevArr2D<Real>      batch_Ma_line_search;
+        DevArr2D<Real>      batch_Jaref_line_search;
+
 
         // For constraints
         DevMat2D<Real>               batch_J_new;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints   nc * nv

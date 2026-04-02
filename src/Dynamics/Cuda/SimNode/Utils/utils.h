@@ -324,7 +324,7 @@ namespace dyno
 
     template<typename T>
     __global__ void SumBatchArray(DevArr2D<T> arr_src1, DevArr2D<T> arr_src2, 
-        DevArr2D<T> arr_dst, bool is_sum=true)
+        DevArr2D<T> arr_dst, bool is_sum=true, DArray<T> factors=DArray<T>(), DArray<int> skip_flag=DArray<int>())
     {
         int sys_id = blockIdx.x;
         int sys_num = arr_src1.NumBlocks();
@@ -341,41 +341,16 @@ namespace dyno
             return;
         }
 
+        if(skip_flag.size() > 0)
+            if(skip_flag[sys_id])
+                return;
+
         int len = arr_src1.Sizes()[sys_id];
+        T factor = (factors.size() > 0) ? factors[sys_id] : T(1);
         for(int i = threadIdx.x; i < len; i += blockDim.x)
         {
             T a = arr_src1(sys_id, i);
-            T b = arr_src2(sys_id, i);
-            arr_dst(sys_id, i) = is_sum ? (a + b) : (a - b);
-        }
-    }
-
-    template<typename T>
-    __global__ void SumBatchArray(DevArr2D<T> arr_src1, DevArr2D<T> arr_src2, 
-        DevArr2D<T> arr_dst, DArray<int> skip_flag, bool is_sum=true)
-    {
-        int sys_id = blockIdx.x;
-        int sys_num = arr_src1.NumBlocks();
-        if(sys_id >= sys_num)
-            return;
-        if(arr_src1.NumBlocks() != arr_src2.NumBlocks() || arr_src1.NumBlocks() != arr_dst.NumBlocks())
-        {
-            printf("Error: NumBlocks mismatch in SumBatchArray\n");
-            return;
-        }
-        if(arr_src1.Sizes()[sys_id] != arr_src2.Sizes()[sys_id] || arr_src1.Sizes()[sys_id] != arr_dst.Sizes()[sys_id])
-        {
-            printf("Error: Sizes mismatch for sys_id %d in SumBatchArray\n", sys_id);
-            return;
-        }
-        if(skip_flag[sys_id])
-            return;
-
-        int len = arr_src1.Sizes()[sys_id];
-        for(int i = threadIdx.x; i < len; i += blockDim.x)
-        {
-            T a = arr_src1(sys_id, i);
-            T b = arr_src2(sys_id, i);
+            T b = factor * arr_src2(sys_id, i);
             arr_dst(sys_id, i) = is_sum ? (a + b) : (a - b);
         }
     }
@@ -411,7 +386,7 @@ namespace dyno
     
     template<typename T>
     __global__ void BatchDenseMatrixVectorMul(DevMat2D<T> mat, DevArr2D<T> vec, DevArr2D<T> out, 
-        DArray<int> rows, DArray<int> cols, bool is_incremental=false, DArray<int> skip_flag=DArray<int>());
+        DArray<int> rows, DArray<int> cols, bool is_incremental=false, DArray<T> factors=DArray<T>(), DArray<int> skip_flag=DArray<int>());
 
     template<typename T>
     __global__ void BatchDenseMatrixVectorMul(DArray2D<T> mat, DevArr2D<T> vec, DevArr2D<T> out, 

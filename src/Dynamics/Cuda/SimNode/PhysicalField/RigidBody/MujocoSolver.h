@@ -34,6 +34,7 @@ namespace dyno
         void ComputeEnergy();
         void BuildHessian();
         void UpdateGradient();
+        void BatchLineSearch();
         void SolveSystem();
         void TimeIntegration();
 

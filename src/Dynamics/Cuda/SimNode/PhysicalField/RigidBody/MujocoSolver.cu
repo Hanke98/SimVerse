@@ -2352,7 +2352,6 @@ namespace dyno
             joint_qpos(env_id, joint_qpos_start));
     }
 
-
     __global__ void PrintTestInfos(
         DArray<int> batch_bodies,
         DevArr2D<int> q_offset,
@@ -2386,8 +2385,180 @@ namespace dyno
         }
     }
 
-}
+    __global__ void BatchAlphaInertiaEnergyKernel(
+        DevArr2D<Real> batch_Ma,
+        DevArr2D<Real> batch_Ma_increm,
+        DevArr2D<Real> batch_q_ex_force,
+        DevArr2D<Real> batch_qacc,
+        DevArr2D<Real> batch_dx,
+        DevArr2D<Real> batch_q_ex_acc,
+        DevArr2D<Real> batch_alpha_energies,
+        DArray<Real> alphas,
+        DArray<int> batch_nv, DArray<int> is_converged, int num_envs, int num_alphas)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        if(is_converged[env_id])
+            return;
 
+        int nv = batch_nv[env_id];
+        int alpha_idx = threadIdx.x / nv;
+        int dof_idx = threadIdx.x % nv;
+
+        if(alpha_idx >= num_alphas)
+            return;
+
+        const Real alpha = alphas[alpha_idx];
+
+
+        Real Ma = batch_Ma(env_id, dof_idx) + alpha * batch_Ma_increm(env_id, dof_idx);
+        Real q_ex_force = batch_q_ex_force(env_id, dof_idx);
+        Real q_acc = batch_qacc(env_id, dof_idx) + alpha * batch_dx(env_id, dof_idx);
+        Real q_ex_acc = batch_q_ex_acc(env_id, dof_idx);
+        atomicAdd(&batch_alpha_energies(env_id, alpha_idx), 0.5f * (Ma - q_ex_force) * (q_acc - q_ex_acc));
+    }
+
+    __global__ void BatchAlphaAnchorEnergyKernel(
+        DevArr2D<Real> batch_Jaref,
+        DevArr2D<Real> batch_Jaref_increm,
+        DevArr2D<Real> batch_D,
+        DevArr2D<Real> batch_alpha_energies,
+        DArray<Real> alphas,
+        DArray<Vec4i> num_each_constraint,
+        DArray<int> is_converged, int num_envs, int num_alphas)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        if(is_converged[env_id])
+            return;
+
+        int num_anchor = num_each_constraint[env_id][0];
+        if(num_anchor == 0)
+            return;
+        int alpha_idx = threadIdx.x / num_anchor;
+        if(alpha_idx >= num_alphas)
+            return;
+
+        
+        int cidx = threadIdx.x % num_anchor;
+
+        const Real D = batch_D(env_id, cidx);
+        const Real Jaref = batch_Jaref(env_id, cidx) + alphas[alpha_idx] * batch_Jaref_increm(env_id, cidx);
+        atomicAdd(&batch_alpha_energies(env_id, alpha_idx), 0.5f * D * Jaref * Jaref);
+
+    }
+
+    __global__ void BatchAlphaFrictionEnergyKernel(
+        BatchFrictionLossConstraints friction_loss_constraints,
+        DevArr2D<Real> batch_Jaref,
+        DevArr2D<Real> batch_Jaref_increm,
+        DevArr2D<Real> batch_D,
+        DevArr2D<Real> batch_alpha_energies,
+        DArray<Real> alphas,
+        DArray<Vec4i> num_each_constraint,
+        DArray<Vec4i> constraint_offset,
+        DArray<int> is_converged, int num_envs, int num_alphas)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        if(is_converged[env_id])
+            return;
+        int num_friction = num_each_constraint[env_id][1];
+        if(num_friction == 0)
+            return;
+        int alpha_idx = threadIdx.x / num_friction;
+
+        if(alpha_idx >= num_alphas)
+            return;
+
+        
+        int cidx = threadIdx.x % num_friction;
+
+        int c_offset = constraint_offset[env_id][1];
+        const int ridx = c_offset + cidx;
+        Real D = batch_D(env_id, ridx);
+        Real Jaref = batch_Jaref(env_id, ridx) + alphas[alpha_idx] * batch_Jaref_increm(env_id, ridx);
+        Real dof_frictionloss = friction_loss_constraints.dof_frictionloss(env_id, cidx);
+
+        Real R_dof_fl = dof_frictionloss / D;
+
+        if(Jaref <= -R_dof_fl)
+            atomicAdd(&batch_alpha_energies(env_id, alpha_idx), -0.5f * R_dof_fl * dof_frictionloss - dof_frictionloss * Jaref);
+        else if(Jaref >= R_dof_fl)
+            atomicAdd(&batch_alpha_energies(env_id, alpha_idx), -0.5f * R_dof_fl * dof_frictionloss + dof_frictionloss * Jaref);
+        else
+            atomicAdd(&batch_alpha_energies(env_id, alpha_idx), 0.5f * D * Jaref * Jaref);
+    }
+
+    __global__ void BatchAlphaContactAndJointLimitEnergyKernel(
+        DevArr2D<Real> batch_Jaref,
+        DevArr2D<Real> batch_Jaref_increm,
+        DevArr2D<Real> batch_D,
+        DevArr2D<Real> batch_alpha_energies,
+        DArray<Real> alphas,
+        DArray<Vec4i> num_each_constraint,
+        DArray<Vec4i> constraint_offset,
+        DArray<int> is_converged, int num_envs, int num_alphas)
+    {
+        int env_id = blockIdx.x;
+        if(env_id >= num_envs)
+            return;
+        if(is_converged[env_id])
+            return;
+
+        int num_contact = num_each_constraint[env_id][2];
+        int num_joint_limit = num_each_constraint[env_id][3];
+        int nc = num_contact + num_joint_limit;
+        if(nc == 0)
+            return;
+        int alpha_idx = threadIdx.x / nc;
+
+        if(alpha_idx >= num_alphas)
+            return;
+
+        
+        int cidx = constraint_offset[env_id][2] + threadIdx.x % nc;
+
+        Real Jaref = batch_Jaref(env_id, cidx) + alphas[alpha_idx] * batch_Jaref_increm(env_id, cidx);
+        Real D = batch_D(env_id, cidx);
+        if(Jaref < 0)
+            atomicAdd(&batch_alpha_energies(env_id, alpha_idx), 0.5f * D * Jaref * Jaref);
+
+    }
+
+    __global__ void ChooseAlphaKernel(
+        DevArr2D<Real> batch_alpha_energies,
+        DArray<Real> alphas,
+        DArray<Real> alphas_cands,
+        DArray<int> is_converged,
+        int num_envs, int num_alphas)
+    {
+        int env_id = threadIdx.x;
+        if(env_id >= num_envs)
+            return;
+        if(is_converged[env_id])
+            return;
+
+        Real min_energy = batch_alpha_energies(env_id, 0);
+        int min_idx = 0;
+        for(int i = 1; i < num_alphas; i++)
+        {
+            const Real& energy = batch_alpha_energies(env_id, i);
+            if(energy < min_energy)
+            {
+                min_energy = energy;
+                min_idx = i;
+            }
+        }
+
+        alphas[env_id] = alphas_cands[min_idx];
+        if(alphas[env_id] == 0.f)
+            is_converged[env_id] = 1;
+    }
+}
 
 namespace dyno
 {
@@ -2510,13 +2681,16 @@ namespace dyno
         rigid_body_system->batch_grad_cpy.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_dof_weight_inv.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_Ma.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_Ma_line_search.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_q_chain_new.BuildFromSizes(batch_nv_host);
+        
 
         // ====================  Num Max Constraints  ====================
         std::vector<int> max_constraints_host(num_envs, num_max_constraints);
         rigid_body_system->batch_aref.BuildFromSizes(max_constraints_host);
         rigid_body_system->batch_imp.BuildFromSizes(max_constraints_host);
         rigid_body_system->batch_Jaref.BuildFromSizes(max_constraints_host);
+        rigid_body_system->batch_Jaref_line_search.BuildFromSizes(max_constraints_host);
         rigid_body_system->batch_constraint_energy.BuildFromSizes(max_constraints_host);
         rigid_body_system->batch_unquads.BuildFromSizes(max_constraints_host);
         rigid_body_system->batch_dA.BuildFromSizes(max_constraints_host);
@@ -2576,6 +2750,15 @@ namespace dyno
         cholesky_solver = std::make_shared<BatchedCholeskySolver<typename TDataType::Real>>();
         cholesky_solver->Initialize(stream);
 
+        // Init batch line search
+        int alpha_nums = 10;
+        std::vector<Real> alphas_host(alpha_nums);
+        for(int i = 0; i < alpha_nums; i++)
+            alphas_host[i] = (1.f / (alpha_nums - 1)) * i;
+        rigid_body_system->alpha_cands.assign(alphas_host);
+        rigid_body_system->batch_alpha_energies.BuildFromSizes(std::vector<int>(num_envs, alpha_nums));
+
+
         spdlog::info("[MujocoSolver Solver] Finished initialization.");
     }
 
@@ -2597,7 +2780,7 @@ namespace dyno
 
         // q_ex_force = -q_inner_force
         SumBatchArray<<<32, 128>>>(rigid_body_system->batch_q_ex_force, rigid_body_system->batch_q_inner_force,
-            rigid_body_system->batch_q_ex_force, false);
+            rigid_body_system->batch_q_ex_force, false, DArray<Real>(), DArray<int>());
         cudaDeviceSynchronize();
 
         // Solve qM * q_ex_acc = q_ex_force by Cholesky factorization instead of explicitly forming qM^{-1}.        
@@ -2651,27 +2834,27 @@ namespace dyno
             rigid_body_system->batch_scale,
             num_envs);
         
-        // rigid_body_system->sys_alpha.reset();
+        thrust::fill(thrust::device, rigid_body_system->sys_alpha.begin(), rigid_body_system->sys_alpha.begin() + num_envs, 1.f);
 
-        // TODO: iterate more times
         int iter = 0;
         while(iter < 10)
         {
-            // TODO: line search
-
+            BatchLineSearch();
 
             // Update qacc      qacc += α * dx
             SumBatchArray<<<32, 128>>>(rigid_body_system->batch_qacc, rigid_body_system->batch_dx,
-                rigid_body_system->batch_qacc, rigid_body_system->is_converged);
+                rigid_body_system->batch_qacc, true, rigid_body_system->sys_alpha, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
 
             // Update Ma        Ma += α * qM * dx
-            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_dx, rigid_body_system->batch_Ma,
-                rigid_body_system->batch_nv, rigid_body_system->batch_nv, true, rigid_body_system->is_converged);
+            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_dx, 
+                rigid_body_system->batch_Ma, rigid_body_system->batch_nv, rigid_body_system->batch_nv, true, 
+                rigid_body_system->sys_alpha, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
             // Update Jaref     Jaref += α * J * dx
-            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref,
-                rigid_body_system->num_constraints, rigid_body_system->batch_nv, true, rigid_body_system->is_converged);
+            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_dx, 
+                rigid_body_system->batch_Jaref, rigid_body_system->num_constraints, rigid_body_system->batch_nv, 
+                true, rigid_body_system->sys_alpha, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
             // spdlog::info("qacc in newton");
             // PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0);
@@ -3050,7 +3233,7 @@ namespace dyno
         const int num_envs = env_infos->num_envs;
 
         BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_qvel, rigid_body_system->batch_constraint_vel,
-            rigid_body_system->num_constraints, rigid_body_system->batch_nv);
+            rigid_body_system->num_constraints, rigid_body_system->batch_nv, false, DArray<Real>(), DArray<int>());
         cudaDeviceSynchronize();
 
         ComputeAnchorAref<TDataType><<<32, 512>>>(
@@ -3096,7 +3279,7 @@ namespace dyno
 
         // Compute constraint residuals Jaref
         BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_qacc,
-            rigid_body_system->batch_Ma, rigid_body_system->batch_nv, rigid_body_system->batch_nv);
+            rigid_body_system->batch_Ma, rigid_body_system->batch_nv, rigid_body_system->batch_nv, false, DArray<Real>(), DArray<int>());
         cudaDeviceSynchronize();
         printf("Ma!!!:\n");
         PrintVector<<<1, 1>>>(rigid_body_system->batch_Ma, 0);
@@ -3107,10 +3290,11 @@ namespace dyno
         cudaDeviceSynchronize();
 
         BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_qacc,
-            rigid_body_system->batch_Jaref, rigid_body_system->num_constraints, rigid_body_system->batch_nv);
+            rigid_body_system->batch_Jaref, rigid_body_system->num_constraints, rigid_body_system->batch_nv, false, DArray<Real>(), DArray<int>());
         cudaDeviceSynchronize();
 
-        SumBatchArray<<<32, 128>>>(rigid_body_system->batch_Jaref, rigid_body_system->batch_aref, rigid_body_system->batch_Jaref, false);
+        SumBatchArray<<<32, 128>>>(rigid_body_system->batch_Jaref, rigid_body_system->batch_aref, 
+            rigid_body_system->batch_Jaref, false, DArray<Real>(), DArray<int>());
         cudaDeviceSynchronize();
 
         // printf("Jaref:\n");
@@ -3371,6 +3555,85 @@ namespace dyno
         cudaDeviceSynchronize();
     }
 
+    template<typename TDataType>
+    void MujocoSolver<TDataType>::BatchLineSearch()
+    {
+        auto& env_infos = this->env_infos;
+        auto& rigid_body_system = this->rigid_body;
+        const int num_envs = env_infos->num_envs;
+
+        rigid_body_system->sys_alpha.reset();
+        rigid_body_system->batch_alpha_energies.Reset();
+        // 要更新的变量：qacc, Ma, Jaref
+        // qacc += α * dx
+        // Ma += α * qM * dx
+        // Jaref += α * J * dx
+        // Update qacc      qacc += α * dx
+
+        // Update Ma        qM * dx
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_qM, rigid_body_system->batch_dx, rigid_body_system->batch_Ma_line_search,
+            rigid_body_system->batch_nv, rigid_body_system->batch_nv, false, DArray<Real>(), rigid_body_system->is_converged);
+        cudaDeviceSynchronize();
+        // Update Jaref     J * dx
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref_line_search,
+            rigid_body_system->num_constraints, rigid_body_system->batch_nv, false, DArray<Real>(), rigid_body_system->is_converged);
+        cudaDeviceSynchronize();
+
+        // 1. 多个environment并行评估不同α下的inertia能量
+        BatchAlphaInertiaEnergyKernel<<<num_envs, 512>>>(
+            rigid_body_system->batch_Ma,
+            rigid_body_system->batch_Ma_line_search,
+            rigid_body_system->batch_q_ex_force,
+            rigid_body_system->batch_qacc,
+            rigid_body_system->batch_dx,
+            rigid_body_system->batch_q_ex_acc,
+            rigid_body_system->batch_alpha_energies,
+            rigid_body_system->alpha_cands,
+            rigid_body_system->batch_nv, rigid_body_system->is_converged, 
+            env_infos->num_envs, rigid_body_system->alpha_cands.size());
+        cudaDeviceSynchronize();
+
+        // 2. 多个environment并行评估不同α下的Constraint能量
+        BatchAlphaAnchorEnergyKernel<<<num_envs, 512>>>(
+            rigid_body_system->batch_Jaref,
+            rigid_body_system->batch_Jaref_line_search,
+            rigid_body_system->batch_D,
+            rigid_body_system->batch_alpha_energies,
+            rigid_body_system->alpha_cands,
+            rigid_body_system->num_each_constraint,
+            rigid_body_system->is_converged,
+            env_infos->num_envs, rigid_body_system->alpha_cands.size());
+        BatchAlphaFrictionEnergyKernel<<<num_envs, 512>>>(
+            rigid_body_system->friction_loss_constraints,
+            rigid_body_system->batch_Jaref,
+            rigid_body_system->batch_Jaref_line_search,
+            rigid_body_system->batch_D,
+            rigid_body_system->batch_alpha_energies,
+            rigid_body_system->alpha_cands,
+            rigid_body_system->num_each_constraint,
+            rigid_body_system->constraint_offset,
+            rigid_body_system->is_converged,
+            env_infos->num_envs, rigid_body_system->alpha_cands.size());
+        BatchAlphaContactAndJointLimitEnergyKernel<<<num_envs, 512>>>(
+            rigid_body_system->batch_Jaref,
+            rigid_body_system->batch_Jaref_line_search,
+            rigid_body_system->batch_D,
+            rigid_body_system->batch_alpha_energies,
+            rigid_body_system->alpha_cands,
+            rigid_body_system->num_each_constraint,
+            rigid_body_system->constraint_offset,
+            rigid_body_system->is_converged,
+            env_infos->num_envs, rigid_body_system->alpha_cands.size());
+        cudaDeviceSynchronize();
+
+        ChooseAlphaKernel<<<1, num_envs>>>(
+            rigid_body_system->batch_alpha_energies,
+            rigid_body_system->sys_alpha,
+            rigid_body_system->alpha_cands,
+            rigid_body_system->is_converged,
+            env_infos->num_envs, rigid_body_system->alpha_cands.size());
+        cudaDeviceSynchronize();
+    }
 
     DEFINE_UNIQUE_CLASS(MujocoSolver, DataType3f);
 }

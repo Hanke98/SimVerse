@@ -277,7 +277,7 @@ namespace dyno
 
     template<typename T>
     __global__ void BatchDenseMatrixVectorMul(DevMat2D<T> mat, DevArr2D<T> vec, DevArr2D<T> out, 
-        DArray<int> rows, DArray<int> cols, bool is_incremental, DArray<int> skip_flag)
+        DArray<int> rows, DArray<int> cols, bool is_incremental, DArray<T> factors, DArray<int> skip_flag)
     {
         int sys_id = blockIdx.x;
         if (sys_id >= out.NumBlocks())
@@ -296,15 +296,16 @@ namespace dyno
         if(ridx >= row)
             return;
 
+        T factor = (factors.size() > 0) ? factors[sys_id] : T(1);
         T sum = 0;
         for(int cidx = 0; cidx < col; cidx++)
-            sum += mat(sys_id, ridx, cidx) * vec(sys_id, cidx);
+            sum += factor * mat(sys_id, ridx, cidx) * vec(sys_id, cidx);
 
         is_incremental ? out(sys_id, ridx) += sum : out(sys_id, ridx) = sum;
     }
 
-    template __global__ void BatchDenseMatrixVectorMul(DevMat2D<Real> mat, DevArr2D<Real> vec, DevArr2D<Real> out, DArray<int> rows, DArray<int> cols, bool is_incremental, DArray<int> skip_flag);
-    template __global__ void BatchDenseMatrixVectorMul(DevMat2D<int> mat, DevArr2D<int> vec, DevArr2D<int> out, DArray<int> rows, DArray<int> cols, bool is_incremental, DArray<int> skip_flag);
+    template __global__ void BatchDenseMatrixVectorMul(DevMat2D<Real> mat, DevArr2D<Real> vec, DevArr2D<Real> out, DArray<int> rows, DArray<int> cols, bool is_incremental, DArray<Real> factors, DArray<int> skip_flag);
+    template __global__ void BatchDenseMatrixVectorMul(DevMat2D<int> mat, DevArr2D<int> vec, DevArr2D<int> out, DArray<int> rows, DArray<int> cols, bool is_incremental, DArray<int> factors, DArray<int> skip_flag);
 
         template<typename T>
     __global__ void BatchDenseMatrixVectorMul(DArray2D<T> mat, DevArr2D<T> vec, DevArr2D<T> out, 

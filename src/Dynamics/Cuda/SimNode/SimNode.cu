@@ -571,7 +571,12 @@ namespace dyno
         // }
 
 
-        auto rigid_body = var_rigid_body.getValue();
+        auto rigid_body = var_rigid_body.constDataPtr();
+        if (!rigid_body)
+        {
+            var_rigid_body.setValue(RigidBody<TDataType>{});
+            rigid_body = var_rigid_body.constDataPtr();
+        }
         // rigid_body.batch_nv.resize(num_env);
         // rigid_body.batch_nv.assign(batch_nv_host);
 
@@ -588,9 +593,7 @@ namespace dyno
         // PrintBatchQaccKernel<Real><<<rigid_body.batch_qacc.nx(), rigid_body.batch_qacc.ny()>>>(rigid_body.batch_qacc);
 
         // AddShapes(rigid_body);
-        OneCubeCase(rigid_body);
-
-        var_rigid_body.setValue(rigid_body);
+        OneCubeCase(*rigid_body);
 
 
         spdlog::info("Finished initializing rigid body state variables.");
@@ -608,10 +611,16 @@ namespace dyno
         Reduction<int> reduce_int;
         
         // 1. collect shape information from rigid body
-        auto rigid_body = var_rigid_body.getValue();
-        int total_boxes = reduce_int.accumulate(rigid_body.env_num_boxes.begin(), rigid_body.env_num_boxes.size());
-        int total_spheres = reduce_int.accumulate(rigid_body.env_num_spheres.begin(), rigid_body.env_num_spheres.size());
-        int total_capsules = reduce_int.accumulate(rigid_body.env_num_capsules.begin(), rigid_body.env_num_capsules.size());
+        auto rigid_body = var_rigid_body.constDataPtr();
+        if (!rigid_body)
+        {
+            spdlog::error("Rigid body data is not initialized.");
+            return;
+        }
+
+        int total_boxes = reduce_int.accumulate(rigid_body->env_num_boxes.begin(), rigid_body->env_num_boxes.size());
+        int total_spheres = reduce_int.accumulate(rigid_body->env_num_spheres.begin(), rigid_body->env_num_spheres.size());
+        int total_capsules = reduce_int.accumulate(rigid_body->env_num_capsules.begin(), rigid_body->env_num_capsules.size());
         topo_boxes.resize(total_boxes);
         topo_spheres.resize(total_spheres);
         topo_capsules.resize(total_capsules);
@@ -620,9 +629,9 @@ namespace dyno
         spdlog::info("Total number of spheres across all environments: {}", total_spheres);
         spdlog::info("Total number of capsules across all environments: {}", total_capsules);
 
-        BindRenderBoxesKernel<<<num_env, 32>>>(rigid_body.boxes, rigid_body.env_num_boxes, rigid_body.env_box_offset, topo_boxes);
-        BindRenderSpheresKernel<<<num_env, 32>>>(rigid_body.spheres, rigid_body.env_num_spheres, rigid_body.env_sphere_offset, topo_spheres);
-        BindRenderCapsulesKernel<<<num_env, 32>>>(rigid_body.capsules, rigid_body.env_num_capsules, rigid_body.env_capsule_offset, topo_capsules);
+        BindRenderBoxesKernel<<<num_env, 32>>>(rigid_body->boxes, rigid_body->env_num_boxes, rigid_body->env_box_offset, topo_boxes);
+        BindRenderSpheresKernel<<<num_env, 32>>>(rigid_body->spheres, rigid_body->env_num_spheres, rigid_body->env_sphere_offset, topo_spheres);
+        BindRenderCapsulesKernel<<<num_env, 32>>>(rigid_body->capsules, rigid_body->env_num_capsules, rigid_body->env_capsule_offset, topo_capsules);
 
         cudaDeviceSynchronize();
 
@@ -638,25 +647,22 @@ namespace dyno
                 InitShape2RigidBodyMappingKernel,
                 mapping);
 
-            BuildShape2RigidBodyMappingKernel<<<rigid_body.rigid_body_2_rendering_idx_mapping.nx(), 128>>>(
+            BuildShape2RigidBodyMappingKernel<<<rigid_body->rigid_body_2_rendering_idx_mapping.nx(), 128>>>(
                 mapping,
-                rigid_body.rigid_body_2_rendering_idx_mapping,
-                rigid_body.batch_bodies,
-                rigid_body.batch_body_offset);
+                rigid_body->rigid_body_2_rendering_idx_mapping,
+                rigid_body->batch_bodies,
+                rigid_body->batch_body_offset);
         }
 
-        int total_rigid_bodies = reduce_int.accumulate(rigid_body.batch_bodies.begin(), rigid_body.batch_bodies.size());
-        FlattenArray2D(rigid_body.batch_pos, rigid_body.topo_pos_cache, total_rigid_bodies,
-            rigid_body.batch_bodies, rigid_body.batch_body_offset);
-        FlattenArray2D(rigid_body.batch_rot, rigid_body.topo_rot_cache, total_rigid_bodies,
-            rigid_body.batch_bodies, rigid_body.batch_body_offset);
+        int total_rigid_bodies = reduce_int.accumulate(rigid_body->batch_bodies.begin(), rigid_body->batch_bodies.size());
+        FlattenArray2D(rigid_body->batch_pos, rigid_body->topo_pos_cache, total_rigid_bodies,
+            rigid_body->batch_bodies, rigid_body->batch_body_offset);
+        FlattenArray2D(rigid_body->batch_rot, rigid_body->topo_rot_cache, total_rigid_bodies,
+            rigid_body->batch_bodies, rigid_body->batch_body_offset);
 
-        topo->setPosition(rigid_body.topo_pos_cache);
-        topo->setRotation(rigid_body.topo_rot_cache);
+        topo->setPosition(rigid_body->topo_pos_cache);
+        topo->setRotation(rigid_body->topo_rot_cache);
         topo->update();
-
-        // Persist flattened caches for downstream modules (e.g., SimModule::UpdateRenderingData).
-        var_rigid_body.setValue(rigid_body);
         
     }
 

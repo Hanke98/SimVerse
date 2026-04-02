@@ -998,7 +998,7 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
         DArray2D<int> parent_idx,
-        DevMat2D<Real> batch_qM_inv,
+        DevMat2D<Real> batch_qM_L,
         DevArr2D<Real> batch_weight_inv,
         int num_envs)
     {
@@ -1030,7 +1030,7 @@ namespace dyno
         ComputeJacLocal(j_tmp, pos, root_idx, subtree_com, batch_cdof, batch_nv, is_static, q_offset, q_lengths, parent_idx, env_id, bid);
         RotateJacobianRow(j_tmp, jac, nv);
 
-        const auto& L = batch_qM_inv;
+        const auto& L = batch_qM_L;
         for(int r = 0; r < 6; r++)
         {
             for(int i = 0; i < nv; i++)
@@ -1074,7 +1074,7 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
         DArray2D<int> joint_type,
-        DevMat2D<Real> batch_qM_inv,
+        DevMat2D<Real> batch_qM_L,
         DevArr2D<Real> batch_dof_weight_inv,
         int num_envs)
     {
@@ -1093,7 +1093,7 @@ namespace dyno
         if(jt == 0)
             return;
 
-        const auto& L = batch_qM_inv;
+        const auto& L = batch_qM_L;
         auto& dof_weight_inv = batch_dof_weight_inv;
 
         if(jt < 3)
@@ -2492,6 +2492,7 @@ namespace dyno
         rigid_body_system->batch_q_inner_force.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_q_ex_force.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_grad.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_grad_cpy.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_dof_weight_inv.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_Ma.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_q_chain_new.BuildFromSizes(batch_nv_host);
@@ -2511,7 +2512,7 @@ namespace dyno
         // ===============  Dense Matrices of size Nv * Nv  ==============
         rigid_body_system->batch_H.BuildFromSquares(rigid_body_system->batch_nv);
         rigid_body_system->batch_qM.BuildFromSquares(rigid_body_system->batch_nv);
-        rigid_body_system->batch_qM_inv.BuildFromSquares(rigid_body_system->batch_nv);
+        rigid_body_system->batch_qM_L.BuildFromSquares(rigid_body_system->batch_nv);
 
         // ===============  Dense Matrices of size Nc * Nv  ==============
         rigid_body_system->batch_J_new.BuildFromShapes(max_constraints_host, batch_nv_host);
@@ -2554,6 +2555,11 @@ namespace dyno
 
         spdlog::info("[MujocoSolver Solver] Initialization complete. Number of environments: {}", env_infos->num_envs);
 
+        // Init batch cholesky solver
+        cudaStream_t stream = nullptr;
+        cuSafeCall(cudaStreamCreate(&stream));
+        cholesky_solver = std::make_shared<BatchedCholeskySolver<typename TDataType::Real>>();
+        cholesky_solver->Initialize(stream);
 
         spdlog::info("[MujocoSolver Solver] Finished initialization.");
     }
@@ -2579,16 +2585,24 @@ namespace dyno
             rigid_body_system->batch_q_ex_force, false);
         cudaDeviceSynchronize();
 
-        // Solve qM * q_ex_acc = q_ex_force by Cholesky factorization instead of explicitly forming qM^{-1}.
-        // BatchCholeskySolveVarSizeKernel factorizes in-place, so copy qM to a temporary buffer first.
-        rigid_body_system->batch_qM_inv.Assign(rigid_body_system->batch_qM);
-        
-        BatchCholeskySolveVarSizeKernel<<<env_infos->num_envs, 1>>>(
-            rigid_body_system->batch_qM_inv,
-            rigid_body_system->batch_q_ex_force,
-            rigid_body_system->batch_q_ex_acc,
-            rigid_body_system->is_converged);
-        cudaDeviceSynchronize();
+        // Solve qM * q_ex_acc = q_ex_force by Cholesky factorization instead of explicitly forming qM^{-1}.        
+        rigid_body_system->batch_qM_L.Assign(rigid_body_system->batch_qM);
+        auto& qM_L= rigid_body_system->batch_qM_L;
+        cholesky_solver->Factorize(qM_L.Begin(), rigid_body_system->batch_nv.begin(), 
+            qM_L.Offsets().Begin(), env_infos->num_envs, CholeskyMethod::PaddedTiled);
+            
+        DevArr2D<Real> q_ex_force_bak;
+        q_ex_force_bak.Assign(rigid_body_system->batch_q_ex_force);
+        cholesky_solver->Solve(qM_L.Begin(), q_ex_force_bak.Begin(),
+            rigid_body_system->batch_nv.begin(), qM_L.Offsets().Begin(), 
+            rigid_body_system->batch_q_ex_acc.Offsets().Begin(),
+            env_infos->num_envs, CholeskyMethod::PaddedTiled);
+
+        // PrintVector<<<1, 1>>>(q_ex_force_bak, 0);
+        // cudaDeviceSynchronize();
+
+        rigid_body_system->batch_q_ex_acc.Assign(q_ex_force_bak);
+        // =========================== Batch Cholesky Solver Usage ===========================
 
         rigid_body_system->batch_qacc.Assign(rigid_body_system->batch_q_ex_acc);
 
@@ -2644,12 +2658,12 @@ namespace dyno
             BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref,
                 rigid_body_system->num_constraints, rigid_body_system->batch_nv, true, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
-            spdlog::info("qacc in newton");
-            PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0);
-            cuSynchronize();
-            spdlog::info("Ma in newton");
-            PrintVector<<<1, 1>>>(rigid_body_system->batch_Ma, 0);
-            cuSynchronize();
+            // spdlog::info("qacc in newton");
+            // PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0);
+            // cuSynchronize();
+            // spdlog::info("Ma in newton");
+            // PrintVector<<<1, 1>>>(rigid_body_system->batch_Ma, 0);
+            // cuSynchronize();
             // spdlog::info("Jaref in newton");
             // PrintVector<<<1, 1>>>(rigid_body_system->batch_Jaref, 0);
             // cuSynchronize();
@@ -3105,7 +3119,7 @@ namespace dyno
             rigid_body_system->q_offset,
             rigid_body_system->q_lengths,
             rigid_body_system->parent_idx,
-            rigid_body_system->batch_qM_inv,
+            rigid_body_system->batch_qM_L,
             rigid_body_system->batch_weight_inv,
             num_envs);
         cudaDeviceSynchronize();
@@ -3116,7 +3130,7 @@ namespace dyno
             rigid_body_system->q_offset,
             rigid_body_system->q_lengths,
             rigid_body_system->joint_type,
-            rigid_body_system->batch_qM_inv,
+            rigid_body_system->batch_qM_L,
             rigid_body_system->batch_dof_weight_inv,
             num_envs);
         cudaDeviceSynchronize();
@@ -3318,12 +3332,20 @@ namespace dyno
         rigid_body_system->batch_dx.Reset();
 
         auto& H = rigid_body_system->batch_H;
-        auto& grad = rigid_body_system->batch_grad;
+        auto& grad = rigid_body_system->batch_grad_cpy;
         auto& x = rigid_body_system->batch_dx; // reuse qacc as solution
 
-        
-        BatchCholeskySolveVarSizeKernel<<<num_envs, 1>>>(H, grad, x, rigid_body_system->is_converged);
-        cudaDeviceSynchronize();
+        grad.Assign(rigid_body_system->batch_grad);
+        cholesky_solver->Factorize(H.Begin(), rigid_body_system->batch_nv.begin(), 
+            H.Offsets().Begin(), env_infos->num_envs, CholeskyMethod::PaddedTiled);
+            
+        cholesky_solver->Solve(H.Begin(), grad.Begin(),
+            rigid_body_system->batch_nv.begin(), H.Offsets().Begin(), 
+            grad.Offsets().Begin(),
+            env_infos->num_envs, CholeskyMethod::PaddedTiled);
+
+        x.Assign(grad);
+
 
         printf("dx (solution):\n");
         PrintVector<<<1, 1>>>(x, 0);

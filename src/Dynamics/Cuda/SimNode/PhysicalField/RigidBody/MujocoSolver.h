@@ -36,6 +36,9 @@ namespace dyno
         void UpdateGradient();
         void SolveSystem();
         void TimeIntegration();
+
+    private:
+        std::shared_ptr<BatchedCholeskySolver<typename TDataType::Real>> cholesky_solver = nullptr;
     };
 }
 

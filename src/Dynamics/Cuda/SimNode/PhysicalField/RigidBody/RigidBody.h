@@ -48,7 +48,7 @@ namespace dyno {
 
         DevMat2D<Real>      batch_qM;      // [env_id, dof_idx] mass matrix    不应该显式的存，直接存LDL^T
         DevArr2D<Vec3f>     batch_inertia;
-        DevMat2D<Real>      batch_qM_inv;
+        DevMat2D<Real>      batch_qM_L;
 
         DArray<Real>        batch_scale;
         DevArr2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
@@ -78,6 +78,7 @@ namespace dyno {
         DevArr2D<Real>      batch_q_ex_acc;
         DevArr2D<Real>      batch_Ma;       // qM * qacc
         DevArr2D<Real>      batch_grad;     // nv * 1, Newton gradient: Ma - q_ex_force - J^T * constraint_force
+        DevArr2D<Real>      batch_grad_cpy;
         DevArr2D<Real>      batch_weight_inv;    // nbody * 1
         DevArr2D<Real>      batch_dof_weight_inv; // nv * 1
         DevArr2D<Real>      batch_dA;       // nc * 1

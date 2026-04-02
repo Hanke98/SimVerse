@@ -95,10 +95,7 @@ namespace dyno {
         std::vector<int> primitive_max_num{sphere_num_max, box_num_max, capsule_num_max};
 
         // printf("connect_max %d\n", connect_max);
-
-        auto rigid_body = var_rigid_body.getValue();
-        rigid_body.ParseRigidBody(envs_arr, body_num_max, primitive_max_num, joint_limit_max, connect_max, fl_max);
-        var_rigid_body.setValue(rigid_body);
+        var_rigid_body.constDataPtr()->ParseRigidBody(envs_arr, body_num_max, primitive_max_num, joint_limit_max, connect_max, fl_max);
     }
 
     template<typename TDataType>

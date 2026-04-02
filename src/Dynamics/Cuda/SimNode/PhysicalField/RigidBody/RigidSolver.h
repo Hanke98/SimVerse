@@ -2,8 +2,8 @@
 
 #include "../Solver.h"
 #include "RigidBody.h"
-#include "../../Utils/type.h"
-
+#include "Utils/type.h"
+#include "Utils/cholesky.h"
 #include <memory>
 
 namespace dyno {
@@ -26,6 +26,5 @@ namespace dyno {
     protected:
         std::shared_ptr<EnvInfosType> env_infos = nullptr;
         std::shared_ptr<RigidBodyType> rigid_body = nullptr;
-
     };
 }

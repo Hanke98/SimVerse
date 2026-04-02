@@ -266,9 +266,27 @@ namespace dyno
 
         printf("PrintVector[%d]: ", sys_id);
         for(int i = 0; i < length; i++)
-            printf("%f\t", vec(sys_id, i));
+            printf("%f\t", static_cast<float>(vec(sys_id, i)));
         printf("\n\n");
-    }   
+    }
+
+    template<typename T>
+    __global__ void PrintMatrix(DevMat2D<T> mat, int sys_id)
+    {
+        if(threadIdx.x != 0)
+            return;
+        int rows = mat.BlockRows(sys_id);
+        int cols = mat.BlockCols(sys_id);
+
+        printf("PrintMatrix[%d]:\n", sys_id);
+        for(int r = 0; r < rows; r++)
+        {
+            for(int c = 0; c < cols; c++)
+                printf("%f\t", mat(sys_id, r, c));
+            printf("\n");
+        }
+        printf("\n");
+    }
 
     template<typename T>
     __global__ void SumArray2D(DArray2D<T> arr_src1, DArray2D<T> arr_src2, DArray2D<T> arr_dst, int sys_num, DArray<int> lengths, bool is_sum=true)

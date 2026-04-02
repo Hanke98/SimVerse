@@ -1,7 +1,8 @@
 #include "RigidBody.h"
 #include "Object.h"
 #include "DataTypes.h"
-#include "../../Utils/utils.h"
+#include "Utils/utils.h"
+#include <Utils/SimBlockVector.h>
 
 namespace dyno
 {

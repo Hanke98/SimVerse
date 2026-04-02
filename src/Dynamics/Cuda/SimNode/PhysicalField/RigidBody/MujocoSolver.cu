@@ -1233,7 +1233,7 @@ namespace dyno
         {
             const Vec3f& axis = constraints.limit_extern(env_id, jl_cid);
             for(int i = 0; i < 3; i++)
-                J(env_id, row_idx * nv + q_start + i) = axis[i];
+                J(env_id, row_idx * nv + q_start + i) = - axis[i];
         }
     }
 

@@ -229,7 +229,7 @@ namespace dyno
                                 // boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
                                 mass_host(eid, bid) = 8 * density * halfLength[0] * halfLength[1] * halfLength[2];
-                                spdlog::info("box mass: {}, density: {}, size: {}", mass_host(eid, bid), density, halfLength[0] * 2 * halfLength[1] * 2 * halfLength[2] * 2);
+
                                 box_num++;
                                 break;
                             }
@@ -250,6 +250,7 @@ namespace dyno
                             }
                             default: ;
                         }
+                        spdlog::info("mass: {}, density: {}", mass_host(eid, bid), density);
                     }
 
                     if (rb_json.contains("joint")) {

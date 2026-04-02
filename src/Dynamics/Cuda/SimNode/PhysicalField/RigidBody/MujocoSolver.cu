@@ -991,7 +991,7 @@ namespace dyno
         DArray<int> batch_bodies,
         DArray2D<int> is_static,
         DArray<int> batch_nv,
-        DArray2D<Vec3f> batch_pos,
+        DevArr2D<Vec3f> batch_global_com_pos,
         DevArr2D<int> root_idx,
         DevArr2D<Vec3f> subtree_com,
         DevArr2D<Real> batch_cdof,
@@ -1026,8 +1026,7 @@ namespace dyno
 
         Real jac[6 * NV_TMP];
         Real j_tmp[6 * NV_TMP];
-        const auto& pos = batch_pos(env_id, bid);
-        ComputeJacLocal(j_tmp, pos, root_idx, subtree_com, batch_cdof, batch_nv, is_static, q_offset, q_lengths, parent_idx, env_id, bid);
+        ComputeJacLocal(j_tmp, batch_global_com_pos(env_id, bid), root_idx, subtree_com, batch_cdof, batch_nv, is_static, q_offset, q_lengths, parent_idx, env_id, bid);
         RotateJacobianRow(j_tmp, jac, nv);
 
         const auto& L = batch_qM_L;
@@ -1702,7 +1701,7 @@ namespace dyno
         DevArr2D<Vec3f> subtree_com,
         DArray2D<Real> batch_mass,
         DevArr2D<Real> subtree_mass,
-        DArray2D<Vec3f> batch_pos,
+        DevArr2D<Vec3f> batch_global_com_pos,
         DArray2D<int> parent_idx,
         int num_envs)
     {
@@ -1712,7 +1711,7 @@ namespace dyno
 
         const int num_bodies = batch_bodies[env_id];
         for(int bidx = 0; bidx < num_bodies; bidx++)
-            subtree_com(env_id, bidx) = batch_mass(env_id, bidx) * batch_pos(env_id, bidx);
+            subtree_com(env_id, bidx) = batch_mass(env_id, bidx) * batch_global_com_pos(env_id, bidx);
 
         for(int bidx = num_bodies - 1; bidx >= 0; bidx--)
         {
@@ -1866,11 +1865,11 @@ namespace dyno
     __global__ void SubtreeInertialKernel(
         DArray<int> batch_bodies,
         DevArr2D<int> root_idx,
-        DArray2D<Vec3f> batch_pos,
+        DevArr2D<Vec3f> batch_global_com_pos,
         DevArr2D<Vec3f> subtree_com,
         DevArr2D<Real> subtree_inertia,
         DevArr2D<Vec3f> batch_inertia,
-        DArray2D<Mat3f> batch_rot,
+        DevArr2D<Mat3f> batch_com_rot,
         DArray2D<Real> batch_mass,
         DevArr2D<Real> batch_crb,
         int num_envs)
@@ -1885,9 +1884,9 @@ namespace dyno
             return;
 
         const int ridx = root_idx(env_id, bid);
-        Vec3f offset = batch_pos(env_id, bid) - subtree_com(env_id, ridx);
+        Vec3f offset = batch_global_com_pos(env_id, bid) - subtree_com(env_id, ridx);
         const Vec3f& body_inertia = batch_inertia(env_id, bid);
-        const auto& rot_mat = batch_rot(env_id, bid);
+        const auto& rot_mat = batch_com_rot(env_id, bid);
         const Real mass = batch_mass(env_id, bid);
 
         SubtreeComInertia(subtree_inertia, body_inertia, rot_mat, offset, mass, env_id, bid);
@@ -2802,7 +2801,7 @@ namespace dyno
             rigid_body_system->subtree_com,
             rigid_body_system->batch_mass,
             rigid_body_system->subtree_mass,
-            rigid_body_system->batch_pos,
+            rigid_body_system->batch_global_com_pos,
             rigid_body_system->parent_idx,
             num_envs);
         cudaDeviceSynchronize();
@@ -2844,11 +2843,11 @@ namespace dyno
         SubtreeInertialKernel<<<32, 512>>>(
             rigid_body_system->batch_bodies,
             rigid_body_system->root_idx,
-            rigid_body_system->batch_pos,
+            rigid_body_system->batch_global_com_pos,
             rigid_body_system->subtree_com,
             rigid_body_system->subtree_inertia,
             rigid_body_system->batch_inertia,
-            rigid_body_system->batch_rot,
+            rigid_body_system->batch_com_rot,
             rigid_body_system->batch_mass,
             rigid_body_system->batch_crb,
             num_envs);
@@ -3132,7 +3131,7 @@ namespace dyno
             rigid_body_system->batch_bodies,
             rigid_body_system->is_static,
             rigid_body_system->batch_nv,
-            rigid_body_system->batch_pos,
+            rigid_body_system->batch_global_com_pos,
             rigid_body_system->root_idx,
             rigid_body_system->subtree_com,
             rigid_body_system->batch_cdof,

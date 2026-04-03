@@ -34,7 +34,7 @@ std::shared_ptr<dyno::SceneGraph> CreateScene()
 
 	auto surface_render = std::make_shared<dyno::GLSurfaceVisualModule>();
 	surface_render->setColor(dyno::Color(1.f, 1.f, 0.f));
-	surface_render->setAlpha(0.5f);
+	surface_render->setAlpha(1.0f);
 	mapper->outTriangleSet()->connect(surface_render->inTriangleSet());
 	sim_node->graphicsPipeline()->pushModule(surface_render);
 
@@ -49,6 +49,8 @@ int main()
 	dyno::GlfwApp app;
 	app.setSceneGraph(CreateScene());
 	app.initialize(1280, 768);
+	app.renderWindow()->setScreenRecordingPath("/home/zhen/simverse/examples/Cuda/SimNode/SimNodeInit/screen_record/");
+	// app.renderWindow()->isScreenRecordingOn() = true;
 	app.mainLoop();
 
 	return 0;

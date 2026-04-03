@@ -2,6 +2,7 @@
 #include <spdlog/spdlog.h>
 #include <thrust/device_ptr.h>
 #include <thrust/reduce.h>
+#include <thrust/scan.h>
 #include <thrust/execution_policy.h> 
 
 #include "../../Utils/utils.h"
@@ -14,7 +15,8 @@
 namespace dyno
 {
     __global__ void TimeIntegrationKernel(
-        DArray<int> batch_bodies,
+        DArray<int> flatten_body_to_env,
+        DArray<int> batch_body_offset,
         DevArr2D<int> parent_idx,
         DevArr2D<int> is_static,
         DevArr2D<int> qpos_offset,
@@ -23,35 +25,87 @@ namespace dyno
         DevArr2D<Real> batch_qvel,
         DevArr2D<int> joint_type,
         DArray<Real> dts,
-        int num_envs)
+        int num_envs,
+        int total_bodies)
     {
-        int env_id = blockDim.x * blockIdx.x + threadIdx.x;
-        if(env_id >= num_envs)
+        const int global_bid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (global_bid >= total_bodies)
             return;
 
-        int env_self_bodies = batch_bodies[env_id];
+        const int env_id = flatten_body_to_env[global_bid];
+        if (env_id >= num_envs)
+            return;
+
+        const int bid = global_bid - batch_body_offset[env_id];
+
+        const int parent = parent_idx(env_id, bid);
+        const int is_static_body = is_static(env_id, bid);
+        const int qpos_start = qpos_offset(env_id, bid);
+        const int q_start = q_offset(env_id, bid);
         const Real dt = dts[env_id];
-        for(int bid = 0; bid < env_self_bodies; bid++)
+
+        if (parent == -1)
         {
-            const int parent = parent_idx(env_id, bid);
-            const int is_static_body = is_static(env_id, bid);
+            if (is_static_body)
+                return;
 
-            const int qpos_start = qpos_offset(env_id, bid);
-            const int q_start = q_offset(env_id, bid);
+            for (int i = 0; i < 3; i++)
+                batch_qpos(env_id, qpos_start + i) += batch_qvel(env_id, q_start + i) * dt;
 
+            Vec3f w = Vec3f(
+                batch_qvel(env_id, q_start + 3),
+                batch_qvel(env_id, q_start + 4),
+                batch_qvel(env_id, q_start + 5));
 
-            if(parent == -1)
+            Quat<Real> quat = Quat<Real>(
+                batch_qpos(env_id, qpos_start + 3),
+                batch_qpos(env_id, qpos_start + 4),
+                batch_qpos(env_id, qpos_start + 5),
+                batch_qpos(env_id, qpos_start + 6));
+
+            Real w_norm = w.norm();
+            Quat<Real> qrot;
+
+            if (w_norm > 1e-8)
             {
-                if(is_static_body)
-                    continue;
+                Vec3f axis = w / w_norm;
+                Real angle = w_norm * dt;
+                qrot = QuatFromAxisAngle(axis, angle);
+            }
+            else
+            {
+                qrot = Quat<Real>(0, 0, 0, 1);
+            }
 
-                for(int i = 0; i < 3; i++)
-                    batch_qpos(env_id, qpos_start + i) += batch_qvel(env_id, q_start + i) * dt;
+            quat.normalize();
+            Quat<Real> quat_new = quat * qrot;
+            batch_qpos(env_id, qpos_start + 3) = quat_new.x;
+            batch_qpos(env_id, qpos_start + 4) = quat_new.y;
+            batch_qpos(env_id, qpos_start + 5) = quat_new.z;
+            batch_qpos(env_id, qpos_start + 6) = quat_new.w;
+        }
+        else
+        {
+            const int jt = joint_type(env_id, bid);
+            if (jt < 3)
+            {
+                batch_qpos(env_id, qpos_start) += batch_qvel(env_id, q_start) * dt;
+            }
+            else
+            {
+                Vec3f w = Vec3f(
+                    batch_qvel(env_id, q_start),
+                    batch_qvel(env_id, q_start + 1),
+                    batch_qvel(env_id, q_start + 2));
 
-                Vec3f w = Vec3f(batch_qvel(env_id, q_start + 3), batch_qvel(env_id, q_start + 4), batch_qvel(env_id, q_start + 5));
-                Quat<Real> quat = Quat<Real>(batch_qpos(env_id, qpos_start + 3), batch_qpos(env_id, qpos_start + 4), batch_qpos(env_id, qpos_start + 5), batch_qpos(env_id, qpos_start + 6));
+                Quat<Real> quat = Quat<Real>(
+                    batch_qpos(env_id, qpos_start),
+                    batch_qpos(env_id, qpos_start + 1),
+                    batch_qpos(env_id, qpos_start + 2),
+                    batch_qpos(env_id, qpos_start + 3));
+
                 Real w_norm = w.norm();
-                Quat<Real> qrot;
+                Quat<Real> qrot = Quat<Real>(0, 0, 0, 1);
 
                 if (w_norm > 1e-8)
                 {
@@ -59,43 +113,13 @@ namespace dyno
                     Real angle = w_norm * dt;
                     qrot = QuatFromAxisAngle(axis, angle);
                 }
-                else
-                    qrot = Quat<Real>(0, 0, 0, 1);
 
                 quat.normalize();
                 Quat<Real> quat_new = quat * qrot;
-                batch_qpos(env_id, qpos_start + 3) = quat_new.x;
-                batch_qpos(env_id, qpos_start + 4) = quat_new.y;
-                batch_qpos(env_id, qpos_start + 5) = quat_new.z;
-                batch_qpos(env_id, qpos_start + 6) = quat_new.w;
-            }
-            else
-            {
-                const int joint_type_body = joint_type(env_id, bid);
-                if(joint_type_body < 3)  // Hinge or Slide
-                    batch_qpos(env_id, qpos_start) += batch_qvel(env_id, q_start) * dt;
-                else
-                {
-                    Vec3f w = Vec3f(batch_qvel(env_id, q_start), batch_qvel(env_id, q_start + 1), batch_qvel(env_id, q_start + 2));
-                    Quat<Real> quat = Quat<Real>(batch_qpos(env_id, qpos_start), batch_qpos(env_id, qpos_start + 1), batch_qpos(env_id, qpos_start + 2), batch_qpos(env_id, qpos_start + 3));
-                    Real w_norm = w.norm();
-                    Quat<Real> qrot = Quat<Real>(0, 0, 0, 1);
-
-                    if (w_norm > 1e-8)
-                    {
-                        Vec3f axis = w / w_norm;
-                        Real angle = w_norm * dt;
-                        qrot = QuatFromAxisAngle(axis, angle);
-                    }
-
-                    quat.normalize();
-                    Quat<Real> quat_new = quat * qrot;
-                    batch_qpos(env_id, qpos_start) = quat_new.x;
-                    batch_qpos(env_id, qpos_start + 1) = quat_new.y;
-                    batch_qpos(env_id, qpos_start + 2) = quat_new.z;
-                    batch_qpos(env_id, qpos_start + 3) = quat_new.w;
-                }
-
+                batch_qpos(env_id, qpos_start) = quat_new.x;
+                batch_qpos(env_id, qpos_start + 1) = quat_new.y;
+                batch_qpos(env_id, qpos_start + 2) = quat_new.z;
+                batch_qpos(env_id, qpos_start + 3) = quat_new.w;
             }
         }
     }
@@ -278,6 +302,24 @@ namespace dyno
 
     }
 
+    template<typename TDataType>
+    __global__ void FillFlattenConstraintKernel(
+    DArray<int> flatten_constraint_to_env,
+    DArray<int> batch_constraint_offset,
+    DArray<int> num_constraints,
+    int num_envs)
+    {
+        const int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if (env_id >= num_envs)
+            return;
+
+        const int offset = batch_constraint_offset[env_id];
+        const int nc = num_constraints[env_id];
+
+        for (int cidx = 0; cidx < nc; ++cidx)
+            flatten_constraint_to_env[offset + cidx] = env_id;
+    }
+
 
     __global__ void InitInertiaKernel(DArray<int> batch_bodies, DevArr2D<Vec3f> batch_inertia,
         DevArr2D<Real> batch_mass, DArray2D<SphereInfo> spheres, DArray2D<BoxInfo> boxes,
@@ -417,23 +459,36 @@ namespace dyno
     }
 
     __global__ void UpdateGeneralizedVelKernel(
-        DArray<int> batch_nv,
+        DArray<Pair<int, int>> flatten_q_to_env_body,
+        DevArr2D<int> batch_nv_offset,
+        DevArr2D<int> q_offset,
+        DevArr2D<int> q_lengths,
         DevArr2D<Real> batch_qvel,
         DevArr2D<Real> batch_qacc,
         DArray<Real> timesteps,
-        int num_envs)
+        int num_envs,
+        int total_nv)
     {
-        int env_id = blockIdx.x;
+        const int global_qidx = blockIdx.x * blockDim.x + threadIdx.x;
+
+        if (global_qidx >= total_nv)
+            return;
+        const int env_id = flatten_q_to_env_body[global_qidx].first;
+        const int body_id = flatten_q_to_env_body[global_qidx].second;
+
         if(env_id >= num_envs)
             return;
 
-        const int num_nv = batch_nv[env_id];
-        int dof_idx = threadIdx.x;
-        if(dof_idx >= num_nv)
+        const int body_global_q_start = batch_nv_offset(env_id, body_id);
+        const int q_start = q_offset(env_id, body_id);
+        const int q_num = q_lengths(env_id, body_id);
+        const int qidx = q_start + (global_qidx - body_global_q_start);
+
+        if (qidx < q_start || qidx >= q_start + q_num)
             return;
 
         const Real dt = timesteps[env_id];
-        batch_qvel(env_id, dof_idx) += batch_qacc(env_id, dof_idx) * dt;
+        batch_qvel(env_id, qidx) += batch_qacc(env_id, qidx) * dt;
     }
 
     __device__ void CubeCollitionWithGround(const Vec3f& pos, const Mat3f& rot, const BoxInfo& box,
@@ -1630,37 +1685,51 @@ namespace dyno
     template<typename TDataType>
     __global__ void UpdateGradientKernel(
         DArray<int> is_converged,
-        DArray<int> batch_nv,
+        DArray<Pair<int, int>> flatten_q_to_env_body,
+        DevArr2D<int> batch_nv_offset,
         DArray<int> num_constraints,
         DevMat2D<Real> batch_J,
         DevArr2D<Real> batch_constraint_force,
         DevArr2D<Real> batch_Ma,
         DevArr2D<Real> batch_q_ex_force,
         DevArr2D<Real> batch_grad,
-        int num_envs)
+        DevArr2D<int> q_offset,
+        DevArr2D<int> q_lengths,
+        int num_envs,
+        int total_nv)
     {
-        const int env_id = blockIdx.x;
+
+        const int global_qidx = blockIdx.x * blockDim.x + threadIdx.x;
+        if(global_qidx >= total_nv)
+            return;
+
+        const int env_id = flatten_q_to_env_body[global_qidx].first;
+        const int body_id = flatten_q_to_env_body[global_qidx].second;
+
         if(env_id >= num_envs)
             return;
         if(is_converged[env_id])
             return;
 
-        const int dof_idx = threadIdx.x;
-        const int nv = batch_nv[env_id];
-        if(dof_idx >= nv)
+        const int body_global_q_start = batch_nv_offset(env_id, body_id);
+        const int q_start = q_offset(env_id, body_id);
+        const int q_num = q_lengths(env_id, body_id);
+        const int qidx = q_start + (global_qidx - body_global_q_start);
+
+        if (qidx < q_start || qidx >= q_start + q_num)
             return;
 
         const int nc = num_constraints[env_id];
         Real jt_f = 0.f;
         for(int cidx = 0; cidx < nc; cidx++)
         {
-            const Real j = batch_J(env_id, cidx, dof_idx);
+            const Real j = batch_J(env_id, cidx, qidx);
             jt_f += j * batch_constraint_force(env_id, cidx);
         }
 
-        batch_grad(env_id, dof_idx) =
-            -batch_Ma(env_id, dof_idx)
-            +batch_q_ex_force(env_id, dof_idx)
+        batch_grad(env_id, qidx) =
+            -batch_Ma(env_id, qidx)
+            +batch_q_ex_force(env_id, qidx)
             +jt_f;
     }
 
@@ -2644,7 +2713,8 @@ namespace dyno
 
     template<typename TDataType>
     __global__ void UpdateJointPoseKernel(
-        DArray<int> batch_bodies,
+        DArray<int> flatten_body_to_env,
+        DArray<int> batch_body_offset,
         DArray2D<Vec3f> batch_pos,
         DArray2D<Quat<Real>> batch_quat,
         DArray2D<Mat3f> batch_rot,
@@ -2655,17 +2725,18 @@ namespace dyno
         DevArr2D<int> joint_qpos_offset,
         DevArr2D<Real> batch_qpos,
         DevArr2D<int> joint_type,
-        int num_envs)
+        int num_envs,
+        int total_bodies)
     {
-        int env_id = blockIdx.x;
+        const int global_bid = blockIdx.x * blockDim.x + threadIdx.x;
+        if(global_bid >= total_bodies)
+            return;
+
+        const int env_id = flatten_body_to_env[global_bid];
         if(env_id >= num_envs)
             return;
 
-        const int num_bodies = batch_bodies[env_id];
-        int bid = threadIdx.x;
-        if(bid >= num_bodies)
-            return;
-
+        const int bid = global_bid - batch_body_offset[env_id];
         const int parent = parent_idx(env_id, bid);
         const int is_static_body = is_static(env_id, bid);
         const int qpos_start = qpos_offset(env_id, bid);
@@ -2966,6 +3037,7 @@ namespace dyno
         INIT_DYNO_ARRAY(rigid_body_system->batch_scale, num_envs);
         INIT_DYNO_ARRAY(rigid_body_system->is_converged, num_envs);
         INIT_DYNO_ARRAY(rigid_body_system->sys_alpha, num_envs);
+        INIT_DYNO_ARRAY(rigid_body_system->batch_constraint_offset, num_envs);
 
         
         // Calculate the DoFs and establish index
@@ -3028,6 +3100,8 @@ namespace dyno
             rigid_body_system->q_lengths,rigid_body_system->batch_nv_offset, rigid_body_system->batch_groups, 
             rigid_body_system->flatten_group_to_env, rigid_body_system->flatten_body_to_env, 
             rigid_body_system->flatten_q_to_env_body, num_envs);
+        
+    
 
         // 2. malloc the solver states based on the DoF count
         rigid_body_system->batch_qpos.BuildFromSizes(num_qpos);
@@ -3276,16 +3350,28 @@ namespace dyno
         const auto& env_infos = this->env_infos;
         const auto& rigid_body_system = this->rigid_body;
 
-        UpdateGeneralizedVelKernel<<<32, 512>>>(
-            rigid_body_system->batch_nv,
+        const int total_nv_ = rigid_body_system->flatten_q_to_env_body.size();
+        const int threads = 128;
+        const int blocks_nv = (total_nv_ + threads - 1) / threads;
+
+        UpdateGeneralizedVelKernel<<<blocks_nv, threads>>>(
+            rigid_body_system->flatten_q_to_env_body,
+            rigid_body_system->batch_nv_offset,
+            rigid_body_system->q_offset,
+            rigid_body_system->q_lengths,
             rigid_body_system->batch_qvel,
             rigid_body_system->batch_qacc,
             env_infos->timesteps,
-            env_infos->num_envs);
+            env_infos->num_envs,
+            total_nv_);
         cudaDeviceSynchronize();
 
-        TimeIntegrationKernel<<<32, 512>>>(
-            rigid_body_system->batch_bodies,
+        const int total_bodies_ = rigid_body_system->flatten_body_to_env.size();
+        const int blocks_body = (total_bodies_ + threads - 1) / threads;
+
+        TimeIntegrationKernel<<<blocks_body, threads>>>(
+            rigid_body_system->flatten_body_to_env,
+            rigid_body_system->batch_body_offset,
             rigid_body_system->parent_idx,
             rigid_body_system->is_static,
             rigid_body_system->qpos_offset,
@@ -3294,7 +3380,8 @@ namespace dyno
             rigid_body_system->batch_qvel,
             rigid_body_system->joint_type,
             env_infos->timesteps,
-            env_infos->num_envs);
+            env_infos->num_envs,
+            total_bodies_);
         cudaDeviceSynchronize();
 
         spdlog::info("Qvel:");
@@ -3304,9 +3391,9 @@ namespace dyno
         PrintVector<<<1, 1>>>(rigid_body_system->batch_qpos, 0);
         cudaDeviceSynchronize();
 
-
-        UpdateJointPoseKernel<TDataType><<<32, 512>>>(
-            rigid_body_system->batch_bodies,
+        UpdateJointPoseKernel<TDataType><<<blocks_body, threads>>>(
+            rigid_body_system->flatten_body_to_env,
+            rigid_body_system->batch_body_offset,
             rigid_body_system->batch_pos,
             rigid_body_system->batch_quat,
             rigid_body_system->batch_rot,
@@ -3317,7 +3404,8 @@ namespace dyno
             rigid_body_system->joint_qpos_offset,
             rigid_body_system->batch_qpos,
             rigid_body_system->joint_type,
-            env_infos->num_envs);
+            env_infos->num_envs,
+            total_bodies_);
         cudaDeviceSynchronize();
     }
 
@@ -3623,6 +3711,32 @@ namespace dyno
             rigid_body_system->num_constraints,
             num_envs);
         cudaDeviceSynchronize();
+
+        thrust::exclusive_scan(
+            thrust::device,
+            rigid_body_system->num_constraints.begin(),
+            rigid_body_system->num_constraints.begin() + num_envs,
+            rigid_body_system->batch_constraint_offset.begin());
+
+        rigid_body_system->num_constraints_total = thrust::reduce(
+            thrust::device,
+            rigid_body_system->num_constraints.begin(),
+            rigid_body_system->num_constraints.begin() + num_envs,
+            0,
+            thrust::plus<int>());
+        
+        const int threads = 128;
+        const int blocks = (num_envs + threads - 1) / threads;
+
+        FillFlattenConstraintKernel<TDataType><<<blocks, threads>>>(
+            rigid_body_system->flatten_constraint_to_env,
+            rigid_body_system->batch_constraint_offset,
+            rigid_body_system->num_constraints,
+            num_envs);
+        cudaDeviceSynchronize();
+        
+
+        
     }
 
     template<typename TDataType>
@@ -3647,6 +3761,7 @@ namespace dyno
             rigid_body_system->parent_idx,
             num_envs);
         cudaDeviceSynchronize();
+        
 
         // Anchor constraints
         AnchorConstraintJacobianKernel<TDataType><<<32, 512>>>(
@@ -3979,19 +4094,26 @@ namespace dyno
         auto& env_infos = this->env_infos;
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
+        const int total_nv_ = rigid_body_system->flatten_q_to_env_body.size();
+        const int threads = 128;
+        const int blocks_nv = (total_nv_ + threads - 1) / threads;
 
         rigid_body_system->batch_grad.Reset();
 
-        UpdateGradientKernel<TDataType><<<num_envs, 512>>>(
+        UpdateGradientKernel<TDataType><<<blocks_nv, threads>>>(
             rigid_body_system->is_converged,
-            rigid_body_system->batch_nv,
+            rigid_body_system->flatten_q_to_env_body,
+            rigid_body_system->batch_nv_offset,
             rigid_body_system->num_constraints,
             rigid_body_system->batch_J,
             rigid_body_system->batch_constraint_force,
             rigid_body_system->batch_Ma,
             rigid_body_system->batch_q_ex_force,
             rigid_body_system->batch_grad,
-            num_envs);
+            rigid_body_system->q_offset,
+            rigid_body_system->q_lengths,
+            num_envs,
+            total_nv_);
         cudaDeviceSynchronize();
 
         printf("Gradient:\n");

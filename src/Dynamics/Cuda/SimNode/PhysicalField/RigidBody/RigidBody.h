@@ -106,6 +106,7 @@ namespace dyno {
         DArray<Vec4i>                constraint_offset;   // [env_id] offset of each type of constraint in the batch_J (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
         DevArr2D<Real>               batch_constraint_vel;
         DevArr2D<Real>               batch_constraint_force;
+        DArray<int>                  batch_constraint_offset;   // Reduction of num_constraints to get the offset of each environment in the flattened constraint arrays
 
         BatchAnchorConstraints                anchor_constraints;
         BatchFrictionLossConstraints          friction_loss_constraints;
@@ -154,10 +155,11 @@ namespace dyno {
         DevArr2D<Pair<int, int>> batch_groups;  // [envid, <body_begin, begin_count>]
 
         // Mapping info for flattening the batch of environments
-        DArray<int>             flatten_group_to_env; // [flatten_group_id] -> env_id
-        DArray<int>             flatten_body_to_env;  // [flatten_body_id] -> env_id
-        DArray<Pair<int, int>>  flatten_q_to_env_body;    // [flatten_q_id] -> [env_id, body_id]
-        DArray<int>             flatten_constraint_to_env;    // [flatten_constraint_id] -> [env_id, body_id]
+        DArray<int> flatten_group_to_env; // [flatten_group_id] -> env_id
+        DArray<int> flatten_body_to_env;  // [flatten_body_id] -> env_id
+        DArray<Pair<int, int>> flatten_q_to_env_body;    // [flatten_q_id] -> [env_id, body_id]
+        DArray<int> flatten_constraint_to_env;    // [flatten_constraint_id] -> [env_id]
+        int num_constraints_total;
 
     public:
         void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num);

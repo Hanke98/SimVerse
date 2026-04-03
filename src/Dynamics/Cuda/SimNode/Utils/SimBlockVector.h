@@ -126,6 +126,18 @@ namespace dyno
         inline const T* BlockPtr(int block_id) const { return data_.Begin() + offsets_[block_id]; }
         inline T* BlockPtr(int block_id) { return data_.Begin() + offsets_[block_id]; }
 
+        inline T& AtBlock(int block_id, int index)
+        {
+            const int base = offsets_.Begin()[block_id];
+            return data_.Begin()[base + index];
+        }
+
+        inline const T& AtBlock(int block_id, int index) const
+        {
+            const int base = offsets_.Begin()[block_id];
+            return data_.Begin()[base + index];
+        }
+
         bool IsValid() const
         {
             if (num_blocks_ < 0 || total_size_ < 0) return false;

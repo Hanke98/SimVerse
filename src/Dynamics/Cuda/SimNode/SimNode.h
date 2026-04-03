@@ -63,7 +63,7 @@ namespace dyno
         ~SimNode() override;
 
     protected:
-        void Init();
+        // void Init();
         void Init(const std::string &root_dir);
 
         void ParseEnv(const json& envs_json);
@@ -72,7 +72,7 @@ namespace dyno
 
         void LoadAssets(const std::string &root_dir);
 
-        void InitRigidBody(int num_env, int num_bodies);    // TEST;
+        // void InitRigidBody(int num_env, int num_bodies);    // TEST;
 
 
         void BindRenderingSurface(int num_env);    // TODO: collect shape information for rendering.

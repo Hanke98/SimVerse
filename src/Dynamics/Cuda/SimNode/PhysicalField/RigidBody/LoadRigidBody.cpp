@@ -41,6 +41,7 @@ namespace dyno
         std::vector<int>           joint_type_host;
         std::vector<Real>          joint_qpos_host;
         std::vector<int>           joint_qpos_num_host;
+        std::vector<int>           joint_offset_host;
         std::vector<Real>          joint_qpos_ref_host;
         std::vector<int>           joint_qpos_offset_host;
         std::vector<Vec3f>         joint_rel_pos_host;
@@ -98,7 +99,7 @@ namespace dyno
         std::vector<int>           col_power_host;
 
         std::vector<Vec3i>      rendering_idx_2_rigid_body_mapping_host;
-        CArray2D<int>        rigid_body_2_rendering_idx_mapping_host;
+        CArray2D<int>        rigid_body_2_rendering_idx_mapping_host(env_num, body_max_num);
 
         std::vector<int>    is_static_host;
         std::vector<Real>   mass_host;
@@ -144,10 +145,6 @@ namespace dyno
                     is_static_host.push_back(is_static ? 1 : 0);
 
                     if (rb_json.at("type") == "primitive") {
-                        parent_idx_host.push_back(-1);
-
-                        int render_idx = -1;
-
                         int id = rb_json.at("ID").get<int>();
                         switch (id) {
                             case 0: {
@@ -168,7 +165,6 @@ namespace dyno
                                 shape_type_host(eid, bid) = 1;
                                 shape_idx_host(eid, bid) = box_num;
 
-                                // boxes_host(eid, box_num).center = body_pos_host(eid, bid);
                                 boxes_host(eid, box_num).center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
                                 boxes_host(eid, box_num).halfLength = Vec3f(halfLength[0], halfLength[1], halfLength[2]);
@@ -324,6 +320,7 @@ namespace dyno
                         }
                     }
                     else {
+                        parent_idx_host.push_back(-1);
                         joint_type_host.push_back(0);
                         joint_qpos_offset_host.push_back(joint_qpos_offset);
                         joint_rel_pos_host.push_back(Vec3f(0));
@@ -445,6 +442,7 @@ namespace dyno
                 env_sphere_offset_host[eid] = total_spheres;
                 env_box_offset_host[eid] = total_boxes;
                 env_capsule_offset_host[eid] = total_capsules;
+                joint_offset_host.push_back(total_joint_qpos);
                 total_bodies += bid;
                 total_spheres += sphere_num;
                 total_boxes += box_num;
@@ -507,17 +505,17 @@ namespace dyno
                     if (joint_type == 2) {
                         batch_quat_host(eid, bid) = xquat_p;
                         body_rot_host(eid, bid) = xquat_p.toMatrix3x3();
-                        body_pos_host(eid, bid) = xpos + (joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_qpos_num_host[eid] + joint_qpos_start]) * joint_axis;
+                        body_pos_host(eid, bid) = xpos + (joint_qpos_host[joint_offset_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_offset_host[eid] + joint_qpos_start]) * joint_axis;
                     } else {
                         Quat<Real> quat_local;
                         if (joint_type == 1)
-                            quat_local.fromAxisAngle(local_axis, joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_qpos_num_host[eid] + joint_qpos_start]);
+                            quat_local.fromAxisAngle(local_axis, joint_qpos_host[joint_offset_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_offset_host[eid] + joint_qpos_start]);
                         else if (joint_type == 3) {
                             Quat<Real> ball_quat = Quat<Real>(
-                                joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start],
-                                joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start + 1],
-                                joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start + 2],
-                                joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start + 3]);
+                                joint_qpos_host[joint_offset_host[eid] + joint_qpos_start],
+                                joint_qpos_host[joint_offset_host[eid] + joint_qpos_start + 1],
+                                joint_qpos_host[joint_offset_host[eid] + joint_qpos_start + 2],
+                                joint_qpos_host[joint_offset_host[eid] + joint_qpos_start + 3]);
                             ball_quat.normalize();
                             quat_local = ball_quat;
                         }
@@ -538,12 +536,6 @@ namespace dyno
         //             i, connect_body_idxs_host(eid, i).first, connect_body_idxs_host(eid, i).second,
         //             connect_anchor_A_local_host(eid, i).x, connect_anchor_A_local_host(eid, i).y, connect_anchor_A_local_host(eid, i).z,
         //             connect_anchor_B_local_host(eid, i).x, connect_anchor_B_local_host(eid, i).y, connect_anchor_B_local_host(eid, i).z);
-        // }
-
-        // for (eid = 0; eid < env_num; ++eid) {
-        //     for (int i = 0; i < fl_max; i++) {
-        //         printf("fl_id: %d, dof_id: %d, resistance: %f\n", i, fl_dof_idxs_host(eid, i), fl_dof_frictionloss_host(eid, i));
-        //     }
         // }
 
         shape_type.assign(shape_type_host);
@@ -575,9 +567,12 @@ namespace dyno
         is_static.Assign(is_static_host, batch_bodies_host);
         batch_mass.Assign(mass_host, batch_bodies_host);
 
+        if (joint_qpos_num_host.size() != 0) {
+            joint_qpos.Assign(joint_qpos_host, joint_qpos_num_host);
+            joint_qpos_ref.Assign(joint_qpos_ref_host, joint_qpos_num_host);
+        }
+
         joint_type.Assign(joint_type_host, batch_bodies_host);
-        joint_qpos.Assign(joint_qpos_host, joint_qpos_num_host);
-        joint_qpos_ref.Assign(joint_qpos_ref_host, joint_qpos_num_host);
         joint_qpos_offset.Assign(joint_qpos_offset_host, batch_bodies_host);
         joint_anchor_ref.Assign(joint_anchor_ref_host, batch_bodies_host);
         joint_axis_ref.Assign(joint_axis_ref_host, batch_bodies_host);
@@ -587,48 +582,54 @@ namespace dyno
         friction_mu.Assign(friction_mu_host, batch_bodies_host);
         contact_weights.Assign(contact_weights_host, batch_bodies_host);
 
-        joint_limit_constraints.ref_nums.assign(jl_ref_num_host);
-        joint_limit_constraints.active_mapping.BuildFromSizes(jl_ref_num_host);
-        joint_limit_constraints.is_active.BuildFromSizes(jl_ref_num_host);
-        joint_limit_constraints.limit_error.BuildFromSizes(jl_ref_num_host);
-        joint_limit_constraints.limit_extern.BuildFromSizes(jl_ref_num_host);
-        joint_limit_constraints.joint_idx.Assign(jl_joint_idx_host, jl_ref_num_host);
-        joint_limit_constraints.is_upper.Assign(jl_is_upper_host, jl_ref_num_host);
-        joint_limit_constraints.limit.Assign(jl_limit_host, jl_ref_num_host);
+        if (jl_ref_num_host.size() != 0) {
+            joint_limit_constraints.ref_nums.assign(jl_ref_num_host);
+            joint_limit_constraints.active_mapping.BuildFromSizes(jl_ref_num_host);
+            joint_limit_constraints.is_active.BuildFromSizes(jl_ref_num_host);
+            joint_limit_constraints.limit_error.BuildFromSizes(jl_ref_num_host);
+            joint_limit_constraints.limit_extern.BuildFromSizes(jl_ref_num_host);
+            joint_limit_constraints.joint_idx.Assign(jl_joint_idx_host, jl_ref_num_host);
+            joint_limit_constraints.is_upper.Assign(jl_is_upper_host, jl_ref_num_host);
+            joint_limit_constraints.limit.Assign(jl_limit_host, jl_ref_num_host);
 
-        joint_limit_constraints.time_const.Assign(jl_tc_host, jl_ref_num_host);
-        joint_limit_constraints.damp_ratio.Assign(jl_dr_host, jl_ref_num_host);
-        joint_limit_constraints.dmax.Assign(jl_dmax_host, jl_ref_num_host);
-        joint_limit_constraints.dmin.Assign(jl_dmin_host, jl_ref_num_host);
-        joint_limit_constraints.midpoint.Assign(jl_midpoint_host, jl_ref_num_host);
-        joint_limit_constraints.width.Assign(jl_width_host, jl_ref_num_host);
-        joint_limit_constraints.power.Assign(jl_power_host, jl_ref_num_host);
+            joint_limit_constraints.time_const.Assign(jl_tc_host, jl_ref_num_host);
+            joint_limit_constraints.damp_ratio.Assign(jl_dr_host, jl_ref_num_host);
+            joint_limit_constraints.dmax.Assign(jl_dmax_host, jl_ref_num_host);
+            joint_limit_constraints.dmin.Assign(jl_dmin_host, jl_ref_num_host);
+            joint_limit_constraints.midpoint.Assign(jl_midpoint_host, jl_ref_num_host);
+            joint_limit_constraints.width.Assign(jl_width_host, jl_ref_num_host);
+            joint_limit_constraints.power.Assign(jl_power_host, jl_ref_num_host);
+        }
 
-        anchor_constraints.body_idxs.Assign(connect_body_idxs_host, connect_anchor_nums_host);
-        anchor_constraints.anchor_A_local.Assign(connect_anchor_A_local_host, connect_anchor_nums_host);
-        anchor_constraints.anchor_B_local.Assign(connect_anchor_B_local_host, connect_anchor_nums_host);
-        anchor_constraints.anchor_A_world.BuildFromSizes(connect_anchor_nums_host);
-        anchor_constraints.anchor_B_world.BuildFromSizes(connect_anchor_nums_host);
-        anchor_constraints.anchor_error.BuildFromSizes(connect_anchor_nums_host);
+        if (connect_anchor_nums_host.size() != 0) {
+            anchor_constraints.body_idxs.Assign(connect_body_idxs_host, connect_anchor_nums_host);
+            anchor_constraints.anchor_A_local.Assign(connect_anchor_A_local_host, connect_anchor_nums_host);
+            anchor_constraints.anchor_B_local.Assign(connect_anchor_B_local_host, connect_anchor_nums_host);
+            anchor_constraints.anchor_A_world.BuildFromSizes(connect_anchor_nums_host);
+            anchor_constraints.anchor_B_world.BuildFromSizes(connect_anchor_nums_host);
+            anchor_constraints.anchor_error.BuildFromSizes(connect_anchor_nums_host);
 
-        anchor_constraints.time_const.Assign(connect_tc_host, connect_anchor_nums_host);
-        anchor_constraints.damp_ratio.Assign(connect_dr_host, connect_anchor_nums_host);
-        anchor_constraints.dmax.Assign(connect_dmax_host, connect_anchor_nums_host);
-        anchor_constraints.dmin.Assign(connect_dmin_host, connect_anchor_nums_host);
-        anchor_constraints.midpoint.Assign(connect_midpoint_host, connect_anchor_nums_host);
-        anchor_constraints.width.Assign(connect_width_host, connect_anchor_nums_host);
-        anchor_constraints.power.Assign(connect_power_host, connect_anchor_nums_host);
+            anchor_constraints.time_const.Assign(connect_tc_host, connect_anchor_nums_host);
+            anchor_constraints.damp_ratio.Assign(connect_dr_host, connect_anchor_nums_host);
+            anchor_constraints.dmax.Assign(connect_dmax_host, connect_anchor_nums_host);
+            anchor_constraints.dmin.Assign(connect_dmin_host, connect_anchor_nums_host);
+            anchor_constraints.midpoint.Assign(connect_midpoint_host, connect_anchor_nums_host);
+            anchor_constraints.width.Assign(connect_width_host, connect_anchor_nums_host);
+            anchor_constraints.power.Assign(connect_power_host, connect_anchor_nums_host);
+        }
 
-        friction_loss_constraints.dof_idxs.Assign(fl_dof_idxs_host, fl_num_host);
-        friction_loss_constraints.dof_frictionloss.Assign(fl_dof_frictionloss_host, fl_num_host);
+        if (fl_num_host.size() != 0) {
+            friction_loss_constraints.dof_idxs.Assign(fl_dof_idxs_host, fl_num_host);
+            friction_loss_constraints.dof_frictionloss.Assign(fl_dof_frictionloss_host, fl_num_host);
 
-        friction_loss_constraints.time_const.Assign(fl_tc_host, fl_num_host);
-        friction_loss_constraints.damp_ratio.Assign(fl_dr_host, fl_num_host);
-        friction_loss_constraints.dmax.Assign(fl_dmax_host, fl_num_host);
-        friction_loss_constraints.dmin.Assign(fl_dmin_host, fl_num_host);
-        friction_loss_constraints.midpoint.Assign(fl_midpoint_host, fl_num_host);
-        friction_loss_constraints.width.Assign(fl_width_host, fl_num_host);
-        friction_loss_constraints.power.Assign(fl_power_host, fl_num_host);
+            friction_loss_constraints.time_const.Assign(fl_tc_host, fl_num_host);
+            friction_loss_constraints.damp_ratio.Assign(fl_dr_host, fl_num_host);
+            friction_loss_constraints.dmax.Assign(fl_dmax_host, fl_num_host);
+            friction_loss_constraints.dmin.Assign(fl_dmin_host, fl_num_host);
+            friction_loss_constraints.midpoint.Assign(fl_midpoint_host, fl_num_host);
+            friction_loss_constraints.width.Assign(fl_width_host, fl_num_host);
+            friction_loss_constraints.power.Assign(fl_power_host, fl_num_host);
+        }
 
         collision_constraints.time_const.Assign(col_tc_host, batch_bodies_host);
         collision_constraints.damp_ratio.Assign(col_dr_host, batch_bodies_host);

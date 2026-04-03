@@ -609,12 +609,6 @@ namespace dyno
         
         // 1. collect shape information from rigid body
         auto rigid_body = var_rigid_body.constDataPtr();
-        if (!rigid_body)
-        {
-            spdlog::error("Rigid body data is not initialized.");
-            return;
-        }
-
         int total_boxes = reduce_int.accumulate(rigid_body->env_num_boxes.begin(), rigid_body->env_num_boxes.size());
         int total_spheres = reduce_int.accumulate(rigid_body->env_num_spheres.begin(), rigid_body->env_num_spheres.size());
         int total_capsules = reduce_int.accumulate(rigid_body->env_num_capsules.begin(), rigid_body->env_num_capsules.size());

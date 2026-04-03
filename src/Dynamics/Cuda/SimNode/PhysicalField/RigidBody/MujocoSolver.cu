@@ -127,6 +127,7 @@ namespace dyno
         {
             const int parent_idx = parent_idx_all(env_id, bid);
             const int is_static = is_static_all(env_id, bid);
+            printf("parent_id: %d, is_static: %d\n", parent_idx, is_static);
 
             if (parent_idx == -1)
             {
@@ -376,8 +377,8 @@ namespace dyno
         DArray<int> batch_bodies,
         DevArr2D<int> root_idx,
         DevArr2D<Real> subtree_mass,
-        DArray2D<Real> batch_mass,
-        DArray2D<int> parent_idx,
+        DevArr2D<Real> batch_mass,
+        DevArr2D<int> parent_idx,
         int num_envs)
     {
         int env_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -397,7 +398,7 @@ namespace dyno
     __global__ void CalculateSubtreeMassKernel(
         DArray<int> batch_bodies,
         DevArr2D<Real> subtree_mass,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         int num_envs)
     {
         int env_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -501,7 +502,7 @@ namespace dyno
     template<typename TDataType>
     __global__ void UpdateJointLimitConstraints(
         BatchJointLimitConstraints joint_limits,
-        DArray2D<int> joint_type,
+        DevArr2D<int> joint_type,
         DevArr2D<int> qpos_offset,
         DevArr2D<Real> batch_qpos,
         int num_envs)
@@ -589,7 +590,7 @@ namespace dyno
     __global__ void CollisonDetectionKernel(
         BatchCollisionConstraints collision_constraints,
         DArray<int> batch_bodies,
-        DArray2D<int> is_static,
+        DevArr2D<int> is_static,
         DArray2D<Vec3f> batch_pos,
         DArray2D<Mat3f> batch_rot,
         DArray2D<int> shape_type,
@@ -619,8 +620,8 @@ namespace dyno
 
     __device__ void ComputeJacLocal(Real* dst_jac, const Vec3f& c_point,
         const DevArr2D<int>& root_idx, const DevArr2D<Vec3f>& subtree_com, const DevArr2D<Real>& batch_cdof,
-        const DArray<int>& batch_nv, const DArray2D<int>& is_static, const DevArr2D<int>& q_offset,
-        const DevArr2D<int>& q_lengths, const DArray2D<int>& parent_idx, int env_id, int bid)
+        const DArray<int>& batch_nv, const DevArr2D<int>& is_static, const DevArr2D<int>& q_offset,
+        const DevArr2D<int>& q_lengths, const DevArr2D<int>& parent_idx, int env_id, int bid)
     {
         const int root = root_idx(env_id, bid);
         Vec3f offset = c_point - subtree_com(env_id, root);
@@ -661,10 +662,10 @@ namespace dyno
         DevArr2D<int> root_idx,
         DevArr2D<Vec3f> subtree_com,
         DevArr2D<Real> batch_cdof,
-        DArray2D<int> is_static,
+        DevArr2D<int> is_static,
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -738,10 +739,10 @@ namespace dyno
         DevArr2D<int> root_idx,
         DevArr2D<Vec3f> subtree_com,
         DevArr2D<Real> batch_cdof,
-        DArray2D<int> is_static,
+        DevArr2D<int> is_static,
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -801,7 +802,7 @@ namespace dyno
         DArray<Vec4i> num_each_constraint,
         BatchJointLimitConstraints constraints,
         DevArr2D<int> q_offset,
-        DArray2D<int> joint_type,
+        DevArr2D<int> joint_type,
         DArray<Vec4i> constraint_offset,
         DArray<int> batch_nv,
         DevMat2D<Real> batch_J,
@@ -835,7 +836,7 @@ namespace dyno
     }
 
     template<typename TDataType>
-    __global__ void PrintJacobian(DArray2D<Real> batch_J, DArray<int> num_constraints, DArray<int> batch_nv, int env_id)
+    __global__ void PrintJacobian(DevArr2D<Real> batch_J, DArray<int> num_constraints, DArray<int> batch_nv, int env_id)
     {
         if(threadIdx.x != 0)
             return;
@@ -1045,7 +1046,7 @@ namespace dyno
         BatchCollisionConstraints collision_constraints,
         DArray<Vec4i> constraint_offset,
         DevArr2D<Real> batch_constraint_vel,
-        DArray2D<Real> contact_weights,
+        DevArr2D<Real> contact_weights,
         DevArr2D<Real> batch_imp,
         DevArr2D<Real> batch_aref,
         int num_envs)
@@ -1097,7 +1098,7 @@ namespace dyno
     template<typename TDataType>
     __global__ void ComputeDiagJMinvJTForBodies(
         DArray<int> batch_bodies,
-        DArray2D<int> is_static,
+        DevArr2D<int> is_static,
         DArray<int> batch_nv,
         DevArr2D<Vec3f> batch_global_com_pos,
         DevArr2D<int> root_idx,
@@ -1180,7 +1181,7 @@ namespace dyno
         DArray<int> batch_nv,
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
-        DArray2D<int> joint_type,
+        DevArr2D<int> joint_type,
         DevMat2D<Real> batch_qM_L,
         DevArr2D<Real> batch_dof_weight_inv,
         int num_envs)
@@ -1717,17 +1718,17 @@ namespace dyno
         DArray<int> batch_bodies,
         DArray2D<Quat<Real>> batch_quat,
         DArray2D<Mat3f> batch_rot,
-        DArray2D<int> parent_idx,
-        DArray2D<Vec3f> joint_axis_ref,
-        DArray2D<Vec3f> joint_anchor_ref,
-        DArray2D<int> joint_type,
-        DArray2D<Real> joint_qpos,
-        DArray2D<Real> joint_qpos_ref,
-        DArray2D<int> joint_qpos_offset,
+        DevArr2D<int> parent_idx,
+        DevArr2D<Vec3f> joint_axis_ref,
+        DevArr2D<Vec3f> joint_anchor_ref,
+        DevArr2D<int> joint_type,
+        DevArr2D<Real> joint_qpos,
+        DevArr2D<Real> joint_qpos_ref,
+        DevArr2D<int> joint_qpos_offset,
         DArray2D<Vec3f> batch_pos,
-        DArray2D<Quat<Real>> joint_rel_quat,
+        DevArr2D<Quat<Real>> joint_rel_quat,
         DevArr2D<Vec3f> joint_axis,
-        DArray2D<Vec3f> joint_rel_pos,
+        DevArr2D<Vec3f> joint_rel_pos,
         DevArr2D<Vec3f> joint_anchor,
         DevArr2D<Vec3f> global_com_pos,
         DevArr2D<Vec3f> local_com_pos,
@@ -1810,10 +1811,10 @@ namespace dyno
     __global__ void SubtreeComKernel(
         DArray<int> batch_bodies,
         DevArr2D<Vec3f> subtree_com,
-        DArray2D<Real> batch_mass,
+        DevArr2D<Real> batch_mass,
         DevArr2D<Real> subtree_mass,
         DevArr2D<Vec3f> batch_global_com_pos,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         int num_envs)
     {
         int env_id = blockDim.x * blockIdx.x + threadIdx.x;
@@ -1839,16 +1840,16 @@ namespace dyno
     __global__ void ComputeCdofKernel(
         DArray<int> batch_bodies,
         DevArr2D<Real> batch_cdof,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         DArray2D<Vec3f> batch_pos,
         DArray2D<Mat3f> batch_rot,
         DevArr2D<Vec3f> subtree_com,
         DevArr2D<int> q_offset,
         DevArr2D<int> root_idx,
         DevArr2D<Vec3f> joint_anchor,
-        DArray2D<int> joint_type,
+        DevArr2D<int> joint_type,
         DevArr2D<Vec3f> joint_axis,
-        DArray2D<int> is_static,
+        DevArr2D<int> is_static,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -1981,7 +1982,7 @@ namespace dyno
         DevArr2D<Real> subtree_inertia,
         DevArr2D<Vec3f> batch_inertia,
         DevArr2D<Mat3f> batch_com_rot,
-        DArray2D<Real> batch_mass,
+        DevArr2D<Real> batch_mass,
         DevArr2D<Real> batch_crb,
         int num_envs)
     {
@@ -2007,7 +2008,7 @@ namespace dyno
 
     __global__ void AccumulateSubtreeInertialKernel(
         DArray<int> batch_bodies,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         DevArr2D<Real> batch_crb,
         DevArr2D<Real> subtree_inertia,
         int num_envs)
@@ -2065,15 +2066,15 @@ namespace dyno
         DevMat2D<Real> batch_qM,
         DArray<int> batch_nv,
         DevArr2D<int> is_isolated,
-        DArray2D<int> is_static,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> is_static,
+        DevArr2D<int> parent_idx,
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
         DevArr2D<Real> batch_cdof,
         DevArr2D<int> batch_q_chain,
         DevArr2D<Real> batch_crb,
         DevArr2D<Vec3f> batch_inertia,
-        DArray2D<Real> batch_mass,
+        DevArr2D<Real> batch_mass,
         int num_envs)
     {
         int env_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2193,10 +2194,10 @@ namespace dyno
         DevArr2D<Real> batch_qvel,
         DevArr2D<Real> subtree_com_vel,
         DevArr2D<Real> batch_cdof_dot,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         DevArr2D<int> q_offset,
-        DArray2D<int> joint_type,
-        DArray2D<int> is_static,
+        DevArr2D<int> joint_type,
+        DevArr2D<int> is_static,
         int num_envs)
     {
         int env_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2293,9 +2294,9 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<Real> subtree_inertia,
         DevArr2D<Real> subtree_com_vel,
-        DArray2D<int> parent_idx,
-        DArray2D<int> is_static,
-        DArray2D<int> joint_type,
+        DevArr2D<int> parent_idx,
+        DevArr2D<int> is_static,
+        DevArr2D<int> joint_type,
         DevArr2D<int> q_lengths,
         int num_envs)
     {
@@ -2412,13 +2413,13 @@ namespace dyno
         DArray2D<Vec3f> batch_pos,
         DArray2D<Quat<Real>> batch_quat,
         DArray2D<Mat3f> batch_rot,
-        DArray2D<Real> joint_qpos,
-        DArray2D<int> parent_idx,
-        DArray2D<int> is_static,
+        DevArr2D<Real> joint_qpos,
+        DevArr2D<int> parent_idx,
+        DevArr2D<int> is_static,
         DevArr2D<int> qpos_offset,
-        DArray2D<int> joint_qpos_offset,
+        DevArr2D<int> joint_qpos_offset,
         DevArr2D<Real> batch_qpos,
-        DArray2D<int> joint_type,
+        DevArr2D<int> joint_type,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -2468,11 +2469,11 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
         DevArr2D<Real> batch_cdof,
-        DArray2D<int> is_static,
+        DevArr2D<int> is_static,
         DevArr2D<int> is_isolated,
         DArray2D<int> shape_type,
-        DArray2D<int> parent_idx,
-        DArray2D<int> joint_type,
+        DevArr2D<int> parent_idx,
+        DevArr2D<int> joint_type,
         int num_envs)
     {
         int env_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2689,34 +2690,6 @@ namespace dyno
         const int max_bodies = rigid_body_system->max_bodies;
         const int max_nv = max_bodies * 6;
 
-        // auto& collision_constraints = this->rigid_body->collision_constraints;
-        // CArray2D<Real> time_const_host(num_envs, max_bodies);
-        // CArray2D<Real> damp_ratio_host(num_envs, max_bodies);
-        // CArray2D<Real> dmax_host(num_envs, max_bodies);
-        // CArray2D<Real> dmin_host(num_envs, max_bodies);
-        // CArray2D<Real> width_host(num_envs, max_bodies);
-        // CArray2D<Real> midpoint_host(num_envs, max_bodies);
-        // CArray2D<int> power_host(num_envs, max_bodies);
-        // CArray2D<Real> contact_weights_host(num_envs, max_bodies);
-        // for(int i = 0; i < max_bodies; i++)
-        // {
-        //     time_const_host(0, i) = 0.02f;
-        //     damp_ratio_host(0, i) = 1.f;
-        //     dmax_host(0, i) = 0.95f;
-        //     dmin_host(0, i) = 0.9f;
-        //     width_host(0, i) = 0.001f;
-        //     midpoint_host(0, i) = 0.5f;
-        //     power_host(0, i) = 2;
-        //     contact_weights_host(0, i) = 1.f;
-        // }
-        // collision_constraints.time_const.assign(time_const_host);
-        // collision_constraints.damp_ratio.assign(damp_ratio_host);
-        // collision_constraints.dmax.assign(dmax_host);
-        // collision_constraints.dmin.assign(dmin_host);
-        // collision_constraints.width.assign(width_host);
-        // collision_constraints.midpoint.assign(midpoint_host);
-        // collision_constraints.power.assign(power_host);
-        // rigid_body_system->contact_weights.assign(contact_weights_host);
 
         std::vector<int> num_bodies_host(num_envs);
         cudaMemcpy(num_bodies_host.data(), rigid_body_system->batch_bodies.begin(), num_envs * sizeof(int), cudaMemcpyDeviceToHost);

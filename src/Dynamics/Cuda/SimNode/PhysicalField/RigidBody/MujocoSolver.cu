@@ -503,8 +503,8 @@ namespace dyno
     __global__ void UpdateJointLimitConstraints(
         BatchJointLimitConstraints joint_limits,
         DevArr2D<int> joint_type,
-        DevArr2D<int> qpos_offset,
-        DevArr2D<Real> batch_qpos,
+        DevArr2D<int> joint_qpos_offset,
+        DevArr2D<Real> joint_qpos,
         int num_envs)
     {
         int env_id = blockIdx.x;
@@ -518,7 +518,7 @@ namespace dyno
         const int bid = joint_limits.joint_idx(env_id, jl_idx);
         const int jt = joint_type(env_id, bid);
         const int is_upper = joint_limits.is_upper(env_id, jl_idx);
-        const int qpos_idx = qpos_offset(env_id, bid);
+        const int qpos_idx = joint_qpos_offset(env_id, bid);
         const Real limit = joint_limits.limit(env_id, jl_idx);
         auto& limit_err = joint_limits.limit_error(env_id, jl_idx);
         auto& is_active = joint_limits.is_active(env_id, jl_idx);
@@ -527,7 +527,7 @@ namespace dyno
 
         if(jt < 3)
         {
-            Real dist = batch_qpos(env_id, qpos_idx) - limit;
+            Real dist = joint_qpos(env_id, qpos_idx) - limit;
             if((is_upper && dist > 0.f) || (!is_upper && dist < 0.f))
             {
                 limit_err = dist;
@@ -536,7 +536,7 @@ namespace dyno
         }
         else
         {
-            Quat<Real> quat = Quat<Real>(batch_qpos(env_id, qpos_idx), batch_qpos(env_id, qpos_idx + 1), batch_qpos(env_id, qpos_idx + 2), batch_qpos(env_id, qpos_idx + 3));
+            Quat<Real> quat = Quat<Real>(joint_qpos(env_id, qpos_idx), joint_qpos(env_id, qpos_idx + 1), joint_qpos(env_id, qpos_idx + 2), joint_qpos(env_id, qpos_idx + 3));
             quat.normalize();
 
             Vec3f angle_vel;
@@ -550,6 +550,8 @@ namespace dyno
                 limit_extern = angle_vel.normalize();
             }
         }
+        printf("Env %d, Joint Limit Constraint %d, is_upper: %d, limit: %f, qpos: %f, dist: %f, is_active: %d\n",
+            env_id, jl_idx, is_upper, limit, joint_qpos(env_id, qpos_idx), limit_err, is_active);
     }
 
     template<typename TDataType>
@@ -561,7 +563,7 @@ namespace dyno
         DArray<int> num_constraints,
         int num_envs)
     {
-        int env_id = blockDim.x * blockIdx.x + threadIdx.x;
+        int env_id = threadIdx.x;
         if(env_id >= num_envs)
             return;
 
@@ -2903,6 +2905,8 @@ namespace dyno
         if(alphas[env_id] == 0.f)
             is_converged[env_id] = 1;
     }
+
+    // __global__ void 
 }
 
 namespace dyno
@@ -3019,6 +3023,7 @@ namespace dyno
         INIT_DYNO_ARRAY(rigid_body_system->flatten_group_to_env, total_groups_);
         INIT_DYNO_ARRAY(rigid_body_system->flatten_body_to_env, total_bodies_);
         INIT_DYNO_ARRAY(rigid_body_system->flatten_q_to_env_body, total_nv_);
+        INIT_DYNO_ARRAY(rigid_body_system->flatten_constraint_to_env, num_envs * num_max_constraints);
 
 
         FillFlattenMappingInfoKernel<<<32, 512>>>(
@@ -3046,7 +3051,7 @@ namespace dyno
         rigid_body_system->batch_dof_weight_inv.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_Ma.BuildFromSizes(batch_nv_host);
         rigid_body_system->batch_Ma_line_search.BuildFromSizes(batch_nv_host);
-        rigid_body_system->batch_q_chain_new.BuildFromSizes(batch_nv_host);
+        rigid_body_system->batch_q_chain.BuildFromSizes(batch_nv_host);
 
         // ========================  Num Nv * 6  ==========================
         std::vector<int> num_dofs6_host(num_envs);
@@ -3073,7 +3078,7 @@ namespace dyno
         rigid_body_system->batch_qM_L.BuildFromSquares(rigid_body_system->batch_nv);
 
         // ===============  Dense Matrices of size Nc * Nv  ==============
-        rigid_body_system->batch_J_new.BuildFromShapes(max_constraints_host, batch_nv_host);
+        rigid_body_system->batch_J.BuildFromShapes(max_constraints_host, batch_nv_host);
         
 
         INIT_DYNO_ARRAY(rigid_body_system->collision_constraints.collision_nums, num_envs);
@@ -3224,7 +3229,7 @@ namespace dyno
                 rigid_body_system->sys_alpha, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
             // Update Jaref     Jaref += α * J * dx
-            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_dx, 
+            BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_dx, 
                 rigid_body_system->batch_Jaref, rigid_body_system->num_constraints, rigid_body_system->batch_nv, 
                 true, rigid_body_system->sys_alpha, rigid_body_system->is_converged);
             cudaDeviceSynchronize();
@@ -3592,22 +3597,28 @@ namespace dyno
             rigid_body_system->shape_idx,
             rigid_body_system->boxes,
             num_envs);
+        cudaDeviceSynchronize();
+        spdlog::info("Collision detection done.");
+        
         UpdateAnchorConstarints<TDataType><<<32, 512>>>(
             rigid_body_system->num_each_constraint,
             rigid_body_system->anchor_constraints,
             rigid_body_system->batch_rot,
             rigid_body_system->batch_pos,
             num_envs);
+        cudaDeviceSynchronize();
+        spdlog::info("Anchor constraints updated.");
+        
         UpdateJointLimitConstraints<TDataType><<<32, 512>>>(
             rigid_body_system->joint_limit_constraints,
             rigid_body_system->joint_type,
-            rigid_body_system->qpos_offset,
-            rigid_body_system->batch_qpos,
+            rigid_body_system->joint_qpos_offset,
+            rigid_body_system->joint_qpos,
             num_envs);
         cudaDeviceSynchronize();
+        spdlog::info("Joint limit constraints updated.");
 
-
-        CountConstraintNums<TDataType><<<32, 512>>>(
+        CountConstraintNums<TDataType><<<1, num_envs>>>(
             rigid_body_system->num_each_constraint,
             rigid_body_system->joint_limit_constraints,
             rigid_body_system->collision_constraints,
@@ -3624,12 +3635,12 @@ namespace dyno
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
 
-        rigid_body_system->batch_J_new.Reset();
+        rigid_body_system->batch_J.Reset();
         ContactConstraintJacobianKernel<TDataType><<<32, 512>>>(
             rigid_body_system->collision_constraints,
             rigid_body_system->batch_nv,
             rigid_body_system->constraint_offset,
-            rigid_body_system->batch_J_new,
+            rigid_body_system->batch_J,
             rigid_body_system->root_idx,
             rigid_body_system->subtree_com,
             rigid_body_system->batch_cdof,
@@ -3645,7 +3656,7 @@ namespace dyno
             rigid_body_system->anchor_constraints,
             rigid_body_system->num_each_constraint,
             rigid_body_system->batch_nv,
-            rigid_body_system->batch_J_new,
+            rigid_body_system->batch_J,
             rigid_body_system->root_idx,
             rigid_body_system->subtree_com,
             rigid_body_system->batch_cdof,
@@ -3661,7 +3672,7 @@ namespace dyno
             rigid_body_system->num_each_constraint,
             rigid_body_system->constraint_offset,
             rigid_body_system->batch_nv,
-            rigid_body_system->batch_J_new,
+            rigid_body_system->batch_J,
             rigid_body_system->friction_loss_constraints,
             num_envs);
         cudaDeviceSynchronize();
@@ -3674,7 +3685,7 @@ namespace dyno
             rigid_body_system->joint_type,
             rigid_body_system->constraint_offset,
             rigid_body_system->batch_nv,
-            rigid_body_system->batch_J_new,
+            rigid_body_system->batch_J,
             num_envs);
         cudaDeviceSynchronize();
 
@@ -3697,7 +3708,7 @@ namespace dyno
         auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
 
-        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_qvel, rigid_body_system->batch_constraint_vel,
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_qvel, rigid_body_system->batch_constraint_vel,
             rigid_body_system->num_constraints, rigid_body_system->batch_nv, false, DArray<Real>(), DArray<int>());
         cudaDeviceSynchronize();
 
@@ -3754,7 +3765,7 @@ namespace dyno
         PrintVector<<<1, 1>>>(rigid_body_system->batch_qacc, 0);
         cudaDeviceSynchronize();
 
-        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_qacc,
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_qacc,
             rigid_body_system->batch_Jaref, rigid_body_system->num_constraints, rigid_body_system->batch_nv, false, DArray<Real>(), DArray<int>());
         cudaDeviceSynchronize();
 
@@ -3952,7 +3963,7 @@ namespace dyno
             rigid_body_system->is_converged,
             rigid_body_system->batch_nv,
             rigid_body_system->num_constraints,
-            rigid_body_system->batch_J_new,
+            rigid_body_system->batch_J,
             rigid_body_system->batch_D,
             rigid_body_system->batch_unquads,
             rigid_body_system->batch_qM,
@@ -3978,7 +3989,7 @@ namespace dyno
             rigid_body_system->is_converged,
             rigid_body_system->batch_nv,
             rigid_body_system->num_constraints,
-            rigid_body_system->batch_J_new,
+            rigid_body_system->batch_J,
             rigid_body_system->batch_constraint_force,
             rigid_body_system->batch_Ma,
             rigid_body_system->batch_q_ex_force,
@@ -4041,7 +4052,7 @@ namespace dyno
             rigid_body_system->batch_nv, rigid_body_system->batch_nv, false, DArray<Real>(), rigid_body_system->is_converged);
         cudaDeviceSynchronize();
         // Update Jaref     J * dx
-        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J_new, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref_line_search,
+        BatchDenseMatrixVectorMul<<<32, 512>>>(rigid_body_system->batch_J, rigid_body_system->batch_dx, rigid_body_system->batch_Jaref_line_search,
             rigid_body_system->num_constraints, rigid_body_system->batch_nv, false, DArray<Real>(), rigid_body_system->is_converged);
         cudaDeviceSynchronize();
 

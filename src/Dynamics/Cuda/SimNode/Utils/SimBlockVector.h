@@ -64,7 +64,7 @@ namespace dyno
             for (int b = 0; b < n; ++b)
             {
                 const int size = sizes[b];
-                if (size <= 0)
+                if (size < 0)
                 {
                     Clear();
                     return false;

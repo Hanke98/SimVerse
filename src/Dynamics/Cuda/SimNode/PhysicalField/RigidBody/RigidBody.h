@@ -56,7 +56,7 @@ namespace dyno {
         DevArr2D<Real>      batch_cdof;    // [env_id, dof_idx] projection basis
         DevArr2D<Real>      batch_cdof_dot; // [env_id, dof_idx] projection basis time derivative
         DevArr2D<Real>      batch_crb;     // dense vec num_bodies * 10
-        DevArr2D<int>       batch_q_chain_new;
+        DevArr2D<int>       batch_q_chain;
 
         DArray2D<Vec3f>       batch_pos;     // [env_id, body_id] world position of rigid body
         DArray2D<Mat3f>       batch_rot;     // [env_id, body_id] world rotation of rigid body (as rotation matrix)
@@ -100,7 +100,7 @@ namespace dyno {
 
 
         // For constraints
-        DevMat2D<Real>               batch_J_new;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints   nc * nv
+        DevMat2D<Real>               batch_J;           // [env_id, num_constraints * max_dof] Jacobian matrix of constraints   nc * nv
         DArray<int>                  num_constraints;   // [env_id] number of constraints in each environment = num_collision_constraints + num_topo_invariant_constraints
         DArray<Vec4i>                num_each_constraint; // [env_id] num of each type of constraint (Vec4i: [0] anchor, [1] friction loss, [2] joint limit, [3] collision_constraints)
         DArray<Vec4i>                constraint_offset;   // [env_id] offset of each type of constraint in the batch_J (Vec4i: [0 ~ 2] topo_invariant_constraints, [3] collision_constraints)
@@ -154,10 +154,10 @@ namespace dyno {
         DevArr2D<Pair<int, int>> batch_groups;  // [envid, <body_begin, begin_count>]
 
         // Mapping info for flattening the batch of environments
-        DArray<int> flatten_group_to_env; // [flatten_group_id] -> env_id
-        DArray<int> flatten_body_to_env;  // [flatten_body_id] -> env_id
-        DArray<Pair<int, int>> flatten_q_to_env_body;    // [flatten_q_id] -> [env_id, body_id]
-        DArray<Pair<int, int>> flatten_constraint_to_env_body;    // [flatten_constraint_id] -> [env_id, body_id]
+        DArray<int>             flatten_group_to_env; // [flatten_group_id] -> env_id
+        DArray<int>             flatten_body_to_env;  // [flatten_body_id] -> env_id
+        DArray<Pair<int, int>>  flatten_q_to_env_body;    // [flatten_q_id] -> [env_id, body_id]
+        DArray<int>             flatten_constraint_to_env;    // [flatten_constraint_id] -> [env_id, body_id]
 
     public:
         void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num);

@@ -1712,7 +1712,8 @@ namespace dyno
 
     template<typename TDataType>
     __global__ void ForwardKinematicsKernel(
-        DArray<int> batch_bodies,
+        DevArr2D<Pair<int, int>> batch_groups,
+        DArray<int> flatten_group_to_env,
         DArray2D<Quat<Real>> batch_quat,
         DArray2D<Mat3f> batch_rot,
         DevArr2D<int> parent_idx,
@@ -1731,15 +1732,21 @@ namespace dyno
         DevArr2D<Vec3f> local_com_pos,
         DevArr2D<Quat<Real>> local_com_quat,
         DevArr2D<Mat3f> com_rot,
-        int num_envs)
+        int num_groups)
     {
-        int env_id = threadIdx.x;
-        if(env_id >= num_envs)
+        int group_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if (group_id >= num_groups)
             return;
 
-        const int num_bodies = batch_bodies[env_id];
-        for(int bid = 0; bid < num_bodies; bid++)
+        const int env_id = flatten_group_to_env[group_id];
+        const int local_gid = group_id - batch_groups.BlockOffset(env_id);
+        const Pair<int, int> group = batch_groups(env_id, local_gid);
+        const int body_begin = group.first;
+        const int body_count = group.second;
+
+        for (int local_bid = 0; local_bid < body_count; ++local_bid)
         {
+            const int bid = body_begin + local_bid;
             const int pidx = parent_idx(env_id, bid);
             if(pidx == -1)
             {
@@ -1808,36 +1815,48 @@ namespace dyno
 
     template<typename TDataType>
     __global__ void SubtreeComKernel(
-        DArray<int> batch_bodies,
+        DevArr2D<Pair<int, int>> batch_groups,
+        DArray<int> flatten_group_to_env,
         DevArr2D<Vec3f> subtree_com,
         DevArr2D<Real> batch_mass,
         DevArr2D<Real> subtree_mass,
         DevArr2D<Vec3f> batch_global_com_pos,
-        DevArr2D<int> parent_idx,
-        int num_envs)
+        DArray2D<int> parent_idx,
+        int num_envs,
+        int num_groups)
     {
-        int env_id = threadIdx.x;
-        if(env_id >= num_envs)
+        int group_id = blockDim.x * blockIdx.x + threadIdx.x;
+        if (group_id >= num_groups)
             return;
 
-        const int num_bodies = batch_bodies[env_id];
-        for(int bidx = 0; bidx < num_bodies; bidx++)
+        const int env_id = flatten_group_to_env[group_id];
+        if (env_id >= num_envs)
+            return;
+
+        const int local_gid = group_id - batch_groups.BlockOffset(env_id);
+        const Pair<int, int> group = batch_groups(env_id, local_gid);
+        const int body_begin = group.first;
+        const int body_count = group.second;
+
+        for (int bidx = body_begin; bidx < body_begin + body_count; ++bidx)
             subtree_com(env_id, bidx) = batch_mass(env_id, bidx) * batch_global_com_pos(env_id, bidx);
 
-        for(int bidx = num_bodies - 1; bidx >= 0; bidx--)
+
+        for(int bidx = body_begin + body_count - 1; bidx >= body_begin; --bidx)
         {
             const int pidx = parent_idx(env_id, bidx);
             if(pidx != -1)
                 subtree_com(env_id, pidx) += subtree_com(env_id, bidx);
         }
 
-        for(int bidx = 0; bidx < num_bodies; bidx++)
+        for(int bidx = body_begin; bidx < body_begin + body_count; ++bidx)
             subtree_com(env_id, bidx) /= subtree_mass(env_id, bidx);
     }
 
     template<typename TDataType>
     __global__ void ComputeCdofKernel(
-        DArray<int> batch_bodies,
+        DArray<int> flatten_body_to_env,
+        DArray<int> batch_bodies_offset,
         DevArr2D<Real> batch_cdof,
         DevArr2D<int> parent_idx,
         DArray2D<Vec3f> batch_pos,
@@ -1848,17 +1867,19 @@ namespace dyno
         DevArr2D<Vec3f> joint_anchor,
         DevArr2D<int> joint_type,
         DevArr2D<Vec3f> joint_axis,
-        DevArr2D<int> is_static,
-        int num_envs)
+        DArray2D<int> is_static,
+        int num_envs,
+        int total_bodies)
     {
-        int env_id = blockIdx.x;
-        if(env_id >= num_envs)
+        const int global_bid = blockDim.x * blockIdx.x + threadIdx.x;
+        if(global_bid >= total_bodies)
             return;
 
-        int env_self_bodies = batch_bodies[env_id];
-        int bid = threadIdx.x;
-        if(bid >= env_self_bodies)
+        const int env_id = flatten_body_to_env[global_bid];
+        if (env_id >= num_envs)
             return;
+
+        const int bid = global_bid - batch_bodies_offset[env_id];
 
         const int pidx = parent_idx(env_id, bid);
         const Vec3f& pos = batch_pos(env_id, bid);
@@ -1974,7 +1995,8 @@ namespace dyno
     }
 
     __global__ void SubtreeInertialKernel(
-        DArray<int> batch_bodies,
+        DArray<int> flatten_body_to_env,
+        DArray<int> batch_bodies_offset,
         DevArr2D<int> root_idx,
         DevArr2D<Vec3f> batch_global_com_pos,
         DevArr2D<Vec3f> subtree_com,
@@ -1983,16 +2005,18 @@ namespace dyno
         DevArr2D<Mat3f> batch_com_rot,
         DevArr2D<Real> batch_mass,
         DevArr2D<Real> batch_crb,
-        int num_envs)
+        int num_envs,
+        int total_bodies)
     {
-        int env_id = blockIdx.x;
+        const int global_bid = blockDim.x * blockIdx.x + threadIdx.x;
+        if(global_bid >= total_bodies)
+            return;
+
+        const int env_id = flatten_body_to_env[global_bid];
         if(env_id >= num_envs)
             return;
 
-        int env_self_bodies = batch_bodies[env_id];
-        int bid = threadIdx.x;
-        if(bid >= env_self_bodies)
-            return;
+        const int bid = global_bid - batch_bodies_offset[env_id];
 
         const int ridx = root_idx(env_id, bid);
         Vec3f offset = batch_global_com_pos(env_id, bid) - subtree_com(env_id, ridx);
@@ -2006,17 +2030,28 @@ namespace dyno
     }
 
     __global__ void AccumulateSubtreeInertialKernel(
-        DArray<int> batch_bodies,
-        DevArr2D<int> parent_idx,
+        DevArr2D<Pair<int, int>> batch_groups,
+        DArray<int> flatten_group_to_env,
+        DArray2D<int> parent_idx,
         DevArr2D<Real> batch_crb,
         DevArr2D<Real> subtree_inertia,
-        int num_envs)
+        int num_envs,
+        int num_groups)
     {
-        int env_id = blockDim.x * blockIdx.x + threadIdx.x;
-        if(env_id >= num_envs)
+        const int group_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if (group_id >= num_groups)
             return;
 
-        for(int bid = batch_bodies[env_id] - 1; bid >= 0; bid--)
+        const int env_id = flatten_group_to_env[group_id];
+        if (env_id >= num_envs)
+            return;
+
+        const int local_gid = group_id - batch_groups.BlockOffset(env_id);
+        const Pair<int, int> group = batch_groups(env_id, local_gid);
+        const int body_begin = group.first;
+        const int body_count = group.second;
+
+        for(int bid = body_begin + body_count - 1; bid >= body_begin; bid--)
         {
             const int pidx = parent_idx(env_id, bid);
             if(pidx != -1)
@@ -2061,8 +2096,9 @@ namespace dyno
 
     template<typename TDataType>
     __global__ void UpdateGeneralizedInertialMatrixKernel(
-        DArray<int> batch_bodies,
+        DArray<Pair<int, int>> flatten_q_to_env_body,
         DevMat2D<Real> batch_qM,
+        DevArr2D<int> batch_nv_offset,
         DArray<int> batch_nv,
         DevArr2D<int> is_isolated,
         DevArr2D<int> is_static,
@@ -2070,79 +2106,95 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
         DevArr2D<Real> batch_cdof,
-        DevArr2D<int> batch_q_chain,
         DevArr2D<Real> batch_crb,
         DevArr2D<Vec3f> batch_inertia,
         DevArr2D<Real> batch_mass,
-        int num_envs)
+        int num_envs,
+        int total_nv)
     {
-        int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        const int global_qidx = blockIdx.x * blockDim.x + threadIdx.x;
+        if(global_qidx >= total_nv)
+            return;
+
+        const Pair<int, int> q_info = flatten_q_to_env_body[global_qidx];
+        const int env_id = q_info.first;
         if(env_id >= num_envs)
             return;
 
-        int env_self_bodies = batch_bodies[env_id];
+        const int bid = q_info.second;
         const int nv = batch_nv[env_id];
+        const int body_global_q_start = batch_nv_offset(env_id, bid);
+        const int q_start = q_offset(env_id, bid);
+        const int q_num = q_lengths(env_id, bid);
+        const int qidx = q_start + (global_qidx - body_global_q_start);
 
-        for(int bid = 0; bid < env_self_bodies; bid++)
+        if(qidx < q_start || qidx >= q_start + q_num)
+            return;
+
+        if(is_static(env_id, bid))
+            return;
+
+        const int isolated = is_isolated(env_id, bid);
+        if(!isolated)
         {
-            const int isolated = is_isolated(env_id, bid);
-            if(is_static(env_id, bid))
-                continue;
+            Real tmp_dof[6];
+            Real Icdof[6];
+            for(int i = 0; i < 6; i++)
+                tmp_dof[i] = batch_cdof(env_id, qidx * 6 + i);
 
-            const int q_start = q_offset(env_id, bid);
-            const int q_num = q_lengths(env_id, bid);
+            InertiaMultiVec(batch_crb, tmp_dof, Icdof, env_id, bid);
 
-            if(!isolated)
+            int i = qidx;
+            int j = bid;
+            while(j != -1)
             {
-                Real tmp_dof[6];
-                Real Icdof[6];
-                for(int qidx = q_start; qidx < q_start + q_num; qidx++)
+                const int qidx_j = q_offset(env_id, j);
+                for(int k = i; k >= qidx_j; k--)
                 {
-                    for(int i = 0; i < 6; i++)
-                        tmp_dof[i] = batch_cdof(env_id, qidx * 6 + i);
+                    Real val = 0.f;
+                    for(int n = 0; n < 6; n++)
+                        val += batch_cdof(env_id, k * 6 + n) * Icdof[n];
 
-                    InertiaMultiVec(batch_crb, tmp_dof, Icdof, env_id, bid);
-
-                    int i = qidx;
-                    int j = bid;
-                    int q_chain_length = 0;
-                    while(j != -1)
-                    {
-                        int qidx_j = q_offset(env_id, j);
-                        for(int k = i; k >= qidx_j; k--)
-                            batch_q_chain(env_id, q_chain_length++) = k;
-
-                        j = parent_idx(env_id, j);
-                        if(j != -1)
-                            i = q_offset(env_id, j) + q_lengths(env_id, j) - 1;
-                    }
-
-                    for(int m = 0; m < q_chain_length; m++)
-                    {
-                        int i1 = batch_q_chain(env_id, m);
-                        Real val = 0.f;
-                        for(int n = 0; n < 6; n++)
-                            val += batch_cdof(env_id, i1 * 6 + n) * Icdof[n];
-
-                        batch_qM(env_id, qidx, i1) = val;
-                        batch_qM(env_id, i1, qidx) = val;
-                    }
+                    batch_qM(env_id, qidx, k) = val;
                 }
-            }
-            else
-            {
-                for(int i = 0; i < 6; i++)
-                    for(int j = 0; j < 6; j++)
-                        batch_qM(env_id, q_start + i, q_start + j) = 0.f;
 
-                batch_qM(env_id, q_start + 0, q_start + 0) = batch_mass(env_id, bid);
-                batch_qM(env_id, q_start + 1, q_start + 1) = batch_mass(env_id, bid);
-                batch_qM(env_id, q_start + 2, q_start + 2) = batch_mass(env_id, bid);
-                batch_qM(env_id, q_start + 3, q_start + 3) = batch_inertia(env_id, bid).x;
-                batch_qM(env_id, q_start + 4, q_start + 4) = batch_inertia(env_id, bid).y;
-                batch_qM(env_id, q_start + 5, q_start + 5) = batch_inertia(env_id, bid).z;
+                j = parent_idx(env_id, j);
+                if(j != -1)
+                    i = q_offset(env_id, j) + q_lengths(env_id, j) - 1;
             }
         }
+        else
+        {
+            const int local_qidx = qidx - q_start;
+            if(local_qidx < 3)
+                batch_qM(env_id, qidx, qidx) = batch_mass(env_id, bid);
+            else if(local_qidx < q_num)
+            {
+                const Vec3f& inertia = batch_inertia(env_id, bid);
+                if(local_qidx == 3)
+                    batch_qM(env_id, qidx, qidx) = inertia.x;
+                else if(local_qidx == 4)
+                    batch_qM(env_id, qidx, qidx) = inertia.y;
+                else if(local_qidx == 5)
+                    batch_qM(env_id, qidx, qidx) = inertia.z;
+            }
+        }
+    }
+
+    // mirror the upper triangle to the lower triangle to ensure symmetry
+    __global__ void FillGeneralizedInertialMatrixSymmetryKernel(
+        DevMat2D<Real> batch_qM,
+        DArray<int> batch_nv,
+        int num_envs)
+    {
+        const int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if(env_id >= num_envs)
+            return;
+
+        const int nv = batch_nv[env_id];
+        for(int row = 0; row < nv; row++)
+            for(int col = 0; col < row; col++)
+                batch_qM(env_id, col, row) = batch_qM(env_id, row, col);
     }
 
     template<typename T>
@@ -2188,7 +2240,8 @@ namespace dyno
 
     template<typename TDataType>
     __global__ void ComputeComVelKernel(
-        DArray<int> batch_bodies,
+        DevArr2D<Pair<int, int>> batch_groups,
+        DArray<int> flatten_group_to_env,
         DevArr2D<Real> batch_cdof,
         DevArr2D<Real> batch_qvel,
         DevArr2D<Real> subtree_com_vel,
@@ -2197,14 +2250,23 @@ namespace dyno
         DevArr2D<int> q_offset,
         DevArr2D<int> joint_type,
         DevArr2D<int> is_static,
-        int num_envs)
+        int num_envs,
+        int num_groups)
     {
-        int env_id = blockIdx.x * blockDim.x + threadIdx.x;
+        const int group_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if(group_id >= num_groups)
+            return;
+
+        const int env_id = flatten_group_to_env[group_id];
         if(env_id >= num_envs)
             return;
 
-        const int num_bodies = batch_bodies[env_id];
-        for(int bid = 0; bid < num_bodies; bid++)
+        const int local_gid = group_id - batch_groups.BlockOffset(env_id);
+        const Pair<int, int> group = batch_groups(env_id, local_gid);
+        const int body_begin = group.first;
+        const int body_count = group.second;
+
+        for(int bid = body_begin; bid < body_begin + body_count; bid++)
         {
             const int pidx = parent_idx(env_id, bid);
             const int q_start = q_offset(env_id, bid);
@@ -2278,6 +2340,174 @@ namespace dyno
         res[3] = -cvel_2 * vec_4 + cvel_1 * vec_5;
         res[4] = cvel_2 * vec_3 - cvel_0 * vec_5;
         res[5] = -cvel_1 * vec_3 + cvel_0 * vec_4;
+    }
+
+    template<typename TDataType>
+    __global__ void RNECaccKernel(
+        DevArr2D<Pair<int, int>> batch_groups,
+        DArray<int> flatten_group_to_env,
+        const DArray<Vec3f> gravities,
+        DevArr2D<Real> batch_cacc,
+        DevArr2D<Real> batch_cdof_dot,
+        DevArr2D<Real> batch_qvel,
+        DArray2D<int> parent_idx,
+        DArray2D<int> is_static,
+        DArray2D<int> joint_type,
+        DevArr2D<int> q_offset,
+        int num_envs,
+        int num_groups)
+    {
+        const int group_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if(group_id >= num_groups)
+            return;
+
+        const int env_id = flatten_group_to_env[group_id];
+        if(env_id >= num_envs)
+            return;
+
+        const int local_gid = group_id - batch_groups.BlockOffset(env_id);
+        const Pair<int, int> group = batch_groups(env_id, local_gid);
+        const int body_begin = group.first;
+        const int body_count = group.second;
+        const Vec3f gravity = gravities[env_id];
+
+        for(int bid = body_begin; bid < body_begin + body_count; bid++)
+        {
+            const int pidx = parent_idx(env_id, bid);
+            const int q_start = q_offset(env_id, bid);
+
+            if(pidx == -1)
+            {
+                for(int i = 0; i < 3; i++)
+                    batch_cacc(env_id, bid * 6 + 3 + i) = -gravity[i];
+
+                if(!is_static(env_id, bid))
+                    ComputeCACC(batch_cdof_dot, batch_qvel, batch_cacc, env_id, bid, q_start, 6);
+            }
+            else
+            {
+                const int jt = joint_type(env_id, bid);
+                for(int i = 0; i < 6; i++)
+                    batch_cacc(env_id, bid * 6 + i) = batch_cacc(env_id, pidx * 6 + i);
+
+                if(jt < 3)
+                {
+                    for(int i = 0; i < 6; i++)
+                        batch_cacc(env_id, bid * 6 + i) += batch_qvel(env_id, q_start) * batch_cdof_dot(env_id, q_start * 6 + i);
+                }
+                else
+                {
+                    ComputeCACC(batch_cdof_dot, batch_qvel, batch_cacc, env_id, bid, q_start, 3);
+                }
+            }
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void RNEForceKernel(
+        DArray<int> flatten_body_to_env,
+        DArray<int> batch_body_offset,
+        DevArr2D<Real> batch_cacc,
+        DevArr2D<Real> batch_cforce,
+        DevArr2D<Real> subtree_inertia,
+        DevArr2D<Real> subtree_com_vel,
+        int num_envs,
+        int total_bodies)
+    {
+        const int global_bid = blockIdx.x * blockDim.x + threadIdx.x;
+        if(global_bid >= total_bodies)
+            return;
+
+        const int env_id = flatten_body_to_env[global_bid];
+        if(env_id >= num_envs)
+            return;
+
+        const int bid = global_bid - batch_body_offset[env_id];
+
+        Real Iacc[6];
+        Real Ivel[6];
+        Real vec6_buffer[6];
+
+        for(int i = 0; i < 6; i++)
+            vec6_buffer[i] = batch_cacc(env_id, bid * 6 + i);
+        InertiaMultiVec(subtree_inertia, vec6_buffer, Iacc, env_id, bid);
+
+        for(int i = 0; i < 6; i++)
+            vec6_buffer[i] = subtree_com_vel(env_id, bid * 6 + i);
+        InertiaMultiVec(subtree_inertia, vec6_buffer, Ivel, env_id, bid);
+
+        ComputeCVelCrossDual(subtree_com_vel, Ivel, vec6_buffer, env_id, bid);
+        for(int i = 0; i < 6; i++)
+            batch_cforce(env_id, bid * 6 + i) = Iacc[i] + vec6_buffer[i];
+    }
+
+    template<typename TDataType>
+    __global__ void RNEAccumKernel(
+        DevArr2D<Pair<int, int>> batch_groups,
+        DArray<int> flatten_group_to_env,
+        DArray2D<int> parent_idx,
+        DevArr2D<Real> batch_cforce,
+        int num_envs,
+        int num_groups)
+    {
+        const int group_id = blockIdx.x * blockDim.x + threadIdx.x;
+        if(group_id >= num_groups)
+            return;
+
+        const int env_id = flatten_group_to_env[group_id];
+        if(env_id >= num_envs)
+            return;
+
+        const int local_gid = group_id - batch_groups.BlockOffset(env_id);
+        const Pair<int, int> group = batch_groups(env_id, local_gid);
+        const int body_begin = group.first;
+        const int body_count = group.second;
+
+        for(int bid = body_begin + body_count - 1; bid >= body_begin; bid--)
+        {
+            const int pidx = parent_idx(env_id, bid);
+            if(pidx == -1)
+                continue;
+
+            for(int i = 0; i < 6; i++)
+                batch_cforce(env_id, pidx * 6 + i) += batch_cforce(env_id, bid * 6 + i);
+        }
+    }
+
+    template<typename TDataType>
+    __global__ void RNEProjKernel(
+        DArray<Pair<int, int>> flatten_q_to_env_body,
+        DevArr2D<int> batch_nv_offset,
+        DevArr2D<int> q_offset,
+        DevArr2D<int> q_lengths,
+        DevArr2D<Real> batch_cdof,
+        DevArr2D<Real> batch_cforce,
+        DevArr2D<Real> batch_q_inner_force,
+        int num_envs,
+        int total_nv)
+    {
+        const int global_qidx = blockIdx.x * blockDim.x + threadIdx.x;
+        if(global_qidx >= total_nv)
+            return;
+
+        const Pair<int, int> q_info = flatten_q_to_env_body[global_qidx];
+        const int env_id = q_info.first;
+        if(env_id >= num_envs)
+            return;
+
+        const int bid = q_info.second;
+        const int body_global_q_start = batch_nv_offset(env_id, bid);
+        const int q_start = q_offset(env_id, bid);
+        const int q_num = q_lengths(env_id, bid);
+        const int qidx = q_start + (global_qidx - body_global_q_start);
+
+        if(qidx < q_start || qidx >= q_start + q_num)
+            return;
+
+        Real sum = 0.f;
+        for(int i = 0; i < 6; i++)
+            sum += batch_cdof(env_id, qidx * 6 + i) * batch_cforce(env_id, bid * 6 + i);
+        batch_q_inner_force(env_id, qidx) = sum;
     }
 
     template<typename TDataType>
@@ -3097,9 +3327,14 @@ namespace dyno
         const auto& env_infos = this->env_infos;
         const auto& rigid_body_system = this->rigid_body;
         const int num_envs = env_infos->num_envs;
+        const int num_groups = rigid_body_system->batch_groups.TotalSize();
 
-        ForwardKinematicsKernel<TDataType><<<1, num_envs>>>(
-            rigid_body_system->batch_bodies,
+        const int threads = 128;
+        const int blocks_group = (num_groups + threads - 1) / threads;
+        
+        ForwardKinematicsKernel<TDataType><<<blocks_group, threads>>>(
+            rigid_body_system->batch_groups,
+            rigid_body_system->flatten_group_to_env,
             rigid_body_system->batch_quat,
             rigid_body_system->batch_rot,
             rigid_body_system->parent_idx,
@@ -3118,22 +3353,29 @@ namespace dyno
             rigid_body_system->batch_local_com_pos,
             rigid_body_system->batch_local_com_quat,
             rigid_body_system->batch_com_rot,
-            num_envs);
+            num_groups);
+            
         cudaDeviceSynchronize();
 
-        SubtreeComKernel<TDataType><<<1, num_envs>>>(
-            rigid_body_system->batch_bodies,
+        SubtreeComKernel<TDataType><<<blocks_group, threads>>>(
+            rigid_body_system->batch_groups,
+            rigid_body_system->flatten_group_to_env,
             rigid_body_system->subtree_com,
             rigid_body_system->batch_mass,
             rigid_body_system->subtree_mass,
             rigid_body_system->batch_global_com_pos,
             rigid_body_system->parent_idx,
-            num_envs);
+            num_envs,
+            num_groups);
         cudaDeviceSynchronize();
 
         // rigid_body_system->batch_cdof.reset();
-        ComputeCdofKernel<TDataType><<<32, 512>>>(
-            rigid_body_system->batch_bodies,
+        const int total_bodies_ = rigid_body_system->flatten_body_to_env.size();
+        const int blocks_body = (total_bodies_ + threads - 1) / threads;
+
+        ComputeCdofKernel<TDataType><<<blocks_body, threads>>>(
+            rigid_body_system->flatten_body_to_env,
+            rigid_body_system->batch_body_offset,
             rigid_body_system->batch_cdof,
             rigid_body_system->parent_idx,
             rigid_body_system->batch_pos,
@@ -3145,7 +3387,8 @@ namespace dyno
             rigid_body_system->joint_type,
             rigid_body_system->joint_axis,
             rigid_body_system->is_static,
-            num_envs);
+            num_envs,
+            total_bodies_);
         cudaDeviceSynchronize();
 
         // spdlog::info("Env 0");
@@ -3178,8 +3421,9 @@ namespace dyno
         // Crb
         rigid_body_system->batch_crb.Reset();
         // 1. Calculate the global inertia matrix of each rigid body when the center of mass of the corresponding kinematic tree is taken as the reference point.
-        SubtreeInertialKernel<<<32, 512>>>(
-            rigid_body_system->batch_bodies,
+        SubtreeInertialKernel<<<blocks_body, threads>>>(
+            rigid_body_system->flatten_body_to_env,
+            rigid_body_system->batch_body_offset,
             rigid_body_system->root_idx,
             rigid_body_system->batch_global_com_pos,
             rigid_body_system->subtree_com,
@@ -3188,25 +3432,31 @@ namespace dyno
             rigid_body_system->batch_com_rot,
             rigid_body_system->batch_mass,
             rigid_body_system->batch_crb,
-            num_envs);
+            num_envs,
+            total_bodies_);
         // 2. Calculate the global inertia matrix of each sub-tree.
         cudaDeviceSynchronize();
-        AccumulateSubtreeInertialKernel<<<32, 128>>>(
-            rigid_body_system->batch_bodies,
+
+        AccumulateSubtreeInertialKernel<<<blocks_group, threads>>>(
+            rigid_body_system->batch_groups,
+            rigid_body_system->flatten_group_to_env,
             rigid_body_system->parent_idx,
             rigid_body_system->batch_crb,
             rigid_body_system->subtree_inertia,
-            num_envs);
+            num_envs,
+            num_groups);
         cudaDeviceSynchronize();
 
 
         // 3. Construct the system inertia matrix in the generalized coordinate system.
+        const int total_nv_ = rigid_body_system->flatten_q_to_env_body.size();
+
         rigid_body_system->batch_qM.Reset();
-        auto& q_chain = rigid_body_system->batch_q_chain_new;
-        cudaMemset((void*)q_chain.Begin(), -1, q_chain.TotalSize() * sizeof(int));
-        UpdateGeneralizedInertialMatrixKernel<TDataType><<<32, 512>>>(
-            rigid_body_system->batch_bodies,
+        const int blocks_nv = (total_nv_ + threads - 1) / threads;
+        UpdateGeneralizedInertialMatrixKernel<TDataType><<<blocks_nv, threads>>>(
+            rigid_body_system->flatten_q_to_env_body,
             rigid_body_system->batch_qM,
+            rigid_body_system->batch_nv_offset,
             rigid_body_system->batch_nv,
             rigid_body_system->is_isolated,
             rigid_body_system->is_static,
@@ -3214,17 +3464,24 @@ namespace dyno
             rigid_body_system->q_offset,
             rigid_body_system->q_lengths,
             rigid_body_system->batch_cdof,
-            rigid_body_system->batch_q_chain_new,
             rigid_body_system->batch_crb,
             rigid_body_system->batch_inertia,
             rigid_body_system->batch_mass,
+            num_envs,
+            total_nv_);
+        cudaDeviceSynchronize();
+        // mirror the upper triangle to the lower triangle
+        FillGeneralizedInertialMatrixSymmetryKernel<<<32, 128>>>(
+            rigid_body_system->batch_qM,
+            rigid_body_system->batch_nv,
             num_envs);
         cudaDeviceSynchronize();
 
         rigid_body_system->subtree_com_vel.Reset();
         // rigid_body_system->batch_cdof_dot.reset();
-        ComputeComVelKernel<TDataType><<<32, 512>>>(
-            rigid_body_system->batch_bodies,
+        ComputeComVelKernel<TDataType><<<blocks_group, threads>>>(
+            rigid_body_system->batch_groups,
+            rigid_body_system->flatten_group_to_env,
             rigid_body_system->batch_cdof,
             rigid_body_system->batch_qvel,
             rigid_body_system->subtree_com_vel,
@@ -3233,29 +3490,82 @@ namespace dyno
             rigid_body_system->q_offset,
             rigid_body_system->joint_type,
             rigid_body_system->is_static,
-            num_envs);
+            num_envs,
+            num_groups);
         cudaDeviceSynchronize();
-        // Compute RNE
+        // 4. Recursive Newton-Euler in split stages.
         rigid_body_system->batch_cacc.Reset();
         rigid_body_system->batch_cforce.Reset();
-        ComputeRNEKernel<TDataType><<<32, 512>>>(
-            rigid_body_system->batch_bodies,
+
+        // 4.1 Forward recursion: propagate spatial accelerations along each kinematic tree.
+        RNECaccKernel<TDataType><<<blocks_group, threads>>>(
+            rigid_body_system->batch_groups,
+            rigid_body_system->flatten_group_to_env,
             env_infos->gravities,
             rigid_body_system->batch_cacc,
-            rigid_body_system->batch_cforce,
-            rigid_body_system->batch_q_inner_force,
-            rigid_body_system->batch_cdof,
             rigid_body_system->batch_cdof_dot,
             rigid_body_system->batch_qvel,
-            rigid_body_system->q_offset,
-            rigid_body_system->subtree_inertia,
-            rigid_body_system->subtree_com_vel,
             rigid_body_system->parent_idx,
             rigid_body_system->is_static,
             rigid_body_system->joint_type,
-            rigid_body_system->q_lengths,
-            num_envs);
+            rigid_body_system->q_offset,
+            num_envs,
+            num_groups);
         cudaDeviceSynchronize();
+
+        // 4.2 Body-wise Newton-Euler: compute each body's spatial force from inertia, acceleration and velocity.
+        RNEForceKernel<TDataType><<<blocks_body, threads>>>(
+            rigid_body_system->flatten_body_to_env,
+            rigid_body_system->batch_body_offset,
+            rigid_body_system->batch_cacc,
+            rigid_body_system->batch_cforce,
+            rigid_body_system->subtree_inertia,
+            rigid_body_system->subtree_com_vel,
+            num_envs,
+            total_bodies_);
+        cudaDeviceSynchronize();
+
+        // 4.3 Backward recursion: accumulate child reaction forces back to the parent body.
+        RNEAccumKernel<TDataType><<<blocks_group, threads>>>(
+            rigid_body_system->batch_groups,
+            rigid_body_system->flatten_group_to_env,
+            rigid_body_system->parent_idx,
+            rigid_body_system->batch_cforce,
+            num_envs,
+            num_groups);
+        cudaDeviceSynchronize();
+
+        // 4.4 Project spatial forces to generalized joint forces.
+        rigid_body_system->batch_q_inner_force.Reset();
+        RNEProjKernel<TDataType><<<blocks_nv, threads>>>(
+            rigid_body_system->flatten_q_to_env_body,
+            rigid_body_system->batch_nv_offset,
+            rigid_body_system->q_offset,
+            rigid_body_system->q_lengths,
+            rigid_body_system->batch_cdof,
+            rigid_body_system->batch_cforce,
+            rigid_body_system->batch_q_inner_force,
+            num_envs,
+            total_nv_);
+        cudaDeviceSynchronize();
+
+        // ComputeRNEKernel<TDataType><<<32, 512>>>(
+        //     rigid_body_system->batch_bodies,
+        //     env_infos->gravities,
+        //     rigid_body_system->batch_cacc,
+        //     rigid_body_system->batch_cforce,
+        //     rigid_body_system->batch_q_inner_force,
+        //     rigid_body_system->batch_cdof,
+        //     rigid_body_system->batch_cdof_dot,
+        //     rigid_body_system->batch_qvel,
+        //     rigid_body_system->q_offset,
+        //     rigid_body_system->subtree_inertia,
+        //     rigid_body_system->subtree_com_vel,
+        //     rigid_body_system->parent_idx,
+        //     rigid_body_system->is_static,
+        //     rigid_body_system->joint_type,
+        //     rigid_body_system->q_lengths,
+        //     num_envs);
 
         spdlog::info("[MujocoSolver Solver] Finished forward kinematics.");
     }

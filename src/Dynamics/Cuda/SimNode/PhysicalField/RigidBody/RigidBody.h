@@ -73,7 +73,7 @@ namespace dyno {
         DArray<Mat3f>       topo_rot_cache; // flattened body rotations for topology update
 
         // For articulated bodies
-        DevBlockVector<int>       parent_idx;   // [env_id, body_id] parent body index (-1 for root)
+        DevBlockVector<int> parent_idx;   // [env_id, body_id] parent body index (-1 for root)
         DevArr2D<int>       root_idx;     // [env_id, body_id] root body index
         DevArr2D<Real>      subtree_mass;   // [env_id, body_id] mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
         DevArr2D<Vec3f>     subtree_com;    // [env_id, body_id] center of mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
@@ -113,7 +113,7 @@ namespace dyno {
         BatchCollisionConstraints             collision_constraints;
         DevBlockVector<Real>                  friction_mu;
         DevBlockVector<Real>                  contact_weights;
-        
+
 
         // For joint
         DevBlockVector<int>           joint_type;     // [env_id, body_id] type of joint (0: none, 1: hinge, 2: slide, 3: ball)
@@ -133,11 +133,11 @@ namespace dyno {
         // Shape information for rendering and collision handling
         DArray2D<int>           shape_type;    // [body_id] type
         DArray2D<int>           shape_idx;     // [body_id] index to the corresponding shape parameter array (e.g., box_params, sphere_params, etc.)
-        
+
         DArray<int>             env_num_boxes;  // [env_id] number of boxes in each environment
         DArray<int>             env_box_offset;  // [env_id] offset of boxes in the global box array
         DArray2D<BoxInfo>       boxes;
-        
+
         DArray<int>             env_num_spheres;  // [env_id] number of spheres in each environment
         DArray<int>             env_sphere_offset;  // [env_id] offset of spheres in the global sphere array
         DArray2D<SphereInfo>    spheres;
@@ -159,12 +159,8 @@ namespace dyno {
         DArray<Pair<int, int>> flatten_q_to_env_body;    // [flatten_q_id] -> [env_id, body_id]
 
     public:
-        void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num,
-            int joint_limit_max, int connect_max, int fl_max);
+        void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num);
     };
 
-    
+
 }
-
-
-

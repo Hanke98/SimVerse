@@ -7,19 +7,20 @@
 namespace dyno
 {
     template<typename TDataType>
-    void RigidBody<TDataType>::ParseRigidBody(const json& envs_json)
+    void RigidBody<TDataType>::ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num)
     {
         spdlog::info("Start initializing rigid body state variables.");
         // printf("connect_num: %d", connect_max);
         int env_num = envs_json.size();
 
-        std::vector<int> shape_type_host;
-        std::vector<int> shape_idx_host;
+        CArray2D<int> shape_type_host(env_num, body_max_num);
+        CArray2D<int> shape_idx_host(env_num, body_max_num);
         std::vector<int> parent_idx_host;
 
-        std::vector<SphereInfo>     spheres_host;
-        std::vector<BoxInfo>        boxes_host;
-        std::vector<CapsuleInfo>    capsules_host;
+        CArray2D<SphereInfo> spheres_host(env_num, primitive_max_num[0]);
+        CArray2D<BoxInfo> boxes_host(env_num, primitive_max_num[1]);
+        CArray2D<CapsuleInfo> capsules_host(env_num, primitive_max_num[2]);
+
 
         std::vector<int> env_num_boxes_host;
         std::vector<int> env_box_offset_host(env_num, 0);
@@ -33,9 +34,9 @@ namespace dyno
         std::vector<int> batch_bodies_host;
         std::vector<int> batch_body_offset_host;
 
-        std::vector<Vec3f>      body_pos_host;
-        std::vector<Mat3f>      body_rot_host;
-        std::vector<Quat<Real>> batch_quat_host;
+        CArray2D<Vec3f>     body_pos_host(env_num, body_max_num);
+        CArray2D<Mat3f>     body_rot_host(env_num, body_max_num);
+        CArray2D<Quat<Real>> batch_quat_host(env_num, body_max_num);
 
         std::vector<int>           joint_type_host;
         std::vector<Real>          joint_qpos_host;
@@ -97,7 +98,7 @@ namespace dyno
         std::vector<int>           col_power_host;
 
         std::vector<Vec3i>      rendering_idx_2_rigid_body_mapping_host;
-        std::vector<int>        rigid_body_2_rendering_idx_mapping_host;
+        CArray2D<int>        rigid_body_2_rendering_idx_mapping_host;
 
         std::vector<int>    is_static_host;
         std::vector<Real>   mass_host;
@@ -125,17 +126,11 @@ namespace dyno
                 for (const auto& rb_json : env_json["rigid_body"]) {
 
                     auto pos = rb_json.at("pos").get<std::vector<float>>();
-                    body_pos_host.push_back(Vec3f(pos[0], pos[1], pos[2]));
+                    body_pos_host(eid, bid) = Vec3f(pos[0], pos[1], pos[2]);
+                    auto quat = rb_json.at("quat").get<std::vector<float>>();
+                    batch_quat_host(eid, bid) = Quat<Real>(quat[0], quat[1], quat[2], quat[3]);
+                    body_rot_host(eid, bid) = batch_quat_host(eid, bid).toMatrix3x3();
 
-                    if (rb_json.contains("quat")) {
-                        auto quat = rb_json.at("quat").get<std::vector<float>>();
-                        auto quat_ = Quat<Real>(quat[0], quat[1], quat[2], quat[3]);
-                        batch_quat_host.push_back(quat_);
-                        body_rot_host.push_back(quat_.toMatrix3x3());
-                    } else {
-                        body_rot_host.push_back(Mat3f::identityMatrix());
-                        batch_quat_host.push_back(Quat<Real>::identity());
-                    }
 
                     Real density = rb_json["density"].get<float>();
 
@@ -156,14 +151,13 @@ namespace dyno
                         int id = rb_json.at("ID").get<int>();
                         switch (id) {
                             case 0: {
-                                shape_type_host.push_back(0);
-                                shape_idx_host.push_back(sphere_num);
+                                shape_type_host(eid, bid) = 0;
+                                shape_idx_host(eid, bid) = sphere_num;
 
-                                SphereInfo s;
-                                s.center = Vec3f(0, 0, 0);
+                                spheres_host(eid, sphere_num).center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
-                                s.radius = halfLength[0];
-                                spheres_host.push_back(s);
+                                spheres_host(eid, sphere_num).radius = halfLength[0];
+                                // spheres_host(eid, sphere_num).rot = batch_quat_host(eid, bid);
 
                                 mass_host.push_back(density * 4. / 3. * M_PI * pow(halfLength[0], 3));
 
@@ -171,14 +165,14 @@ namespace dyno
                                 break;
                             }
                             case 1: {
-                                shape_type_host.push_back(1);
-                                shape_idx_host.push_back(box_num);
+                                shape_type_host(eid, bid) = 1;
+                                shape_idx_host(eid, bid) = box_num;
 
-                                BoxInfo b;
-                                b.center = Vec3f(0, 0, 0);
+                                // boxes_host(eid, box_num).center = body_pos_host(eid, bid);
+                                boxes_host(eid, box_num).center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
-                                b.halfLength = Vec3f(halfLength[0], halfLength[1], halfLength[2]);
-                                boxes_host.push_back(b);
+                                boxes_host(eid, box_num).halfLength = Vec3f(halfLength[0], halfLength[1], halfLength[2]);
+                                // boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
 
                                 mass_host.push_back(8 * density * halfLength[0] * halfLength[1] * halfLength[2]);
 
@@ -186,15 +180,13 @@ namespace dyno
                                 break;
                             }
                             case 2: {
-                                shape_type_host.push_back(2);
-                                shape_idx_host.push_back(capsule_num);
+                                shape_type_host(eid, bid) = 2;
+                                shape_idx_host(eid, bid) = capsule_num;
 
-                                CapsuleInfo c;
-                                c.center = Vec3f(0, 0, 0);
+                                capsules_host(eid, capsule_num).center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
-                                c.radius= halfLength[0];
-                                c.halfLength= halfLength[1];
-                                capsules_host.push_back(c);
+                                capsules_host(eid, capsule_num).radius= halfLength[0];
+                                capsules_host(eid, capsule_num).halfLength= halfLength[1];
 
                                 mass_host.push_back(density * (2 * M_PI * halfLength[1] * halfLength[0] * halfLength[0] + 4. / 3. * M_PI * pow(halfLength[0], 3)));
 
@@ -223,7 +215,7 @@ namespace dyno
                             joint_axis_ref_host.push_back(Vec3f(0));
 
                         joint_rel_pos_host.push_back(Vec3f(pos[0], pos[1], pos[2]));
-                        joint_rel_quat_host.push_back(batch_quat_host.back());
+                        joint_rel_quat_host.push_back(batch_quat_host(eid, bid));
 
                         if (joint_json.contains("upper")) {
                             jl_is_upper_host.push_back(1);
@@ -468,8 +460,8 @@ namespace dyno
         {
             for (int bid = 0; bid < batch_bodies_host[eid]; ++bid)
             {
-                int st = shape_type_host[batch_body_offset_host[eid] + bid];
-                int si = shape_idx_host[batch_body_offset_host[eid] + bid];
+                int st = shape_type_host(eid, bid);
+                int si = shape_idx_host(eid, bid);
                 if (st < 0 || si < 0)
                     continue;
 
@@ -491,7 +483,7 @@ namespace dyno
                 {
                     rendering_idx_2_rigid_body_mapping_host[render_idx] = Vec3i(eid, st, si);
                 }
-                rigid_body_2_rendering_idx_mapping_host.push_back(render_idx);
+                rigid_body_2_rendering_idx_mapping_host(eid, bid) = render_idx;
             }
         }
 
@@ -499,8 +491,8 @@ namespace dyno
             for (int bid = 0; bid < batch_bodies_host[eid]; ++bid) {
                 const int pid = parent_idx_host[batch_body_offset_host[eid] + bid];
                 if (pid != -1) {
-                    const auto& parent_quat = batch_quat_host[batch_body_offset_host[eid] + pid];
-                    const auto& parent_rot = body_rot_host[batch_body_offset_host[eid] + pid];
+                    const auto& parent_quat = batch_quat_host(eid, pid);
+                    const auto& parent_rot = body_rot_host(eid, pid);
                     const int& joint_type = joint_type_host[batch_body_offset_host[eid] + bid];
                     const auto& joint_qpos_start = joint_qpos_offset_host[batch_body_offset_host[eid] + bid];
                     const auto& local_axis = joint_axis_ref_host[batch_body_offset_host[eid] + bid];
@@ -509,13 +501,13 @@ namespace dyno
                     Quat<Real> xquat_p = parent_quat * joint_rel_quat_host[batch_body_offset_host[eid] + bid];
                     Vec3f joint_axis = xquat_p * local_axis;
                     Vec3f xanchor = xquat_p * local_anchor;
-                    Vec3f xpos = parent_rot * joint_rel_pos_host[batch_body_offset_host[eid] + bid] + body_pos_host[batch_body_offset_host[eid] + pid];
+                    Vec3f xpos = parent_rot * joint_rel_pos_host[batch_body_offset_host[eid] + bid] + body_pos_host(eid, pid);
                     xanchor += xpos;
 
                     if (joint_type == 2) {
-                        batch_quat_host[batch_body_offset_host[eid] + bid] = xquat_p;
-                        body_rot_host[batch_body_offset_host[eid] + bid] = xquat_p.toMatrix3x3();
-                        body_pos_host[batch_body_offset_host[eid] + bid] = xpos + (joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_qpos_num_host[eid] + joint_qpos_start]) * joint_axis;
+                        batch_quat_host(eid, bid) = xquat_p;
+                        body_rot_host(eid, bid) = xquat_p.toMatrix3x3();
+                        body_pos_host(eid, bid) = xpos + (joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_qpos_num_host[eid] + joint_qpos_start]) * joint_axis;
                     } else {
                         Quat<Real> quat_local;
                         if (joint_type == 1)
@@ -531,10 +523,10 @@ namespace dyno
                         }
 
                         Quat<Real> xquat_c = xquat_p * quat_local;
-                        batch_quat_host[batch_body_offset_host[eid] + bid] = xquat_c;
-                        body_rot_host[batch_body_offset_host[eid] + bid] = xquat_c.toMatrix3x3();
+                        batch_quat_host(eid, bid) = xquat_c;
+                        body_rot_host(eid, bid) = xquat_c.toMatrix3x3();
                         xpos = xquat_c * local_anchor;
-                        body_pos_host[batch_body_offset_host[eid] + bid] = xanchor - xpos;
+                        body_pos_host(eid, bid) = xanchor - xpos;
                     }
                 }
             }
@@ -554,17 +546,17 @@ namespace dyno
         //     }
         // }
 
-        shape_type.Assign(shape_type_host, batch_bodies_host);
-        shape_idx.Assign(shape_idx_host, batch_bodies_host);
+        shape_type.assign(shape_type_host);
+        shape_idx.assign(shape_idx_host);
         parent_idx.Assign(parent_idx_host, batch_bodies_host);
 
-        boxes.Assign(boxes_host, env_num_boxes_host);
-        spheres.Assign(spheres_host, env_num_spheres_host);
-        capsules.Assign(capsules_host, env_num_capsules_host);
+        boxes.assign(boxes_host);
+        spheres.assign(spheres_host);
+        capsules.assign(capsules_host);
 
-        batch_pos.Assign(body_pos_host, batch_bodies_host);
-        batch_rot.Assign(body_rot_host, batch_bodies_host);
-        batch_quat.Assign(batch_quat_host, batch_bodies_host);
+        batch_pos.assign(body_pos_host);
+        batch_rot.assign(body_rot_host);
+        batch_quat.assign(batch_quat_host);
 
         spdlog::info("num boxes: {}, num spheres: {}, num capsules: {}", total_boxes, total_spheres, total_capsules);
         env_num_boxes.assign(env_num_boxes_host);
@@ -578,7 +570,7 @@ namespace dyno
         batch_body_offset.assign(batch_body_offset_host);
 
         rendering_idx_2_rigid_body_mapping.assign(rendering_idx_2_rigid_body_mapping_host);
-        rigid_body_2_rendering_idx_mapping.Assign(rigid_body_2_rendering_idx_mapping_host, batch_bodies_host);
+        rigid_body_2_rendering_idx_mapping.assign(rigid_body_2_rendering_idx_mapping_host);
 
         is_static.Assign(is_static_host, batch_bodies_host);
         batch_mass.Assign(mass_host, batch_bodies_host);

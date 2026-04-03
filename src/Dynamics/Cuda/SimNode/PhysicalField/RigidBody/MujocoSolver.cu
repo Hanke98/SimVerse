@@ -1821,7 +1821,7 @@ namespace dyno
         DevArr2D<Real> batch_mass,
         DevArr2D<Real> subtree_mass,
         DevArr2D<Vec3f> batch_global_com_pos,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         int num_envs,
         int num_groups)
     {
@@ -1867,7 +1867,7 @@ namespace dyno
         DevArr2D<Vec3f> joint_anchor,
         DevArr2D<int> joint_type,
         DevArr2D<Vec3f> joint_axis,
-        DArray2D<int> is_static,
+        DevArr2D<int> is_static,
         int num_envs,
         int total_bodies)
     {
@@ -2032,7 +2032,7 @@ namespace dyno
     __global__ void AccumulateSubtreeInertialKernel(
         DevArr2D<Pair<int, int>> batch_groups,
         DArray<int> flatten_group_to_env,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         DevArr2D<Real> batch_crb,
         DevArr2D<Real> subtree_inertia,
         int num_envs,
@@ -2350,9 +2350,9 @@ namespace dyno
         DevArr2D<Real> batch_cacc,
         DevArr2D<Real> batch_cdof_dot,
         DevArr2D<Real> batch_qvel,
-        DArray2D<int> parent_idx,
-        DArray2D<int> is_static,
-        DArray2D<int> joint_type,
+        DevArr2D<int> parent_idx,
+        DevArr2D<int> is_static,
+        DevArr2D<int> joint_type,
         DevArr2D<int> q_offset,
         int num_envs,
         int num_groups)
@@ -2445,7 +2445,7 @@ namespace dyno
     __global__ void RNEAccumKernel(
         DevArr2D<Pair<int, int>> batch_groups,
         DArray<int> flatten_group_to_env,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         DevArr2D<Real> batch_cforce,
         int num_envs,
         int num_groups)

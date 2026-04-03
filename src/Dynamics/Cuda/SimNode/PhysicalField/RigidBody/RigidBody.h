@@ -65,7 +65,7 @@ namespace dyno {
         DevArr2D<Vec3f>       batch_local_com_pos;
         DevArr2D<Quat<Real>>  batch_local_com_quat;
         DevArr2D<Mat3f>       batch_com_rot;
-        DevBlockVector<Real>      batch_mass;    // [env_id, body_id] mass of rigid body
+        DevArr2D<Real>        batch_mass;    // [env_id, body_id] mass of rigid body
         
 
 
@@ -73,7 +73,7 @@ namespace dyno {
         DArray<Mat3f>       topo_rot_cache; // flattened body rotations for topology update
 
         // For articulated bodies
-        DevBlockVector<int> parent_idx;   // [env_id, body_id] parent body index (-1 for root)
+        DevArr2D<int>       parent_idx;   // [env_id, body_id] parent body index (-1 for root)
         DevArr2D<int>       root_idx;     // [env_id, body_id] root body index
         DevArr2D<Real>      subtree_mass;   // [env_id, body_id] mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
         DevArr2D<Vec3f>     subtree_com;    // [env_id, body_id] center of mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
@@ -111,21 +111,21 @@ namespace dyno {
         BatchFrictionLossConstraints          friction_loss_constraints;
         BatchJointLimitConstraints            joint_limit_constraints;
         BatchCollisionConstraints             collision_constraints;
-        DevBlockVector<Real>                  friction_mu;
-        DevBlockVector<Real>                  contact_weights;
+        DevArr2D<Real>                  friction_mu;
+        DevArr2D<Real>                  contact_weights;
 
 
         // For joint
-        DevBlockVector<int>           joint_type;     // [env_id, body_id] type of joint (0: none, 1: hinge, 2: slide, 3: ball)
-        DevBlockVector<Real>          joint_qpos;
-        DevBlockVector<Real>          joint_qpos_ref;
-        DevBlockVector<int>           joint_qpos_offset;
-        DevBlockVector<Vec3f>         joint_rel_pos;
-        DevBlockVector<Quat<Real>>    joint_rel_quat;
-        DevBlockVector<Vec3f>         joint_axis;     // [env_id, body_id] joint axis for hinge and slide joint, or initial relative rotation axis for ball joint
-        DevBlockVector<Vec3f>         joint_axis_ref;
-        DevBlockVector<Vec3f>         joint_anchor;   // [env_id, body_id] joint anchor in the local frame of the body
-        DevBlockVector<Vec3f>         joint_anchor_ref;
+        DevArr2D<int>           joint_type;     // [env_id, body_id] type of joint (0: none, 1: hinge, 2: slide, 3: ball)
+        DevArr2D<Real>          joint_qpos;
+        DevArr2D<Real>          joint_qpos_ref;
+        DevArr2D<int>           joint_qpos_offset;
+        DevArr2D<Vec3f>         joint_rel_pos;
+        DevArr2D<Quat<Real>>    joint_rel_quat;
+        DevArr2D<Vec3f>         joint_axis;     // [env_id, body_id] joint axis for hinge and slide joint, or initial relative rotation axis for ball joint
+        DevArr2D<Vec3f>         joint_axis_ref;
+        DevArr2D<Vec3f>         joint_anchor;   // [env_id, body_id] joint anchor in the local frame of the body
+        DevArr2D<Vec3f>         joint_anchor_ref;
         DevArr2D<Real>          batch_cacc;
         DevArr2D<Real>          batch_cforce;
 

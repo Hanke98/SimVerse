@@ -205,7 +205,7 @@ namespace dyno
 
     __global__ void FillGroupKernel(
         DArray<int> batch_bodies,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         DevArr2D<Pair<int, int>> groups,
         int num_envs)
     {
@@ -280,7 +280,7 @@ namespace dyno
 
 
     __global__ void InitInertiaKernel(DArray<int> batch_bodies, DevArr2D<Vec3f> batch_inertia,
-        DArray2D<Real> batch_mass, DArray2D<SphereInfo> spheres, DArray2D<BoxInfo> boxes,
+        DevArr2D<Real> batch_mass, DArray2D<SphereInfo> spheres, DArray2D<BoxInfo> boxes,
         DArray2D<CapsuleInfo> capsules,
         DArray2D<int> shape_type, DArray2D<int> shape_idx, int num_envs)
     {
@@ -1106,7 +1106,7 @@ namespace dyno
         DevArr2D<Real> batch_cdof,
         DevArr2D<int> q_offset,
         DevArr2D<int> q_lengths,
-        DArray2D<int> parent_idx,
+        DevArr2D<int> parent_idx,
         DevMat2D<Real> batch_qM_L,
         DevArr2D<Real> batch_weight_inv,
         int num_envs)
@@ -1203,9 +1203,6 @@ namespace dyno
 
         const auto& L = batch_qM_L;
         auto& dof_weight_inv = batch_dof_weight_inv;
-
-        if(jt < 3)
-        {
 
         if(jt < 3)
         {
@@ -1759,6 +1756,10 @@ namespace dyno
 
             Quat<Real> xquat_p = parent_quat * joint_rel_quat(env_id, bid);
             joint_axis(env_id, bid) = RotateVector(local_axis, xquat_p);
+            if(env_id == 1)
+            {
+                printf("env %d, body %d, local_axis: (%f, %f, %f), joint_axis: (%f, %f, %f)\n", env_id, bid, local_axis.x, local_axis.y, local_axis.z, joint_axis(env_id, bid).x, joint_axis(env_id, bid).y, joint_axis(env_id, bid).z);
+            }
             Vec3f xanchor = RotateVector(local_anchor, xquat_p);
             Vec3f xpos = parent_rot * joint_rel_pos(env_id, bid) + batch_pos(env_id, pidx);
             xanchor += xpos;
@@ -1798,7 +1799,6 @@ namespace dyno
             }
 
             global_com_pos(env_id, bid) = batch_rot(env_id, bid) * local_com_pos(env_id, bid) + batch_pos(env_id, bid);
-            global_com_pos(env_id, bid) += batch_pos(env_id, bid);
 
             Quat<Real> quat_tmp = batch_quat(env_id, bid) * local_com_quat(env_id, bid);
             com_rot(env_id, bid) = quat_tmp.toMatrix3x3();
@@ -1834,6 +1834,13 @@ namespace dyno
 
         for(int bidx = 0; bidx < num_bodies; bidx++)
             subtree_com(env_id, bidx) /= subtree_mass(env_id, bidx);
+
+        for(int bid = 0; bid < num_bodies; bid++)
+        {
+            printf("env %d, body %d, global_com: (%f, %f, %f)\n", env_id, bid, batch_global_com_pos(env_id, bid).x, batch_global_com_pos(env_id, bid).y, batch_global_com_pos(env_id, bid).z);
+            printf("env %d, body %d, subtree_com: (%f, %f, %f)\n", env_id, bid, subtree_com(env_id, bid).x, subtree_com(env_id, bid).y, subtree_com(env_id, bid).z);
+
+        }
     }
 
     template<typename TDataType>
@@ -1872,6 +1879,10 @@ namespace dyno
             Vec3f offset = subtree_com(env_id, root_idx(env_id, bid)) - joint_anchor(env_id, bid);
             const int jt = joint_type(env_id, bid);
             const Vec3f& axis = joint_axis(env_id, bid);
+            if(env_id == 1)
+            {
+                printf("env %d, body %d, offset: (%f, %f, %f), axis: (%f, %f, %f)\n", env_id, bid, offset.x, offset.y, offset.z, axis.x, axis.y, axis.z);
+            }
 
             if(jt == 1)
             {
@@ -2400,10 +2411,14 @@ namespace dyno
                 }
             }
 
-            printf("env %d, body %d, q_inner_force: ", env_id, bid);
-            for(int i = 0; i < q_lengths(env_id, bid); i++)
-                printf("%f ", batch_q_inner_force(env_id, q_start + i));
-            printf("\n");
+            if(env_id == 1)
+            {
+                printf("env %d, body %d, q_inner_force: ", env_id, bid);
+                for(int i = 0; i < q_lengths(env_id, bid); i++)
+                    printf("%f ", batch_q_inner_force(env_id, q_start + i));
+                printf("\n");
+            }
+            
         }
     }
 
@@ -2480,6 +2495,8 @@ namespace dyno
         if(env_id >= num_envs)
             return;
 
+        if(env_id != 1)
+            return;
         const int num_bodies = batch_bodies[env_id];
         for(int bid = 0; bid < num_bodies; bid++)
         {
@@ -3586,7 +3603,7 @@ namespace dyno
         // PrintVector<<<1, 1>>>(rigid_body_system->batch_constraint_force, 0);
         // cudaDeviceSynchronize();
 
-        spdlog::info("s: ");
+        spdlog::info("energies constraints: ");
         PrintVector<<<1, 1>>>(rigid_body_system->batch_energy, 1);
         cudaDeviceSynchronize();
 
@@ -3600,7 +3617,7 @@ namespace dyno
             rigid_body_system->batch_energy,
             num_envs);
         cudaDeviceSynchronize();
-
+        spdlog::info("energies total: ");
         PrintVector<<<1, 1>>>(rigid_body_system->batch_energy, 1);
         cudaDeviceSynchronize();
     }

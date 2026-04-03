@@ -20,15 +20,15 @@ namespace dyno {
         using Real = typename TDataType::Real;
 
         int                 max_bodies;
-        DevBlockVector<int>       is_static;      // [env_id, body_id] whether the rigid body is static or dynamic
-        DevBlockVector<int>       is_isolated;    // [env_id, body_id] whether the rigid body is isolated (not in contact with any other body)
+        DevArr2D<int>       is_static;      // [env_id, body_id] whether the rigid body is static or dynamic
+        DevArr2D<int>       is_isolated;    // [env_id, body_id] whether the rigid body is isolated (not in contact with any other body)
 
         DArray<int>         batch_bodies;  // [env_id] num of rigid bodies in each environment
         DArray<int>         batch_body_offset; // [env_id] flattened rigid body offset in topo position/rotation arrays
     
         DArray<int>         batch_nv;      // [env_id] num of generalized DoFs
         DevArr2D<int>       batch_nv_offset;       // [env_id, body_id] num of generalized DoFs of each body
-        DArray2D<int>       nv_offset;     // [env_id, body_idx] 
+        DevArr2D<int>       nv_offset;     // [env_id, body_idx] 
         
         
         DevArr2D<int>       q_lengths;      // [env_id, body_id] num of generalized DoFs

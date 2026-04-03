@@ -157,6 +157,7 @@ namespace dyno {
         DArray<int> flatten_group_to_env; // [flatten_group_id] -> env_id
         DArray<int> flatten_body_to_env;  // [flatten_body_id] -> env_id
         DArray<Pair<int, int>> flatten_q_to_env_body;    // [flatten_q_id] -> [env_id, body_id]
+        DArray<Pair<int, int>> flatten_constraint_to_env_body;    // [flatten_constraint_id] -> [env_id, body_id]
 
     public:
         void ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num);

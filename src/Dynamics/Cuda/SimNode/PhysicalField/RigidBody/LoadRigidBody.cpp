@@ -502,11 +502,14 @@ namespace dyno
                     Vec3f xpos = parent_rot * joint_rel_pos_host[batch_body_offset_host[eid] + bid] + body_pos_host(eid, pid);
                     xanchor += xpos;
 
-                    if (joint_type == 2) {
+                    if (joint_type == 2)
+                    {
                         batch_quat_host(eid, bid) = xquat_p;
                         body_rot_host(eid, bid) = xquat_p.toMatrix3x3();
                         body_pos_host(eid, bid) = xpos + (joint_qpos_host[joint_offset_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_offset_host[eid] + joint_qpos_start]) * joint_axis;
-                    } else {
+                    }
+                    else
+                    {
                         Quat<Real> quat_local;
                         if (joint_type == 1)
                             quat_local.fromAxisAngle(local_axis, joint_qpos_host[joint_offset_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_offset_host[eid] + joint_qpos_start]);
@@ -563,7 +566,7 @@ namespace dyno
 
         rendering_idx_2_rigid_body_mapping.assign(rendering_idx_2_rigid_body_mapping_host);
         rigid_body_2_rendering_idx_mapping.assign(rigid_body_2_rendering_idx_mapping_host);
-        spdlog::info("ckpt");
+
         is_static.Assign(is_static_host, batch_bodies_host);
         batch_mass.Assign(mass_host, batch_bodies_host);
 
@@ -581,7 +584,7 @@ namespace dyno
 
         friction_mu.Assign(friction_mu_host, batch_bodies_host);
         contact_weights.Assign(contact_weights_host, batch_bodies_host);
-        spdlog::info("ckpt1");
+
         if (jl_ref_num_host.size() != 0) {
             joint_limit_constraints.ref_nums.assign(jl_ref_num_host);
             joint_limit_constraints.active_mapping.BuildFromSizes(jl_ref_num_host);
@@ -591,7 +594,7 @@ namespace dyno
             joint_limit_constraints.joint_idx.Assign(jl_joint_idx_host, jl_ref_num_host);
             joint_limit_constraints.is_upper.Assign(jl_is_upper_host, jl_ref_num_host);
             joint_limit_constraints.limit.Assign(jl_limit_host, jl_ref_num_host);
-            spdlog::info("ckpsadds");
+
             joint_limit_constraints.time_const.Assign(jl_tc_host, jl_ref_num_host);
             joint_limit_constraints.damp_ratio.Assign(jl_dr_host, jl_ref_num_host);
             joint_limit_constraints.dmax.Assign(jl_dmax_host, jl_ref_num_host);
@@ -600,7 +603,7 @@ namespace dyno
             joint_limit_constraints.width.Assign(jl_width_host, jl_ref_num_host);
             joint_limit_constraints.power.Assign(jl_power_host, jl_ref_num_host);
         }
-        spdlog::info("ckp1.5");
+
         if (connect_anchor_nums_host.size() != 0) {
             anchor_constraints.body_idxs.Assign(connect_body_idxs_host, connect_anchor_nums_host);
             anchor_constraints.anchor_A_local.Assign(connect_anchor_A_local_host, connect_anchor_nums_host);
@@ -608,7 +611,7 @@ namespace dyno
             anchor_constraints.anchor_A_world.BuildFromSizes(connect_anchor_nums_host);
             anchor_constraints.anchor_B_world.BuildFromSizes(connect_anchor_nums_host);
             anchor_constraints.anchor_error.BuildFromSizes(connect_anchor_nums_host);
-            spdlog::info("sadasddsas");
+
             anchor_constraints.time_const.Assign(connect_tc_host, connect_anchor_nums_host);
             anchor_constraints.damp_ratio.Assign(connect_dr_host, connect_anchor_nums_host);
             anchor_constraints.dmax.Assign(connect_dmax_host, connect_anchor_nums_host);
@@ -617,7 +620,7 @@ namespace dyno
             anchor_constraints.width.Assign(connect_width_host, connect_anchor_nums_host);
             anchor_constraints.power.Assign(connect_power_host, connect_anchor_nums_host);
         }
-        spdlog::info("ckp2");
+
         if (fl_num_host.size() != 0) {
             friction_loss_constraints.dof_idxs.Assign(fl_dof_idxs_host, fl_num_host);
             friction_loss_constraints.dof_frictionloss.Assign(fl_dof_frictionloss_host, fl_num_host);
@@ -642,6 +645,10 @@ namespace dyno
         num_constraints.assign(num_constraints_host);
         num_each_constraint.assign(num_each_constraint_host);
         constraint_offset.assign(constraint_offset_host);
+
+        std::vector<Quat<Real>> local_com_quat_host(total_bodies, Quat<Real>::identity());
+        batch_local_com_pos.BuildFromSizes(batch_bodies_host);
+        batch_local_com_quat.Assign(local_com_quat_host, batch_bodies_host);
 
         spdlog::info("Finished initializing rigid body state variables.");
     }

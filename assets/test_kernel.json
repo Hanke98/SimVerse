@@ -139,6 +139,65 @@
           "resistance": 50
         }
       ]
+    },
+    {
+      "env_id": 2,
+      "time_step": 0.006,
+      "gravity": [0, -9.81, 0],
+      "rigid_body": [
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": true,
+          "size": [0.1, 0.1, 0.1],
+          "density": 1000,
+          "friction": 0.6,
+          "pos": [0, 1.5, 0],
+          "quat": [0, 0, 0, 1]
+        },
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.2, 0.05, 0.05],
+          "density": 500,
+          "friction": 0.6,
+          "pos": [0.2, 0.0, 0.15],
+          "quat": [0, 0, 0, 1],
+          "joint": {
+            "parent": 0,
+            "type": 1,
+            "anchor": [-0.2, 0, -0.05],
+            "axis": [0, 0, 1],
+            "angle_ref": [0],
+            "angle": [0]
+          }
+        },
+        {
+          "type": "primitive",
+          "ID": 1,
+          "is_static": false,
+          "size": [0.15, 0.05, 0.05],
+          "density": 600,
+          "friction": 0.6,
+          "pos": [0.35, 0.0, 0.1],
+          "quat": [0, 0, 0, 1],
+          "joint": {
+            "parent": 1,
+            "type": 1,
+            "anchor": [-0.15, 0, -0.05],
+            "axis": [0, 0, 1],
+            "angle_ref": [0],
+            "angle": [0]
+          }
+        }
+      ],
+      "friction_loss": [
+        {
+          "dof_id": 1,
+          "resistance": 50
+        }
+      ]
     }
   ]
 }

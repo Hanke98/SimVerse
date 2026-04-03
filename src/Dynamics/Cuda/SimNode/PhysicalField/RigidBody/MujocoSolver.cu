@@ -2670,7 +2670,6 @@ namespace dyno
         const int is_static_body = is_static(env_id, bid);
         const int qpos_start = qpos_offset(env_id, bid);
         const int joint_qpos_start = joint_qpos_offset(env_id, bid);
-
         if(parent != -1)
         {
             const int jt = joint_type(env_id, bid);
@@ -2694,9 +2693,9 @@ namespace dyno
             batch_rot(env_id, bid) = batch_quat(env_id, bid).toMatrix3x3();
         }
 
-        printf("Env %d, Body %d, Position: (%f, %f, %f), joint_qpos: %f\n",
-            env_id, bid, batch_pos(env_id, bid).x, batch_pos(env_id, bid).y, batch_pos(env_id, bid).z,
-            joint_qpos(env_id, joint_qpos_start));
+        // printf("Env %d, Body %d, Position: (%f, %f, %f), joint_qpos: %f\n",
+        //     env_id, bid, batch_pos(env_id, bid).x, batch_pos(env_id, bid).y, batch_pos(env_id, bid).z,
+        //     joint_qpos(env_id, joint_qpos_start));
     }
 
     __global__ void PrintTestInfos(
@@ -2915,8 +2914,6 @@ namespace dyno
     void MujocoSolver<TDataType>::Init()
     {
         spdlog::info("[MujocoSolver Solver] Starting initialization.");
-
-        const int max_joint_qpos = 128;
 
         const auto& env_infos = this->env_infos;
         const auto& rigid_body_system = this->rigid_body;
@@ -3307,6 +3304,7 @@ namespace dyno
         PrintVector<<<1, 1>>>(rigid_body_system->batch_qpos, 0);
         cudaDeviceSynchronize();
 
+
         UpdateJointPoseKernel<TDataType><<<32, 512>>>(
             rigid_body_system->batch_bodies,
             rigid_body_system->batch_pos,
@@ -3321,7 +3319,6 @@ namespace dyno
             rigid_body_system->joint_type,
             env_infos->num_envs);
         cudaDeviceSynchronize();
-
     }
 
     template<typename TDataType>

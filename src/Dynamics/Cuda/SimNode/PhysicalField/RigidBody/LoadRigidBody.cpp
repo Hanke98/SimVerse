@@ -7,171 +7,111 @@
 namespace dyno
 {
     template<typename TDataType>
-    void RigidBody<TDataType>::ParseRigidBody(const json& envs_json, int body_max_num, std::vector<int> primitive_max_num,
-        int joint_limit_max, int connect_max, int fl_max)
+    void RigidBody<TDataType>::ParseRigidBody(const json& envs_json)
     {
         spdlog::info("Start initializing rigid body state variables.");
         // printf("connect_num: %d", connect_max);
         int env_num = envs_json.size();
 
-        CArray2D<int> shape_type_host(env_num, body_max_num);
-        CArray2D<int> shape_idx_host(env_num, body_max_num);
-        CArray2D<int> parent_idx_host(env_num, body_max_num);
+        std::vector<int> shape_type_host;
+        std::vector<int> shape_idx_host;
+        std::vector<int> parent_idx_host;
 
-        CArray2D<SphereInfo> spheres_host(env_num, primitive_max_num[0]);
-        CArray2D<BoxInfo> boxes_host(env_num, primitive_max_num[1]);
-        CArray2D<CapsuleInfo> capsules_host(env_num, primitive_max_num[2]);
+        std::vector<SphereInfo>     spheres_host;
+        std::vector<BoxInfo>        boxes_host;
+        std::vector<CapsuleInfo>    capsules_host;
 
-        std::vector<int> env_num_boxes_host(env_num, 0);
+        std::vector<int> env_num_boxes_host;
         std::vector<int> env_box_offset_host(env_num, 0);
 
-        std::vector<int> env_num_spheres_host(env_num, 0);
+        std::vector<int> env_num_spheres_host;
         std::vector<int> env_sphere_offset_host(env_num, 0);
 
-        std::vector<int> env_num_capsules_host(env_num, 0);
+        std::vector<int> env_num_capsules_host;
         std::vector<int> env_capsule_offset_host(env_num, 0);
 
-        std::vector<int> batch_bodies_host(env_num, 0);
-        std::vector<int> batch_body_offset_host(env_num, 0);
+        std::vector<int> batch_bodies_host;
+        std::vector<int> batch_body_offset_host;
 
-        CArray2D<Vec3f>     body_pos_host(env_num, body_max_num);
-        CArray2D<Mat3f>     body_rot_host(env_num, body_max_num);
-        CArray2D<Quat<Real>> batch_quat_host(env_num, body_max_num);
+        std::vector<Vec3f>      body_pos_host;
+        std::vector<Mat3f>      body_rot_host;
+        std::vector<Quat<Real>> batch_quat_host;
 
-        CArray2D<int>           joint_type_host(env_num, body_max_num);
-        CArray2D<Real>          joint_qpos_host(env_num, body_max_num * 6);
-        CArray2D<Real>          joint_qpos_ref_host(env_num, body_max_num * 6);
-        CArray2D<int>           joint_qpos_offset_host(env_num, body_max_num);
-        CArray2D<Vec3f>         joint_rel_pos_host(env_num, body_max_num);
-        CArray2D<Quat<Real>>    joint_rel_quat_host(env_num, body_max_num);
-        CArray2D<Vec3f>         joint_axis_ref_host(env_num, body_max_num);
-        CArray2D<Vec3f>         joint_anchor_ref_host(env_num, body_max_num);
+        std::vector<int>           joint_type_host;
+        std::vector<Real>          joint_qpos_host;
+        std::vector<int>           joint_qpos_num_host;
+        std::vector<Real>          joint_qpos_ref_host;
+        std::vector<int>           joint_qpos_offset_host;
+        std::vector<Vec3f>         joint_rel_pos_host;
+        std::vector<Quat<Real>>    joint_rel_quat_host;
+        std::vector<Vec3f>         joint_axis_ref_host;
+        std::vector<Vec3f>         joint_anchor_ref_host;
 
-        CArray2D<Real>            friction_mu_host(env_num, body_max_num);
-        CArray2D<Real>            contact_weights_host(env_num, body_max_num);
+        std::vector<Real>            friction_mu_host;
+        std::vector<Real>            contact_weights_host;
 
-        std::vector<int>         jl_ref_num_host(env_num, 0);
-        CArray2D<int>            jl_joint_idx_host(env_num, joint_limit_max);
-        CArray2D<int>            jl_is_upper_host(env_num, joint_limit_max);
-        CArray2D<Real>           jl_limit_host(env_num, joint_limit_max);
+        std::vector<int>            jl_ref_num_host;
+        std::vector<int>            jl_joint_idx_host;
+        std::vector<int>            jl_is_upper_host;
+        std::vector<Real>           jl_limit_host;
 
-        CArray2D<Real>          jl_tc_host(env_num, joint_limit_max);
-        CArray2D<Real>          jl_dr_host(env_num, joint_limit_max);
-        CArray2D<Real>          jl_dmax_host(env_num, joint_limit_max);
-        CArray2D<Real>          jl_dmin_host(env_num, joint_limit_max);
-        CArray2D<Real>          jl_width_host(env_num, joint_limit_max);
-        CArray2D<Real>          jl_midpoint_host(env_num, joint_limit_max);
-        CArray2D<int>           jl_power_host(env_num, joint_limit_max);
+        std::vector<Real>          jl_tc_host;
+        std::vector<Real>          jl_dr_host;
+        std::vector<Real>          jl_dmax_host;
+        std::vector<Real>          jl_dmin_host;
+        std::vector<Real>          jl_width_host;
+        std::vector<Real>          jl_midpoint_host;
+        std::vector<int>           jl_power_host;
 
-        std::vector<int>                connect_anchor_nums_host(env_num, 0);
-        CArray2D<Pair<int, int>>        connect_body_idxs_host(env_num, connect_max);
-        CArray2D<Vec3f>                 connect_anchor_A_local_host(env_num, connect_max);
-        CArray2D<Vec3f>                 connect_anchor_B_local_host(env_num, connect_max);
+        std::vector<int>                   connect_anchor_nums_host;
+        std::vector<Pair<int, int>>        connect_body_idxs_host;
+        std::vector<Vec3f>                 connect_anchor_A_local_host;
+        std::vector<Vec3f>                 connect_anchor_B_local_host;
 
-        CArray2D<Real>          connect_tc_host(env_num, connect_max);
-        CArray2D<Real>          connect_dr_host(env_num, connect_max);
-        CArray2D<Real>          connect_dmax_host(env_num, connect_max);
-        CArray2D<Real>          connect_dmin_host(env_num, connect_max);
-        CArray2D<Real>          connect_width_host(env_num, connect_max);
-        CArray2D<Real>          connect_midpoint_host(env_num, connect_max);
-        CArray2D<int>           connect_power_host(env_num, connect_max);
+        std::vector<Real>          connect_tc_host;
+        std::vector<Real>          connect_dr_host;
+        std::vector<Real>          connect_dmax_host;
+        std::vector<Real>          connect_dmin_host;
+        std::vector<Real>          connect_width_host;
+        std::vector<Real>          connect_midpoint_host;
+        std::vector<int>           connect_power_host;
 
-        CArray2D<int>           fl_dof_idxs_host(env_num, fl_max);
-        CArray2D<Real>          fl_dof_frictionloss_host(env_num, fl_max);
+        std::vector<int>           fl_dof_idxs_host;
+        std::vector<Real>          fl_dof_frictionloss_host;
+        std::vector<int>           fl_num_host;
 
-        CArray2D<Real>          fl_tc_host(env_num, fl_max);
-        CArray2D<Real>          fl_dr_host(env_num, fl_max);
-        CArray2D<Real>          fl_dmax_host(env_num, fl_max);
-        CArray2D<Real>          fl_dmin_host(env_num, fl_max);
-        CArray2D<Real>          fl_width_host(env_num, fl_max);
-        CArray2D<Real>          fl_midpoint_host(env_num, fl_max);
-        CArray2D<int>           fl_power_host(env_num, fl_max);
+        std::vector<Real>          fl_tc_host;
+        std::vector<Real>          fl_dr_host;
+        std::vector<Real>          fl_dmax_host;
+        std::vector<Real>          fl_dmin_host;
+        std::vector<Real>          fl_width_host;
+        std::vector<Real>          fl_midpoint_host;
+        std::vector<int>           fl_power_host;
 
-        CArray2D<Real>          col_tc_host(env_num, body_max_num);
-        CArray2D<Real>          col_dr_host(env_num, body_max_num);
-        CArray2D<Real>          col_dmax_host(env_num, body_max_num);
-        CArray2D<Real>          col_dmin_host(env_num, body_max_num);
-        CArray2D<Real>          col_width_host(env_num, body_max_num);
-        CArray2D<Real>          col_midpoint_host(env_num, body_max_num);
-        CArray2D<int>           col_power_host(env_num, body_max_num);
+        std::vector<Real>          col_tc_host;
+        std::vector<Real>          col_dr_host;
+        std::vector<Real>          col_dmax_host;
+        std::vector<Real>          col_dmin_host;
+        std::vector<Real>          col_width_host;
+        std::vector<Real>          col_midpoint_host;
+        std::vector<int>           col_power_host;
 
-        std::vector<Vec3i>  rendering_idx_2_rigid_body_mapping_host;
-        CArray2D<int>       rigid_body_2_rendering_idx_mapping_host(env_num, body_max_num);
+        std::vector<Vec3i>      rendering_idx_2_rigid_body_mapping_host;
+        std::vector<int>        rigid_body_2_rendering_idx_mapping_host;
 
-        CArray2D<int> is_static_host(env_num, body_max_num);
-        CArray2D<Real> mass_host(env_num, body_max_num);
-        
+        std::vector<int>    is_static_host;
+        std::vector<Real>   mass_host;
 
         std::vector<int> num_constraints_host;
         std::vector<Vec4i> num_each_constraint_host;
         std::vector<Vec4i> constraint_offset_host;
-
-        // std::cout << "initial" << std::endl;
-
-        for (int eid = 0; eid < env_num; ++eid)
-        {
-            for (int sid = 0; sid < body_max_num; ++sid)
-            {
-                shape_type_host(eid, sid) = -1;
-                shape_idx_host(eid, sid) = -1;
-            }
-
-            for (int bid = 0; bid < body_max_num; ++bid)
-            {
-                rigid_body_2_rendering_idx_mapping_host(eid, bid) = -1;
-                body_rot_host(eid, bid) = Mat3f::identityMatrix();
-                batch_quat_host(eid, bid) = Quat<Real>::identity();
-
-                joint_type_host(eid, bid) = 0;
-                contact_weights_host(eid, bid) = 1;
-
-                col_dmax_host(eid, bid) = 0.95;
-                col_dmin_host(eid, bid) = 0.9;
-                col_width_host(eid, bid) = 0.001;
-                col_midpoint_host(eid, bid) = 0.5;
-                col_tc_host(eid, bid) = 0.02;
-                col_dr_host(eid, bid) = 1.;
-                col_power_host(eid, bid) = 2;
-            }
-
-            for (int jl_id = 0; jl_id < joint_limit_max; jl_id++) {
-                jl_dmax_host(eid, jl_id) = 0.95;
-                jl_dmin_host(eid, jl_id) = 0.9;
-                jl_width_host(eid, jl_id) = 0.001;
-                jl_midpoint_host(eid, jl_id) = 0.5;
-                jl_tc_host(eid, jl_id) = 0.02;
-                jl_dr_host(eid, jl_id) = 1.;
-                jl_power_host(eid, jl_id) = 2;
-            }
-
-            for (int connect_id = 0; connect_id < connect_max; connect_id++) {
-                connect_dmax_host(eid, connect_id) = 0.95;
-                connect_dmin_host(eid, connect_id) = 0.9;
-                connect_width_host(eid, connect_id) = 0.001;
-                connect_midpoint_host(eid, connect_id) = 0.5;
-                connect_tc_host(eid, connect_id) = 0.02;
-                connect_dr_host(eid, connect_id) = 1.;
-                connect_power_host(eid, connect_id) = 2;
-            }
-
-            for (int fl_id = 0; fl_id < fl_max; fl_id++) {
-                fl_dmax_host(eid, fl_id) = 0.95;
-                fl_dmin_host(eid, fl_id) = 0.9;
-                fl_width_host(eid, fl_id) = 0.001;
-                fl_midpoint_host(eid, fl_id) = 0.5;
-                fl_tc_host(eid, fl_id) = 0.02;
-                fl_dr_host(eid, fl_id) = 1.;
-                fl_power_host(eid, fl_id) = 2;
-            }
-        }
-
-        // std::cout << "initial finish" << std::endl;
 
         int eid = 0;
         int total_bodies = 0;
         int total_spheres = 0;
         int total_boxes = 0;
         int total_capsules = 0;
+        int total_joint_qpos = 0;
 
         for (const auto& env_json : envs_json) {
             if (env_json.contains("rigid_body") && env_json["rigid_body"].is_array()) {
@@ -185,176 +125,205 @@ namespace dyno
                 for (const auto& rb_json : env_json["rigid_body"]) {
 
                     auto pos = rb_json.at("pos").get<std::vector<float>>();
-                    body_pos_host(eid, bid) = Vec3f(pos[0], pos[1], pos[2]);
-                    auto quat = rb_json.at("quat").get<std::vector<float>>();
-                    batch_quat_host(eid, bid) = Quat<Real>(quat[0], quat[1], quat[2], quat[3]);
-                    body_rot_host(eid, bid) = batch_quat_host(eid, bid).toMatrix3x3();
+                    body_pos_host.push_back(Vec3f(pos[0], pos[1], pos[2]));
+
+                    if (rb_json.contains("quat")) {
+                        auto quat = rb_json.at("quat").get<std::vector<float>>();
+                        auto quat_ = Quat<Real>(quat[0], quat[1], quat[2], quat[3]);
+                        batch_quat_host.push_back(quat_);
+                        body_rot_host.push_back(quat_.toMatrix3x3());
+                    } else {
+                        body_rot_host.push_back(Mat3f::identityMatrix());
+                        batch_quat_host.push_back(Quat<Real>::identity());
+                    }
 
                     Real density = rb_json["density"].get<float>();
 
-                    friction_mu_host(eid, bid) = rb_json.at("friction").get<float>();
+                    friction_mu_host.push_back(rb_json.at("friction").get<float>());
                     if (rb_json.contains("contact_weight"))
-                        contact_weights_host(eid, bid) = rb_json.at("contact_weight").get<float>();
+                        contact_weights_host.push_back(rb_json.at("contact_weight").get<float>());
+                    else
+                        contact_weights_host.push_back(1);
 
                     bool is_static = rb_json["is_static"].get<bool>();
-                    is_static_host(eid, bid) = is_static ? 1 : 0;
+                    is_static_host.push_back(is_static ? 1 : 0);
 
                     if (rb_json.at("type") == "primitive") {
-                        parent_idx_host(eid, bid) = -1;
+                        parent_idx_host.push_back(-1);
 
                         int render_idx = -1;
 
                         int id = rb_json.at("ID").get<int>();
                         switch (id) {
                             case 0: {
-                                shape_type_host(eid, bid) = 0;
-                                shape_idx_host(eid, bid) = sphere_num;
+                                shape_type_host.push_back(0);
+                                shape_idx_host.push_back(sphere_num);
 
-                                spheres_host(eid, sphere_num).center = Vec3f(0, 0, 0);
+                                SphereInfo s;
+                                s.center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
-                                spheres_host(eid, sphere_num).radius = halfLength[0];
-                                // spheres_host(eid, sphere_num).rot = batch_quat_host(eid, bid);
+                                s.radius = halfLength[0];
+                                spheres_host.push_back(s);
 
-                                mass_host(eid, bid) = density * 4. / 3. * M_PI * pow(halfLength[0], 3);
+                                mass_host.push_back(density * 4. / 3. * M_PI * pow(halfLength[0], 3));
 
                                 sphere_num++;
                                 break;
                             }
                             case 1: {
-                                shape_type_host(eid, bid) = 1;
-                                shape_idx_host(eid, bid) = box_num;
+                                shape_type_host.push_back(1);
+                                shape_idx_host.push_back(box_num);
 
-                                // boxes_host(eid, box_num).center = body_pos_host(eid, bid);
-                                boxes_host(eid, box_num).center = Vec3f(0, 0, 0);
+                                BoxInfo b;
+                                b.center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
-                                boxes_host(eid, box_num).halfLength = Vec3f(halfLength[0], halfLength[1], halfLength[2]);
-                                // boxes_host(eid, box_num).rot = batch_quat_host(eid, bid);
+                                b.halfLength = Vec3f(halfLength[0], halfLength[1], halfLength[2]);
+                                boxes_host.push_back(b);
 
-                                mass_host(eid, bid) = 8 * density * halfLength[0] * halfLength[1] * halfLength[2];
+                                mass_host.push_back(8 * density * halfLength[0] * halfLength[1] * halfLength[2]);
 
                                 box_num++;
                                 break;
                             }
                             case 2: {
-                                shape_type_host(eid, bid) = 2;
-                                shape_idx_host(eid, bid) = capsule_num;
+                                shape_type_host.push_back(2);
+                                shape_idx_host.push_back(capsule_num);
 
-                                capsules_host(eid, capsule_num).center = Vec3f(0, 0, 0);
+                                CapsuleInfo c;
+                                c.center = Vec3f(0, 0, 0);
                                 auto halfLength = rb_json.at("size").get<std::vector<float>>();
-                                capsules_host(eid, capsule_num).radius= halfLength[0];
-                                capsules_host(eid, capsule_num).halfLength= halfLength[1];
-                                // capsules_host(eid, capsule_num).rot = batch_quat_host(eid, bid);
+                                c.radius= halfLength[0];
+                                c.halfLength= halfLength[1];
+                                capsules_host.push_back(c);
 
-                                mass_host(eid, bid) = density * (2 * M_PI * halfLength[1] * halfLength[0] * halfLength[0] + 4. / 3. * M_PI * pow(halfLength[0], 3));
+                                mass_host.push_back(density * (2 * M_PI * halfLength[1] * halfLength[0] * halfLength[0] + 4. / 3. * M_PI * pow(halfLength[0], 3)));
 
                                 capsule_num++;
                                 break;
                             }
                             default: ;
                         }
-                        spdlog::info("mass: {}, density: {}", mass_host(eid, bid), density);
+                        spdlog::info("mass: {}, density: {}", mass_host.back(), density);
                     }
 
                     if (rb_json.contains("joint")) {
                         auto joint_json = rb_json["joint"];
-                        parent_idx_host(eid, bid) = joint_json["parent"].get<int>();
+                        parent_idx_host.push_back(joint_json["parent"].get<int>());
 
-                        auto joint_anchor_ref = joint_json.at("anchor").get<std::vector<float>>();
-                        joint_anchor_ref_host(eid, bid) = Vec3f(joint_anchor_ref[0], joint_anchor_ref[1], joint_anchor_ref[2]);
+                        if (joint_json.contains("anchor")) {
+                            auto joint_anchor_ref = joint_json.at("anchor").get<std::vector<float>>();
+                            joint_anchor_ref_host.push_back(Vec3f(joint_anchor_ref[0], joint_anchor_ref[1], joint_anchor_ref[2]));
+                        } else
+                            joint_anchor_ref_host.push_back(Vec3f(0));
 
                         if (joint_json.contains("axis")) {
                             auto joint_axis_ref = joint_json.at("axis").get<std::vector<float>>();
-                            joint_axis_ref_host(eid, bid) = Vec3f(joint_axis_ref[0], joint_axis_ref[1], joint_axis_ref[2]);
-                        }
+                            joint_axis_ref_host.push_back(Vec3f(joint_axis_ref[0], joint_axis_ref[1], joint_axis_ref[2]));
+                        } else
+                            joint_axis_ref_host.push_back(Vec3f(0));
 
-                        joint_rel_pos_host(eid, bid) = body_pos_host(eid, bid);
-                        joint_rel_quat_host(eid, bid) = batch_quat_host(eid, bid);
+                        joint_rel_pos_host.push_back(Vec3f(pos[0], pos[1], pos[2]));
+                        joint_rel_quat_host.push_back(batch_quat_host.back());
 
                         if (joint_json.contains("upper")) {
-                            jl_is_upper_host(eid, jl_num) = 1;
-                            jl_joint_idx_host(eid, jl_num) = bid;
-                            jl_limit_host(eid, jl_num) = joint_json.at("upper").get<float>();
+                            jl_is_upper_host.push_back(1);
+                            jl_joint_idx_host.push_back(bid);
+                            jl_limit_host.push_back(joint_json.at("upper").get<float>());
 
                             if (joint_json.contains("sol_paras")) {
                                 auto jl_paras = joint_json.at("sol_paras").get<std::vector<float>>();
-                                jl_tc_host(eid, jl_num) = jl_paras[0];
-                                jl_dr_host(eid, jl_num) = jl_paras[1];
-                                jl_dmax_host(eid, jl_num) = jl_paras[2];
-                                jl_dmin_host(eid, jl_num) = jl_paras[3];
-                                jl_width_host(eid, jl_num) = jl_paras[4];
-                                jl_midpoint_host(eid, jl_num) = jl_paras[5];
-                                jl_power_host(eid, jl_num) = static_cast<int>(jl_paras[6]);
+                                jl_tc_host.push_back(jl_paras[0]);
+                                jl_dr_host.push_back(jl_paras[1]);
+                                jl_dmax_host.push_back(jl_paras[2]);
+                                jl_dmin_host.push_back(jl_paras[3]);
+                                jl_width_host.push_back(jl_paras[4]);
+                                jl_midpoint_host.push_back(jl_paras[5]);
+                                jl_power_host.push_back(static_cast<int>(jl_paras[6]));
+                            } else {
+                                jl_tc_host.push_back(0.02);
+                                jl_dr_host.push_back(1);
+                                jl_dmax_host.push_back(0.95);
+                                jl_dmin_host.push_back(0.9);
+                                jl_width_host.push_back(0.001);
+                                jl_midpoint_host.push_back(0.5);
+                                jl_power_host.push_back(2);
                             }
 
                             jl_num++;
                         }
 
                         if (joint_json.contains("lower")) {
-                            jl_is_upper_host(eid, jl_num) = 0;
-                            jl_joint_idx_host(eid, jl_num) = bid;
-                            jl_limit_host(eid, jl_num) = joint_json.at("lower").get<float>();
+                            jl_is_upper_host.push_back(0);
+                            jl_joint_idx_host.push_back(bid);
+                            jl_limit_host.push_back(joint_json.at("lower").get<float>());
 
                             if (joint_json.contains("sol_paras")) {
                                 auto jl_paras = joint_json.at("sol_paras").get<std::vector<float>>();
-                                jl_tc_host(eid, jl_num) = jl_paras[0];
-                                jl_dr_host(eid, jl_num) = jl_paras[1];
-                                jl_dmax_host(eid, jl_num) = jl_paras[2];
-                                jl_dmin_host(eid, jl_num) = jl_paras[3];
-                                jl_width_host(eid, jl_num) = jl_paras[4];
-                                jl_midpoint_host(eid, jl_num) = jl_paras[5];
-                                jl_power_host(eid, jl_num) = static_cast<int>(jl_paras[6]);
+                                jl_tc_host.push_back(jl_paras[0]);
+                                jl_dr_host.push_back(jl_paras[1]);
+                                jl_dmax_host.push_back(jl_paras[2]);
+                                jl_dmin_host.push_back(jl_paras[3]);
+                                jl_width_host.push_back(jl_paras[4]);
+                                jl_midpoint_host.push_back(jl_paras[5]);
+                                jl_power_host.push_back(static_cast<int>(jl_paras[6]));
+                            } else {
+                                jl_tc_host.push_back(0.02);
+                                jl_dr_host.push_back(1);
+                                jl_dmax_host.push_back(0.95);
+                                jl_dmin_host.push_back(0.9);
+                                jl_width_host.push_back(0.001);
+                                jl_midpoint_host.push_back(0.5);
+                                jl_power_host.push_back(2);
                             }
 
                             jl_num++;
                         }
 
-                        jl_ref_num_host[eid] = jl_num;
-
                         int type = joint_json.at("type").get<int>();
                         switch(type) {
                             case 1: {
-                                joint_type_host(eid, bid) = 1;
-                                joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
+                                joint_type_host.push_back(1);
+                                joint_qpos_offset_host.push_back(joint_qpos_offset);
 
                                 auto joint_qpos = joint_json.at("angle").get<std::vector<float>>();
-                                joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
+                                joint_qpos_host.push_back(joint_qpos[0]);
 
                                 auto joint_qpos_ref = joint_json.at("angle_ref").get<std::vector<float>>();
-                                joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
+                                joint_qpos_ref_host.push_back(joint_qpos_ref[0]);
 
                                 joint_qpos_offset++;
                                 break;
                             }
 
                             case 2: {
-                                joint_type_host(eid, bid) = 2;
-                                joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
+                                joint_type_host.push_back(2);
+                                joint_qpos_offset_host.push_back(joint_qpos_offset);
 
                                 auto joint_qpos = joint_json.at("displacement").get<std::vector<float>>();
-                                joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
+                                joint_qpos_host.push_back(joint_qpos[0]);
 
                                 auto joint_qpos_ref = joint_json.at("displacement_ref").get<std::vector<float>>();
-                                joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
+                                joint_qpos_ref_host.push_back(joint_qpos_ref[0]);
 
                                 joint_qpos_offset++;
                                 break;
                             }
 
                             case 3: {
-                                joint_type_host(eid, bid) = 3;
-                                joint_qpos_offset_host(eid, bid) = joint_qpos_offset;
+                                joint_type_host.push_back(3);
+                                joint_qpos_offset_host.push_back(joint_qpos_offset);
 
                                 auto joint_qpos = joint_json.at("orientation").get<std::vector<float>>();
-                                joint_qpos_host(eid, joint_qpos_offset) = joint_qpos[0];
-                                joint_qpos_host(eid, joint_qpos_offset + 1) = joint_qpos[1];
-                                joint_qpos_host(eid, joint_qpos_offset + 2) = joint_qpos[2];
-                                joint_qpos_host(eid, joint_qpos_offset + 3) = joint_qpos[3];
+                                joint_qpos_host.push_back(joint_qpos[0]);
+                                joint_qpos_host.push_back(joint_qpos[1]);
+                                joint_qpos_host.push_back(joint_qpos[2]);
+                                joint_qpos_host.push_back(joint_qpos[3]);
 
                                 auto joint_qpos_ref = joint_json.at("orientation_ref").get<std::vector<float>>();
-                                joint_qpos_ref_host(eid, joint_qpos_offset) = joint_qpos_ref[0];
-                                joint_qpos_ref_host(eid, joint_qpos_offset + 1) = joint_qpos_ref[1];
-                                joint_qpos_ref_host(eid, joint_qpos_offset + 2) = joint_qpos_ref[2];
-                                joint_qpos_ref_host(eid, joint_qpos_offset + 3) = joint_qpos_ref[3];
+                                joint_qpos_ref_host.push_back(joint_qpos_ref[0]);
+                                joint_qpos_ref_host.push_back(joint_qpos_ref[1]);
+                                joint_qpos_ref_host.push_back(joint_qpos_ref[2]);
+                                joint_qpos_ref_host.push_back(joint_qpos_ref[3]);
 
                                 joint_qpos_offset += 4;
                                 break;
@@ -362,16 +331,32 @@ namespace dyno
                             default: ;
                         }
                     }
+                    else {
+                        joint_type_host.push_back(0);
+                        joint_qpos_offset_host.push_back(joint_qpos_offset);
+                        joint_rel_pos_host.push_back(Vec3f(0));
+                        joint_rel_quat_host.push_back(Quat<Real>::identity());
+                        joint_axis_ref_host.push_back(Vec3f(0));
+                        joint_anchor_ref_host.push_back(Vec3f(0));
+                    }
 
                     if (rb_json.contains("sol_paras")) {
                         auto paras = rb_json.at("sol_paras").get<std::vector<float>>();
-                        col_tc_host(eid, bid) = paras[0];
-                        col_dr_host(eid, bid) = paras[1];
-                        col_dmax_host(eid, bid) = paras[2];
-                        col_dmin_host(eid, bid) = paras[3];
-                        col_width_host(eid, bid) = paras[4];
-                        col_midpoint_host(eid, bid) = paras[5];
-                        col_power_host(eid, bid) = static_cast<int>(paras[6]);
+                        col_tc_host.push_back(paras[0]);
+                        col_dr_host.push_back(paras[1]);
+                        col_dmax_host.push_back(paras[2]);
+                        col_dmin_host.push_back(paras[3]);
+                        col_width_host.push_back(paras[4]);
+                        col_midpoint_host.push_back(paras[5]);
+                        col_power_host.push_back(static_cast<int>(paras[6]));
+                    } else {
+                        col_tc_host.push_back(0.02);
+                        col_dr_host.push_back(1);
+                        col_dmax_host.push_back(0.95);
+                        col_dmin_host.push_back(0.9);
+                        col_width_host.push_back(0.001);
+                        col_midpoint_host.push_back(0.5);
+                        col_power_host.push_back(2);
                     }
 
                     bid++;
@@ -383,23 +368,31 @@ namespace dyno
                 if(env_json.contains("connect"))
                 {
                     int connect_num = 0;
-                    connect_anchor_nums_host[eid] = static_cast<int>(env_json["connect"].size());
+                    connect_anchor_nums_host.push_back(static_cast<int>(env_json["connect"].size()));
                     for (const auto& connect_json : env_json["connect"]) {
-                        connect_body_idxs_host(eid, connect_num) = Pair<int, int>(connect_json.at("bodyA").get<int>(), connect_json.at("bodyB").get<int>());
+                        connect_body_idxs_host.push_back(Pair<int, int>(connect_json.at("bodyA").get<int>(), connect_json.at("bodyB").get<int>()));
                         auto localA = connect_json.at("anchorA").get<std::vector<float>>();
-                        connect_anchor_A_local_host(eid, connect_num) = Vec3f{localA[0], localA[1], localA[2]};
+                        connect_anchor_A_local_host.push_back(Vec3f{localA[0], localA[1], localA[2]});
                         auto localB = connect_json.at("anchorB").get<std::vector<float>>();
-                        connect_anchor_B_local_host(eid, connect_num) = Vec3f{localB[0], localB[1], localB[2]};
+                        connect_anchor_B_local_host.push_back(Vec3f{localB[0], localB[1], localB[2]});
 
                         if (connect_json.contains("sol_paras")) {
                             auto paras = connect_json.at("sol_paras").get<std::vector<float>>();
-                            connect_tc_host(eid, connect_num) = paras[0];
-                            connect_dr_host(eid, connect_num) = paras[1];
-                            connect_dmax_host(eid, connect_num) = paras[2];
-                            connect_dmin_host(eid, connect_num) = paras[3];
-                            connect_width_host(eid, connect_num) = paras[4];
-                            connect_midpoint_host(eid, connect_num) = paras[5];
-                            connect_power_host(eid, connect_num) = static_cast<int>(paras[6]);
+                            connect_tc_host.push_back(paras[0]);
+                            connect_dr_host.push_back(paras[1]);
+                            connect_dmax_host.push_back(paras[2]);
+                            connect_dmin_host.push_back(paras[3]);
+                            connect_width_host.push_back(paras[4]);
+                            connect_midpoint_host.push_back(paras[5]);
+                            connect_power_host.push_back(static_cast<int>(paras[6]));
+                        } else {
+                            connect_tc_host.push_back(0.02);
+                            connect_dr_host.push_back(1);
+                            connect_dmax_host.push_back(0.95);
+                            connect_dmin_host.push_back(0.9);
+                            connect_width_host.push_back(0.001);
+                            connect_midpoint_host.push_back(0.5);
+                            connect_power_host.push_back(2);
                         }
 
                         connect_num++;
@@ -411,20 +404,29 @@ namespace dyno
                 if(env_json.contains("friction_loss"))
                 {
                     int fl_num = 0;
+                    fl_num_host.push_back(static_cast<int>(env_json["friction_loss"].size()));
                     for (const auto& fl_json : env_json["friction_loss"])
                     {
-                        fl_dof_idxs_host(eid, fl_num) = fl_json.at("dof_id").get<int>();
-                        fl_dof_frictionloss_host(eid, fl_num) = fl_json.at("resistance").get<float>();
+                        fl_dof_idxs_host.push_back(fl_json.at("dof_id").get<int>());
+                        fl_dof_frictionloss_host.push_back(fl_json.at("resistance").get<float>());
 
                         if (fl_json.contains("sol_paras")) {
                             auto paras = fl_json.at("sol_paras").get<std::vector<float>>();
-                            fl_tc_host(eid, fl_num) = paras[0];
-                            fl_dr_host(eid, fl_num) = paras[1];
-                            fl_dmax_host(eid, fl_num) = paras[2];
-                            fl_dmin_host(eid, fl_num) = paras[3];
-                            fl_width_host(eid, fl_num) = paras[4];
-                            fl_midpoint_host(eid, fl_num) = paras[5];
-                            fl_power_host(eid, fl_num) = static_cast<int>(paras[6]);
+                            fl_tc_host.push_back(paras[0]);
+                            fl_dr_host.push_back(paras[1]);
+                            fl_dmax_host.push_back(paras[2]);
+                            fl_dmin_host.push_back(paras[3]);
+                            fl_width_host.push_back(paras[4]);
+                            fl_midpoint_host.push_back(paras[5]);
+                            fl_power_host.push_back(static_cast<int>(paras[6]));
+                        } else {
+                            fl_tc_host.push_back(0.02);
+                            fl_dr_host.push_back(1);
+                            fl_dmax_host.push_back(0.95);
+                            fl_dmin_host.push_back(0.9);
+                            fl_width_host.push_back(0.001);
+                            fl_midpoint_host.push_back(0.5);
+                            fl_power_host.push_back(2);
                         }
 
                         fl_num++;
@@ -434,18 +436,20 @@ namespace dyno
                     constraint_offset[2] = constraint_offset[1] + num_each_constraint.y;
                 }
 
-
-
                 num_each_constraint_host.push_back(num_each_constraint);
                 constraint_offset_host.push_back(constraint_offset);
                 num_constraints_host.push_back(num_each_constraint.x + num_each_constraint.y);
 
-                batch_bodies_host[eid] = bid;
-                env_num_spheres_host[eid] = sphere_num;
-                env_num_boxes_host[eid] = box_num;
-                env_num_capsules_host[eid] = capsule_num;
+                batch_bodies_host.push_back(bid);
+                env_num_spheres_host.push_back(sphere_num);
+                env_num_boxes_host.push_back(box_num);
+                env_num_capsules_host.push_back(capsule_num);
 
-                batch_body_offset_host[eid] = total_bodies;
+                batch_body_offset_host.push_back(total_bodies);
+                joint_qpos_num_host.push_back(joint_qpos_offset);
+
+                jl_ref_num_host.push_back(jl_num);
+
                 env_sphere_offset_host[eid] = total_spheres;
                 env_box_offset_host[eid] = total_boxes;
                 env_capsule_offset_host[eid] = total_capsules;
@@ -453,11 +457,10 @@ namespace dyno
                 total_spheres += sphere_num;
                 total_boxes += box_num;
                 total_capsules += capsule_num;
+                total_joint_qpos += joint_qpos_offset;
             }
             eid++;
         }
-
-        // std::cout << "read info finished" << std::endl;
 
         rendering_idx_2_rigid_body_mapping_host.resize(total_spheres + total_boxes + total_capsules, Vec3i(-1, -1, -1));
 
@@ -465,8 +468,8 @@ namespace dyno
         {
             for (int bid = 0; bid < batch_bodies_host[eid]; ++bid)
             {
-                int st = shape_type_host(eid, bid);
-                int si = shape_idx_host(eid, bid);
+                int st = shape_type_host[batch_body_offset_host[eid] + bid];
+                int si = shape_idx_host[batch_body_offset_host[eid] + bid];
                 if (st < 0 || si < 0)
                     continue;
 
@@ -486,52 +489,52 @@ namespace dyno
 
                 if (render_idx >= 0 && render_idx < total_spheres + total_boxes + total_capsules)
                 {
-                    rigid_body_2_rendering_idx_mapping_host(eid, bid) = render_idx;
                     rendering_idx_2_rigid_body_mapping_host[render_idx] = Vec3i(eid, st, si);
                 }
+                rigid_body_2_rendering_idx_mapping_host.push_back(render_idx);
             }
         }
 
         for (eid = 0; eid < env_num; ++eid) {
             for (int bid = 0; bid < batch_bodies_host[eid]; ++bid) {
-                const int pid = parent_idx_host(eid, bid);
+                const int pid = parent_idx_host[batch_body_offset_host[eid] + bid];
                 if (pid != -1) {
-                    const auto& parent_quat = batch_quat_host(eid, pid);
-                    const auto& parent_rot = body_rot_host(eid, pid);
-                    const int& joint_type = joint_type_host(eid, bid);
-                    const auto& joint_qpos_start = joint_qpos_offset_host(eid, bid);
-                    const auto& local_axis = joint_axis_ref_host(eid, bid);
-                    const auto& local_anchor = joint_anchor_ref_host(eid, bid);
+                    const auto& parent_quat = batch_quat_host[batch_body_offset_host[eid] + pid];
+                    const auto& parent_rot = body_rot_host[batch_body_offset_host[eid] + pid];
+                    const int& joint_type = joint_type_host[batch_body_offset_host[eid] + bid];
+                    const auto& joint_qpos_start = joint_qpos_offset_host[batch_body_offset_host[eid] + bid];
+                    const auto& local_axis = joint_axis_ref_host[batch_body_offset_host[eid] + bid];
+                    const auto& local_anchor = joint_anchor_ref_host[batch_body_offset_host[eid] + bid];
 
-                    Quat<Real> xquat_p = parent_quat * joint_rel_quat_host(eid, bid);
+                    Quat<Real> xquat_p = parent_quat * joint_rel_quat_host[batch_body_offset_host[eid] + bid];
                     Vec3f joint_axis = xquat_p * local_axis;
                     Vec3f xanchor = xquat_p * local_anchor;
-                    Vec3f xpos = parent_rot * joint_rel_pos_host(eid, bid) + body_pos_host(eid, pid);
+                    Vec3f xpos = parent_rot * joint_rel_pos_host[batch_body_offset_host[eid] + bid] + body_pos_host[batch_body_offset_host[eid] + pid];
                     xanchor += xpos;
 
                     if (joint_type == 2) {
-                        batch_quat_host(eid, bid) = xquat_p;
-                        body_rot_host(eid, bid) = xquat_p.toMatrix3x3();
-                        body_pos_host(eid, bid) = xpos + (joint_qpos_host(eid, joint_qpos_start) - joint_qpos_ref_host(eid, joint_qpos_start)) * joint_axis;
+                        batch_quat_host[batch_body_offset_host[eid] + bid] = xquat_p;
+                        body_rot_host[batch_body_offset_host[eid] + bid] = xquat_p.toMatrix3x3();
+                        body_pos_host[batch_body_offset_host[eid] + bid] = xpos + (joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_qpos_num_host[eid] + joint_qpos_start]) * joint_axis;
                     } else {
                         Quat<Real> quat_local;
                         if (joint_type == 1)
-                            quat_local.fromAxisAngle(local_axis, joint_qpos_host(eid, joint_qpos_start) - joint_qpos_ref_host(eid, joint_qpos_start));
+                            quat_local.fromAxisAngle(local_axis, joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start] - joint_qpos_ref_host[joint_qpos_num_host[eid] + joint_qpos_start]);
                         else if (joint_type == 3) {
                             Quat<Real> ball_quat = Quat<Real>(
-                                joint_qpos_host(eid, joint_qpos_start),
-                                joint_qpos_host(eid, joint_qpos_start + 1),
-                                joint_qpos_host(eid, joint_qpos_start + 2),
-                                joint_qpos_host(eid, joint_qpos_start + 3));
+                                joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start],
+                                joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start + 1],
+                                joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start + 2],
+                                joint_qpos_host[joint_qpos_num_host[eid] + joint_qpos_start + 3]);
                             ball_quat.normalize();
                             quat_local = ball_quat;
                         }
 
                         Quat<Real> xquat_c = xquat_p * quat_local;
-                        batch_quat_host(eid, bid) = xquat_c;
-                        body_rot_host(eid, bid) = xquat_c.toMatrix3x3();
+                        batch_quat_host[batch_body_offset_host[eid] + bid] = xquat_c;
+                        body_rot_host[batch_body_offset_host[eid] + bid] = xquat_c.toMatrix3x3();
                         xpos = xquat_c * local_anchor;
-                        body_pos_host(eid, bid) = xanchor - xpos;
+                        body_pos_host[batch_body_offset_host[eid] + bid] = xanchor - xpos;
                     }
                 }
             }
@@ -545,23 +548,23 @@ namespace dyno
         //             connect_anchor_B_local_host(eid, i).x, connect_anchor_B_local_host(eid, i).y, connect_anchor_B_local_host(eid, i).z);
         // }
 
-        for (eid = 0; eid < env_num; ++eid) {
-            for (int i = 0; i < fl_max; i++) {
-                printf("fl_id: %d, dof_id: %d, resistance: %f\n", i, fl_dof_idxs_host(eid, i), fl_dof_frictionloss_host(eid, i));
-            }
-        }
+        // for (eid = 0; eid < env_num; ++eid) {
+        //     for (int i = 0; i < fl_max; i++) {
+        //         printf("fl_id: %d, dof_id: %d, resistance: %f\n", i, fl_dof_idxs_host(eid, i), fl_dof_frictionloss_host(eid, i));
+        //     }
+        // }
 
-        shape_type.assign(shape_type_host);
-        shape_idx.assign(shape_idx_host);
-        parent_idx.assign(parent_idx_host);
+        shape_type.Assign(shape_type_host, batch_bodies_host);
+        shape_idx.Assign(shape_idx_host, batch_bodies_host);
+        parent_idx.Assign(parent_idx_host, batch_bodies_host);
 
-        boxes.assign(boxes_host);
-        spheres.assign(spheres_host);
-        capsules.assign(capsules_host);
+        boxes.Assign(boxes_host, env_num_boxes_host);
+        spheres.Assign(spheres_host, env_num_spheres_host);
+        capsules.Assign(capsules_host, env_num_capsules_host);
 
-        batch_pos.assign(body_pos_host);
-        batch_rot.assign(body_rot_host);
-        batch_quat.assign(batch_quat_host);
+        batch_pos.Assign(body_pos_host, batch_bodies_host);
+        batch_rot.Assign(body_rot_host, batch_bodies_host);
+        batch_quat.Assign(batch_quat_host, batch_bodies_host);
 
         spdlog::info("num boxes: {}, num spheres: {}, num capsules: {}", total_boxes, total_spheres, total_capsules);
         env_num_boxes.assign(env_num_boxes_host);
@@ -575,73 +578,73 @@ namespace dyno
         batch_body_offset.assign(batch_body_offset_host);
 
         rendering_idx_2_rigid_body_mapping.assign(rendering_idx_2_rigid_body_mapping_host);
-        rigid_body_2_rendering_idx_mapping.assign(rigid_body_2_rendering_idx_mapping_host);
+        rigid_body_2_rendering_idx_mapping.Assign(rigid_body_2_rendering_idx_mapping_host, batch_bodies_host);
 
-        is_static.assign(is_static_host);
-        batch_mass.assign(mass_host);
+        is_static.Assign(is_static_host, batch_bodies_host);
+        batch_mass.Assign(mass_host, batch_bodies_host);
 
-        joint_type.assign(joint_type_host);
-        joint_qpos.assign(joint_qpos_host);
-        joint_qpos_ref.assign(joint_qpos_ref_host);
-        joint_qpos_offset.assign(joint_qpos_offset_host);
-        joint_anchor_ref.assign(joint_anchor_ref_host);
-        joint_axis_ref.assign(joint_axis_ref_host);
-        joint_rel_pos.assign(joint_rel_pos_host);
-        joint_rel_quat.assign(joint_rel_quat_host);
+        joint_type.Assign(joint_type_host, batch_bodies_host);
+        joint_qpos.Assign(joint_qpos_host, joint_qpos_num_host);
+        joint_qpos_ref.Assign(joint_qpos_ref_host, joint_qpos_num_host);
+        joint_qpos_offset.Assign(joint_qpos_offset_host, batch_bodies_host);
+        joint_anchor_ref.Assign(joint_anchor_ref_host, batch_bodies_host);
+        joint_axis_ref.Assign(joint_axis_ref_host, batch_bodies_host);
+        joint_rel_pos.Assign(joint_rel_pos_host, batch_bodies_host);
+        joint_rel_quat.Assign(joint_rel_quat_host, batch_bodies_host);
 
-        friction_mu.assign(friction_mu_host);
-        contact_weights.assign(contact_weights_host);
+        friction_mu.Assign(friction_mu_host, batch_bodies_host);
+        contact_weights.Assign(contact_weights_host, batch_bodies_host);
 
         joint_limit_constraints.ref_nums.assign(jl_ref_num_host);
-        INIT_DYNO_ARRAY2D(joint_limit_constraints.active_mapping, env_num, joint_limit_max);
-        INIT_DYNO_ARRAY2D(joint_limit_constraints.is_active, env_num, joint_limit_max);
-        joint_limit_constraints.joint_idx.assign(jl_joint_idx_host);
-        joint_limit_constraints.is_upper.assign(jl_is_upper_host);
-        joint_limit_constraints.limit.assign(jl_limit_host);
-        INIT_DYNO_ARRAY2D(joint_limit_constraints.limit_error, env_num, joint_limit_max);
-        INIT_DYNO_ARRAY2D(joint_limit_constraints.limit_extern, env_num, joint_limit_max);
+        joint_limit_constraints.active_mapping.BuildFromSizes(jl_ref_num_host);
+        joint_limit_constraints.is_active.BuildFromSizes(jl_ref_num_host);
+        joint_limit_constraints.limit_error.BuildFromSizes(jl_ref_num_host);
+        joint_limit_constraints.limit_extern.BuildFromSizes(jl_ref_num_host);
+        joint_limit_constraints.joint_idx.Assign(jl_joint_idx_host, jl_ref_num_host);
+        joint_limit_constraints.is_upper.Assign(jl_is_upper_host, jl_ref_num_host);
+        joint_limit_constraints.limit.Assign(jl_limit_host, jl_ref_num_host);
 
-        joint_limit_constraints.time_const.assign(jl_tc_host);
-        joint_limit_constraints.damp_ratio.assign(jl_dr_host);
-        joint_limit_constraints.dmax.assign(jl_dmax_host);
-        joint_limit_constraints.dmin.assign(jl_dmin_host);
-        joint_limit_constraints.midpoint.assign(jl_midpoint_host);
-        joint_limit_constraints.width.assign(jl_width_host);
-        joint_limit_constraints.power.assign(jl_power_host);
+        joint_limit_constraints.time_const.Assign(jl_tc_host, jl_ref_num_host);
+        joint_limit_constraints.damp_ratio.Assign(jl_dr_host, jl_ref_num_host);
+        joint_limit_constraints.dmax.Assign(jl_dmax_host, jl_ref_num_host);
+        joint_limit_constraints.dmin.Assign(jl_dmin_host, jl_ref_num_host);
+        joint_limit_constraints.midpoint.Assign(jl_midpoint_host, jl_ref_num_host);
+        joint_limit_constraints.width.Assign(jl_width_host, jl_ref_num_host);
+        joint_limit_constraints.power.Assign(jl_power_host, jl_ref_num_host);
 
-        anchor_constraints.body_idxs.assign(connect_body_idxs_host);
-        anchor_constraints.anchor_A_local.assign(connect_anchor_A_local_host);
-        anchor_constraints.anchor_B_local.assign(connect_anchor_B_local_host);
-        INIT_DYNO_ARRAY2D(anchor_constraints.anchor_A_world, env_num, connect_max);
-        INIT_DYNO_ARRAY2D(anchor_constraints.anchor_B_world, env_num, connect_max);
-        INIT_DYNO_ARRAY2D(anchor_constraints.anchor_error, env_num, connect_max);
+        anchor_constraints.body_idxs.Assign(connect_body_idxs_host, connect_anchor_nums_host);
+        anchor_constraints.anchor_A_local.Assign(connect_anchor_A_local_host, connect_anchor_nums_host);
+        anchor_constraints.anchor_B_local.Assign(connect_anchor_B_local_host, connect_anchor_nums_host);
+        anchor_constraints.anchor_A_world.BuildFromSizes(connect_anchor_nums_host);
+        anchor_constraints.anchor_B_world.BuildFromSizes(connect_anchor_nums_host);
+        anchor_constraints.anchor_error.BuildFromSizes(connect_anchor_nums_host);
 
-        anchor_constraints.time_const.assign(connect_tc_host);
-        anchor_constraints.damp_ratio.assign(connect_dr_host);
-        anchor_constraints.dmax.assign(connect_dmax_host);
-        anchor_constraints.dmin.assign(connect_dmin_host);
-        anchor_constraints.midpoint.assign(connect_midpoint_host);
-        anchor_constraints.width.assign(connect_width_host);
-        anchor_constraints.power.assign(connect_power_host);
+        anchor_constraints.time_const.Assign(connect_tc_host, connect_anchor_nums_host);
+        anchor_constraints.damp_ratio.Assign(connect_dr_host, connect_anchor_nums_host);
+        anchor_constraints.dmax.Assign(connect_dmax_host, connect_anchor_nums_host);
+        anchor_constraints.dmin.Assign(connect_dmin_host, connect_anchor_nums_host);
+        anchor_constraints.midpoint.Assign(connect_midpoint_host, connect_anchor_nums_host);
+        anchor_constraints.width.Assign(connect_width_host, connect_anchor_nums_host);
+        anchor_constraints.power.Assign(connect_power_host, connect_anchor_nums_host);
 
-        friction_loss_constraints.dof_idxs.assign(fl_dof_idxs_host);
-        friction_loss_constraints.dof_frictionloss.assign(fl_dof_frictionloss_host);
+        friction_loss_constraints.dof_idxs.Assign(fl_dof_idxs_host, fl_num_host);
+        friction_loss_constraints.dof_frictionloss.Assign(fl_dof_frictionloss_host, fl_num_host);
 
-        friction_loss_constraints.time_const.assign(fl_tc_host);
-        friction_loss_constraints.damp_ratio.assign(fl_dr_host);
-        friction_loss_constraints.dmax.assign(fl_dmax_host);
-        friction_loss_constraints.dmin.assign(fl_dmin_host);
-        friction_loss_constraints.midpoint.assign(fl_midpoint_host);
-        friction_loss_constraints.width.assign(fl_width_host);
-        friction_loss_constraints.power.assign(fl_power_host);
+        friction_loss_constraints.time_const.Assign(fl_tc_host, fl_num_host);
+        friction_loss_constraints.damp_ratio.Assign(fl_dr_host, fl_num_host);
+        friction_loss_constraints.dmax.Assign(fl_dmax_host, fl_num_host);
+        friction_loss_constraints.dmin.Assign(fl_dmin_host, fl_num_host);
+        friction_loss_constraints.midpoint.Assign(fl_midpoint_host, fl_num_host);
+        friction_loss_constraints.width.Assign(fl_width_host, fl_num_host);
+        friction_loss_constraints.power.Assign(fl_power_host, fl_num_host);
 
-        collision_constraints.time_const.assign(col_tc_host);
-        collision_constraints.damp_ratio.assign(col_dr_host);
-        collision_constraints.dmax.assign(col_dmax_host);
-        collision_constraints.dmin.assign(col_dmin_host);
-        collision_constraints.midpoint.assign(col_midpoint_host);
-        collision_constraints.width.assign(col_width_host);
-        collision_constraints.power.assign(col_power_host);
+        collision_constraints.time_const.Assign(col_tc_host, batch_bodies_host);
+        collision_constraints.damp_ratio.Assign(col_dr_host, batch_bodies_host);
+        collision_constraints.dmax.Assign(col_dmax_host, batch_bodies_host);
+        collision_constraints.dmin.Assign(col_dmin_host, batch_bodies_host);
+        collision_constraints.midpoint.Assign(col_midpoint_host, batch_bodies_host);
+        collision_constraints.width.Assign(col_width_host, batch_bodies_host);
+        collision_constraints.power.Assign(col_power_host, batch_bodies_host);
 
         num_constraints.assign(num_constraints_host);
         num_each_constraint.assign(num_each_constraint_host);

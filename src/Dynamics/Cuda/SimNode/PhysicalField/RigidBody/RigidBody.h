@@ -20,8 +20,8 @@ namespace dyno {
         using Real = typename TDataType::Real;
 
         int                 max_bodies;
-        DArray2D<int>       is_static;      // [env_id, body_id] whether the rigid body is static or dynamic
-        DevArr2D<int>       is_isolated;    // [env_id, body_id] whether the rigid body is isolated (not in contact with any other body)
+        DevBlockVector<int>       is_static;      // [env_id, body_id] whether the rigid body is static or dynamic
+        DevBlockVector<int>       is_isolated;    // [env_id, body_id] whether the rigid body is isolated (not in contact with any other body)
 
         DArray<int>         batch_bodies;  // [env_id] num of rigid bodies in each environment
         DArray<int>         batch_body_offset; // [env_id] flattened rigid body offset in topo position/rotation arrays
@@ -35,7 +35,7 @@ namespace dyno {
         DevArr2D<int>       q_offset;       // [env_id, body_id] offset of generalized DoFs;
         DevArr2D<int>       qpos_offset;
         DevArr2D<Real>      batch_qpos;     // [env_id, dof_idx] generalized position
-        
+
         DevArr2D<Real>      batch_qacc;    // [env_id, dof_idx] generalized acceleration
         DevArr2D<Real>      batch_qvel;    // [env_id, dof_idx] generalized velocity
         DevArr2D<Real>      batch_aref;    // nc * 1
@@ -43,7 +43,7 @@ namespace dyno {
         DevArr2D<Real>      batch_imp;
         DArray<Real>        batch_energy;
         DArray<Real>        batch_energy_ref;
-        DevArr2D<Real>      batch_constraint_energy;    
+        DevArr2D<Real>      batch_constraint_energy;
         DevArr2D<int>       batch_unquads;   // [env_id, constraint_idx]
         DevMat2D<Real>      batch_H;
         DevArr2D<Real>      batch_dx;    // [env_id, dof_idx] delta for current Newton iteration
@@ -61,11 +61,11 @@ namespace dyno {
         DArray2D<Vec3f>       batch_pos;     // [env_id, body_id] world position of rigid body
         DArray2D<Mat3f>       batch_rot;     // [env_id, body_id] world rotation of rigid body (as rotation matrix)
         DArray2D<Quat<Real>>  batch_quat;    // [env_id, body_id] world rotation of rigid body (as quaternion)
-        DArray2D<Real>        batch_mass;    // [env_id, body_id] mass of rigid body
         DevArr2D<Vec3f>       batch_global_com_pos;
         DevArr2D<Vec3f>       batch_local_com_pos;
         DevArr2D<Quat<Real>>  batch_local_com_quat;
         DevArr2D<Mat3f>       batch_com_rot;
+        DevBlockVector<Real>      batch_mass;    // [env_id, body_id] mass of rigid body
         
 
 
@@ -73,7 +73,7 @@ namespace dyno {
         DArray<Mat3f>       topo_rot_cache; // flattened body rotations for topology update
 
         // For articulated bodies
-        DArray2D<int>       parent_idx;   // [env_id, body_id] parent body index (-1 for root)
+        DevBlockVector<int>       parent_idx;   // [env_id, body_id] parent body index (-1 for root)
         DevArr2D<int>       root_idx;     // [env_id, body_id] root body index
         DevArr2D<Real>      subtree_mass;   // [env_id, body_id] mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
         DevArr2D<Vec3f>     subtree_com;    // [env_id, body_id] center of mass of the subtree rooted at this body (including itself and all its children in the kinematic tree)
@@ -107,25 +107,25 @@ namespace dyno {
         DevArr2D<Real>               batch_constraint_vel;
         DevArr2D<Real>               batch_constraint_force;
 
-        BatchAnchorConstraints          anchor_constraints;
-        BatchFrictionLossConstraints    friction_loss_constraints;
-        BatchJointLimitConstraints      joint_limit_constraints;
-        BatchCollisionConstraints       collision_constraints;
-        DArray2D<Real>                  friction_mu;
-        DArray2D<Real>                  contact_weights;
+        BatchAnchorConstraints                anchor_constraints;
+        BatchFrictionLossConstraints          friction_loss_constraints;
+        BatchJointLimitConstraints            joint_limit_constraints;
+        BatchCollisionConstraints             collision_constraints;
+        DevBlockVector<Real>                  friction_mu;
+        DevBlockVector<Real>                  contact_weights;
         
 
         // For joint
-        DArray2D<int>           joint_type;     // [env_id, body_id] type of joint (0: none, 1: hinge, 2: slide, 3: ball)
-        DArray2D<Real>          joint_qpos;
-        DArray2D<Real>          joint_qpos_ref;
-        DArray2D<int>           joint_qpos_offset;
-        DArray2D<Vec3f>         joint_rel_pos;
-        DArray2D<Quat<Real>>    joint_rel_quat;
-        DevArr2D<Vec3f>         joint_axis;     // [env_id, body_id] joint axis for hinge and slide joint, or initial relative rotation axis for ball joint
-        DArray2D<Vec3f>         joint_axis_ref;
-        DevArr2D<Vec3f>         joint_anchor;   // [env_id, body_id] joint anchor in the local frame of the body
-        DArray2D<Vec3f>         joint_anchor_ref;
+        DevBlockVector<int>           joint_type;     // [env_id, body_id] type of joint (0: none, 1: hinge, 2: slide, 3: ball)
+        DevBlockVector<Real>          joint_qpos;
+        DevBlockVector<Real>          joint_qpos_ref;
+        DevBlockVector<int>           joint_qpos_offset;
+        DevBlockVector<Vec3f>         joint_rel_pos;
+        DevBlockVector<Quat<Real>>    joint_rel_quat;
+        DevBlockVector<Vec3f>         joint_axis;     // [env_id, body_id] joint axis for hinge and slide joint, or initial relative rotation axis for ball joint
+        DevBlockVector<Vec3f>         joint_axis_ref;
+        DevBlockVector<Vec3f>         joint_anchor;   // [env_id, body_id] joint anchor in the local frame of the body
+        DevBlockVector<Vec3f>         joint_anchor_ref;
         DevArr2D<Real>          batch_cacc;
         DevArr2D<Real>          batch_cforce;
 

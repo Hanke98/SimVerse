@@ -1711,7 +1711,6 @@ namespace dyno
             is_converged[env_id] = 1;
     }
 
-
     template<typename TDataType>
     __global__ void ForwardKinematicsKernel(
         DArray<int> batch_bodies,

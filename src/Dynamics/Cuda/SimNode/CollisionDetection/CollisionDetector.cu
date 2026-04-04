@@ -1273,20 +1273,14 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
 }
 
 template<typename TDataType>
-void MeshCollisionDetector<TDataType>::Detect(
+bool MeshCollisionDetector<TDataType>::broad_phase(
     const RigidBody<TDataType>& rb,
-    BatchCollisionConstraints& out,
     int num_envs)
 {
-    if (!m_initialized)
-    {
-        spdlog::warn("[MeshCollisionDetector] Detect called before Initialize.");
-        return;
-    }
-
-    out.collision_nums.reset();
-
     const int totalBodies = num_envs * m_maxBodies;
+    if (totalBodies <= 0)
+        return false;
+
     if (m_bodyAABBs.size() != static_cast<uint>(totalBodies))
         m_bodyAABBs.resize(totalBodies);
 
@@ -1312,13 +1306,26 @@ void MeshCollisionDetector<TDataType>::Detect(
     m_bodyBroadPhase->inTarget()->assign(m_bodyAABBs);
     m_bodyBroadPhase->update();
 
+    return true;
+}
+
+template<typename TDataType>
+bool MeshCollisionDetector<TDataType>::middle_phase(
+    const RigidBody<TDataType>& rb,
+    int num_envs,
+    std::vector<BodyPair>& bodyPairsHost)
+{
+    const int totalBodies = num_envs * m_maxBodies;
+    if (totalBodies <= 0)
+        return false;
+
     CArray<int> hBatchBodies;
     CArrayList<int> hContactList;
 
     hBatchBodies.assign(rb.batch_bodies);
     hContactList.assign(m_bodyBroadPhase->outContactList()->getData());
 
-    std::vector<BodyPair> bodyPairsHost;
+    bodyPairsHost.clear();
     bodyPairsHost.reserve(128);
     std::unordered_set<uint64_t> pairSet;
 
@@ -1367,13 +1374,29 @@ void MeshCollisionDetector<TDataType>::Detect(
         }
     }
 
-    if (!bodyPairsHost.empty())
+    if (bodyPairsHost.empty())
     {
-        CArray<BodyPair> hPairs(static_cast<uint>(bodyPairsHost.size()));
-        for (uint i = 0; i < hPairs.size(); ++i)
-            hPairs[i] = bodyPairsHost[i];
-        m_bodyPairs.assign(hPairs);
+        m_bodyPairs.resize(0);
+        return false;
+    }
 
+    CArray<BodyPair> hPairs(static_cast<uint>(bodyPairsHost.size()));
+    for (uint i = 0; i < hPairs.size(); ++i)
+        hPairs[i] = bodyPairsHost[i];
+    m_bodyPairs.assign(hPairs);
+
+    return true;
+}
+
+template<typename TDataType>
+void MeshCollisionDetector<TDataType>::narrow_phase(
+    const RigidBody<TDataType>& rb,
+    BatchCollisionConstraints& out,
+    int num_envs,
+    const std::vector<BodyPair>& bodyPairsHost)
+{
+    if (m_bodyPairs.size() > 0)
+    {
         const int threads = 128;
         const int blocks = (m_bodyPairs.size() + threads - 1) / threads;
         CD_NarrowPrimitivePairsKernel<TDataType><<<blocks, threads>>>(
@@ -1396,6 +1419,31 @@ void MeshCollisionDetector<TDataType>::Detect(
     }
 
     detectMeshMeshInternal(bodyPairsHost, rb, out, num_envs);
+}
+
+template<typename TDataType>
+void MeshCollisionDetector<TDataType>::Detect(
+    const RigidBody<TDataType>& rb,
+    BatchCollisionConstraints& out,
+    int num_envs)
+{
+    if (!m_initialized)
+    {
+        spdlog::warn("[MeshCollisionDetector] Detect called before Initialize.");
+        return;
+    }
+
+    out.collision_nums.reset();
+
+    std::vector<BodyPair> bodyPairsHost;
+
+    if (!broad_phase(rb, num_envs))
+        return;
+
+    if (!middle_phase(rb, num_envs, bodyPairsHost))
+        return;
+
+    narrow_phase(rb, out, num_envs, bodyPairsHost);
 }
 
 template<typename TDataType>

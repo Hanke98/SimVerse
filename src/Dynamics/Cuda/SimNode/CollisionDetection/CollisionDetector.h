@@ -43,6 +43,12 @@ namespace dyno {
         void DetectGround(const RigidBody<TDataType>& rb, BatchCollisionConstraints& out, int num_envs);
 
     private:
+        bool broad_phase(const RigidBody<TDataType>& rb, int num_envs);
+        bool middle_phase(const RigidBody<TDataType>& rb, int num_envs, std::vector<BodyPair>& bodyPairsHost);
+        void narrow_phase(const RigidBody<TDataType>& rb,
+            BatchCollisionConstraints& out,
+            int num_envs,
+            const std::vector<BodyPair>& bodyPairsHost);
         void refreshMeshShapeLayoutCache(int shapeCount);
         void detectMeshMeshInternal(const std::vector<BodyPair>& bodyPairsHost,
             const RigidBody<TDataType>& rb,

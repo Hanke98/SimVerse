@@ -47,11 +47,9 @@ namespace dyno {
         bool middle_phase(const RigidBody<TDataType>& rb, int num_envs, std::vector<BodyPair>& bodyPairsHost);
         void narrow_phase(const RigidBody<TDataType>& rb,
             BatchCollisionConstraints& out,
-            int num_envs,
-            const std::vector<BodyPair>& bodyPairsHost);
+            int num_envs);
         void refreshMeshShapeLayoutCache(int shapeCount);
-        void detectMeshMeshInternal(const std::vector<BodyPair>& bodyPairsHost,
-            const RigidBody<TDataType>& rb,
+        void detectMeshMeshInternal(const RigidBody<TDataType>& rb,
             BatchCollisionConstraints& out,
             int num_envs);
 

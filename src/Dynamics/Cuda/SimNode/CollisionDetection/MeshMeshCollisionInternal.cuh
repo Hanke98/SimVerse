@@ -46,6 +46,7 @@ struct MeshShapeView
     DArray<Tri2Edg> triangleEdges;
     DArray<Edge> edgeVertices;
     DArray<Edg2Tri> edgeAdjacentFaces;
+    DArray<Pair<uint, uint>> shapePairs;
 
     DArray<int> shape2BodyFlat;
     DArray<Coord> shapeCenters;
@@ -985,19 +986,30 @@ DYN_FUNC inline bool buildTriPairContext(
     const View& view,
     int tri0,
     int tri1,
-    int patchPairId,
+    int pairId,
     TriPairContext<View>& ctx)
 {
-    if (patchPairId < 0 || patchPairId >= view.patchPairs.size())
-        return false;
+    if (pairId >= 0 && pairId < view.patchPairs.size())
+    {
+        const PatchPair pair = view.patchPairs[pairId];
+        if (pair.patch_a < 0 || pair.patch_b < 0
+            || pair.patch_a >= view.patch2Shape.size() || pair.patch_b >= view.patch2Shape.size())
+            return false;
 
-    const PatchPair pair = view.patchPairs[patchPairId];
-    if (pair.patch_a < 0 || pair.patch_b < 0
-        || pair.patch_a >= view.patch2Shape.size() || pair.patch_b >= view.patch2Shape.size())
+        ctx.tri0Shape = view.patch2Shape[pair.patch_a];
+        ctx.tri1Shape = view.patch2Shape[pair.patch_b];
+    }
+    else if (pairId >= 0 && pairId < view.shapePairs.size())
+    {
+        const auto pair = view.shapePairs[pairId];
+        ctx.tri0Shape = static_cast<int>(pair.first);
+        ctx.tri1Shape = static_cast<int>(pair.second);
+    }
+    else
+    {
         return false;
+    }
 
-    ctx.tri0Shape = view.patch2Shape[pair.patch_a];
-    ctx.tri1Shape = view.patch2Shape[pair.patch_b];
     if (ctx.tri0Shape < 0 || ctx.tri1Shape < 0
         || ctx.tri0Shape >= view.shape2BodyFlat.size() || ctx.tri1Shape >= view.shape2BodyFlat.size())
         return false;
@@ -1016,6 +1028,84 @@ DYN_FUNC inline bool buildTriPairContext(
     ctx.triangle0 = TTriangle3D<typename View::Real>(p00, p01, p02);
     ctx.triangle1 = TTriangle3D<typename View::Real>(p10, p11, p12);
     return true;
+}
+
+__global__ void CountTriPairsPerShapePairKernel(
+    DArray<int> counts,
+    DArray<Pair<uint, uint>> shapePairs,
+    DArray<int> shape2TriOffsets)
+{
+    int pairId = threadIdx.x + blockIdx.x * blockDim.x;
+    if (pairId >= counts.size() || pairId >= shapePairs.size())
+        return;
+
+    const auto pair = shapePairs[pairId];
+    const int shape0 = static_cast<int>(pair.first);
+    const int shape1 = static_cast<int>(pair.second);
+    if (shape0 < 0 || shape1 < 0
+        || shape0 + 1 >= shape2TriOffsets.size()
+        || shape1 + 1 >= shape2TriOffsets.size())
+    {
+        counts[pairId] = 0;
+        return;
+    }
+
+    int count0 = shape2TriOffsets[shape0 + 1] - shape2TriOffsets[shape0];
+    int count1 = shape2TriOffsets[shape1 + 1] - shape2TriOffsets[shape1];
+    count0 = count0 > 0 ? count0 : 0;
+    count1 = count1 > 0 ? count1 : 0;
+    counts[pairId] = count0 * count1;
+}
+
+__global__ void SetTriPairsFromShapePairsKernel(
+    DArray<int> tri0Out,
+    DArray<int> tri1Out,
+    DArray<int> pairIdOut,
+    DArray<int> offsets,
+    DArray<int> counts,
+    DArray<Pair<uint, uint>> shapePairs,
+    DArray<int> shape2TriOffsets)
+{
+    int pairId = threadIdx.x + blockIdx.x * blockDim.x;
+    if (pairId >= shapePairs.size() || pairId >= offsets.size() || pairId >= counts.size())
+        return;
+
+    const int count = counts[pairId];
+    if (count <= 0)
+        return;
+
+    const auto pair = shapePairs[pairId];
+    const int shape0 = static_cast<int>(pair.first);
+    const int shape1 = static_cast<int>(pair.second);
+    if (shape0 < 0 || shape1 < 0
+        || shape0 + 1 >= shape2TriOffsets.size()
+        || shape1 + 1 >= shape2TriOffsets.size())
+        return;
+
+    const int begin0 = shape2TriOffsets[shape0];
+    const int end0 = shape2TriOffsets[shape0 + 1];
+    const int begin1 = shape2TriOffsets[shape1];
+    const int end1 = shape2TriOffsets[shape1 + 1];
+    const int count0 = end0 - begin0;
+    const int count1 = end1 - begin1;
+    if (count0 <= 0 || count1 <= 0)
+        return;
+
+    const int base = offsets[pairId];
+    for (int i = 0; i < count0; ++i)
+    {
+        const int tri0 = begin0 + i;
+        for (int j = 0; j < count1; ++j)
+        {
+            const int outIdx = base + i * count1 + j;
+            if (outIdx >= tri0Out.size() || outIdx >= tri1Out.size() || outIdx >= pairIdOut.size())
+                return;
+
+            tri0Out[outIdx] = tri0;
+            tri1Out[outIdx] = begin1 + j;
+            pairIdOut[outIdx] = pairId;
+        }
+    }
 }
 
 template<typename View>

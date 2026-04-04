@@ -768,13 +768,14 @@ void MeshCollisionDetector<TDataType>::refreshMeshShapeLayoutCache(int shapeCoun
 
 template<typename TDataType>
 void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
-    const std::vector<BodyPair>& bodyPairsHost,
     const RigidBody<TDataType>& rb,
     BatchCollisionConstraints& out,
     int num_envs)
 {
     CArray<int> hBatchBodies;
+    CArrayList<int> hContactList;
     hBatchBodies.assign(rb.batch_bodies);
+    hContactList.assign(m_bodyBroadPhase->outContactList()->getData());
 
     CArray2D<int> hShapeType;
     CArray2D<int> hShapeIdx;
@@ -857,37 +858,72 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
     m_shapeHalfLengths.assign(dShapeHalfLengths);
     m_shapeInvHalfLengths.assign(dShapeInvHalfLengths);
 
+    std::unordered_set<uint64_t> pairSet;
     std::vector<PairUU> shapePairsHost;
-    shapePairsHost.reserve(bodyPairsHost.size());
-    for (const BodyPair& pair : bodyPairsHost)
+    shapePairsHost.reserve(128);
+
+    const int totalBodies = num_envs * m_maxBodies;
+    for (int q = 0; q < totalBodies && q < static_cast<int>(hContactList.size()); ++q)
     {
-        if (pair.env_id < 0 || pair.env_id >= num_envs)
+        const int envA = q / m_maxBodies;
+        const int bodyA = q - envA * m_maxBodies;
+        if (envA < 0 || envA >= num_envs)
             continue;
-        if (pair.body_a < 0 || pair.body_b < 0 || pair.body_a >= m_maxBodies || pair.body_b >= m_maxBodies)
+        if (bodyA < 0 || bodyA >= m_maxBodies || bodyA >= hBatchBodies[envA])
             continue;
-        if (pair.body_a >= hBatchBodies[pair.env_id] || pair.body_b >= hBatchBodies[pair.env_id])
+        if (hShapeType(envA, bodyA) != 1)
             continue;
-        if (hShapeType(pair.env_id, pair.body_a) != 1 || hShapeType(pair.env_id, pair.body_b) != 1)
-            continue;
-        if (!hIsStatic.Empty()
-            && hIsStatic.AtBlock(pair.env_id, pair.body_a)
-            && hIsStatic.AtBlock(pair.env_id, pair.body_b))
-            continue;
-        if (!hParentIdx.Empty())
+
+        auto& nbr = hContactList[q];
+        for (auto it = nbr.begin(); it != nbr.end(); ++it)
         {
-            if (hParentIdx.AtBlock(pair.env_id, pair.body_a) == pair.body_b
-                || hParentIdx.AtBlock(pair.env_id, pair.body_b) == pair.body_a)
+            const int r = *it;
+            const int envB = r / m_maxBodies;
+            const int bodyB = r - envB * m_maxBodies;
+            if (envA != envB)
                 continue;
+            if (bodyB < 0 || bodyB >= m_maxBodies || bodyB >= hBatchBodies[envA])
+                continue;
+            if (bodyA == bodyB)
+                continue;
+            if (hShapeType(envA, bodyB) != 1)
+                continue;
+
+            int a = bodyA;
+            int b = bodyB;
+            if (a > b)
+            {
+                const int t = a;
+                a = b;
+                b = t;
+            }
+
+            if (!hIsStatic.Empty()
+                && hIsStatic.AtBlock(envA, a)
+                && hIsStatic.AtBlock(envA, b))
+                continue;
+            if (!hParentIdx.Empty())
+            {
+                if (hParentIdx.AtBlock(envA, a) == b
+                    || hParentIdx.AtBlock(envA, b) == a)
+                    continue;
+            }
+
+            const uint64_t key = (static_cast<uint64_t>(envA) << 40)
+                | (static_cast<uint64_t>(a) << 20)
+                | static_cast<uint64_t>(b);
+            if (!pairSet.insert(key).second)
+                continue;
+
+            const int flatA = envA * m_maxBodies + a;
+            const int flatB = envA * m_maxBodies + b;
+            const int shapeA = flatBodyToShape[flatA];
+            const int shapeB = flatBodyToShape[flatB];
+            if (shapeA < 0 || shapeB < 0)
+                continue;
+
+            shapePairsHost.emplace_back(static_cast<uint>(shapeA), static_cast<uint>(shapeB));
         }
-
-        const int flatA = pair.env_id * m_maxBodies + pair.body_a;
-        const int flatB = pair.env_id * m_maxBodies + pair.body_b;
-        const int shapeA = flatBodyToShape[flatA];
-        const int shapeB = flatBodyToShape[flatB];
-        if (shapeA < 0 || shapeB < 0)
-            continue;
-
-        shapePairsHost.emplace_back(static_cast<uint>(shapeA), static_cast<uint>(shapeB));
     }
 
     if (shapePairsHost.empty())
@@ -897,36 +933,7 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
     for (uint i = 0; i < dShapePairs.size(); ++i)
         dShapePairs[i] = shapePairsHost[i];
     m_shapePairs.assign(dShapePairs);
-
-    const int templatePatchCount = m_cubeTemplate.numPatches > 0 ? m_cubeTemplate.numPatches : 1;
-    std::vector<int> sourcePatchIdsHost;
-    std::vector<int> sourceTargetShapeIdsHost;
-    sourcePatchIdsHost.reserve(shapePairsHost.size() * templatePatchCount);
-    sourceTargetShapeIdsHost.reserve(shapePairsHost.size() * templatePatchCount);
-    for (const PairUU& shapePair : shapePairsHost)
-    {
-        const int shapeA = static_cast<int>(shapePair.first);
-        const int shapeB = static_cast<int>(shapePair.second);
-        const int patchBaseA = shapeA * templatePatchCount;
-        for (int localPatchId = 0; localPatchId < templatePatchCount; ++localPatchId)
-        {
-            sourcePatchIdsHost.push_back(patchBaseA + localPatchId);
-            sourceTargetShapeIdsHost.push_back(shapeB);
-        }
-    }
-
-    if (sourcePatchIdsHost.empty())
-        return;
-
-    CArray<int> dSourcePatchIds(static_cast<uint>(sourcePatchIdsHost.size()));
-    CArray<int> dSourceTargetShapeIds(static_cast<uint>(sourceTargetShapeIdsHost.size()));
-    for (uint i = 0; i < dSourcePatchIds.size(); ++i)
-    {
-        dSourcePatchIds[i] = sourcePatchIdsHost[i];
-        dSourceTargetShapeIds[i] = sourceTargetShapeIdsHost[i];
-    }
-    m_sourcePatchIds.assign(dSourcePatchIds);
-    m_sourceTargetShapeIds.assign(dSourceTargetShapeIds);
+    m_patchPairs.clear();
 
     cd_internal::MeshShapeView<TDataType> view{
         m_cubeTemplateTriSet->getPoints(),
@@ -934,6 +941,7 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
         m_cubeTemplateTriSet->triangle2Edge(),
         m_cubeTemplateTriSet->edgeIndices(),
         m_cubeTemplateTriSet->edge2Triangle(),
+        m_shapePairs,
         m_shape2BodyFlat,
         m_shapeCenters,
         m_shapeRotations,
@@ -954,68 +962,6 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
         m_dHat,
         m_edgeEdgeActivationMargin
     };
-
-    const int totalSources = static_cast<int>(sourcePatchIdsHost.size());
-    m_middleHitCounts.resize(totalSources);
-    m_middleHitCounts.reset();
-    if (totalSources > 0 && templatePatchCount > 0)
-        m_middleHitLists.resize(totalSources, templatePatchCount);
-
-    {
-        const int threads = 128;
-        const int blocks = (totalSources + threads - 1) / threads;
-        cd_internal::CountPatchPairHitsKernel<TDataType, decltype(view)><<<blocks, threads>>>(
-            m_middleHitCounts,
-            m_sourcePatchIds,
-            m_sourceTargetShapeIds,
-            m_cubeTemplate.patchAABBs,
-            m_cubeTemplate.patchBVH,
-            view);
-        cudaDeviceSynchronize();
-    }
-
-    const int totalPatchPairs = totalSources > 0
-        ? m_reduce.accumulate(m_middleHitCounts.begin(), m_middleHitCounts.size())
-        : 0;
-    if (totalPatchPairs <= 0)
-        return;
-
-    m_middleHitOffsets.resize(totalSources);
-    m_middleHitOffsets.assign(m_middleHitCounts);
-    m_scan.exclusive(m_middleHitOffsets, true);
-
-    {
-        const int threads = 128;
-        const int blocks = (totalSources + threads - 1) / threads;
-        cd_internal::RequestPatchPairHitsKernel<TDataType, decltype(view)><<<blocks, threads>>>(
-            m_middleHitLists,
-            m_sourcePatchIds,
-            m_sourceTargetShapeIds,
-            m_cubeTemplate.patchAABBs,
-            m_cubeTemplate.patchBVH,
-            view);
-        cudaDeviceSynchronize();
-    }
-
-    m_patchPairs.resize(totalPatchPairs);
-    {
-        const int threads = 128;
-        const int blocks = (totalSources + threads - 1) / threads;
-        cd_internal::SetPatchPairsFromHitListsKernel<decltype(view)><<<blocks, threads>>>(
-            m_patchPairs,
-            m_middleHitLists,
-            m_middleHitOffsets,
-            m_middleHitCounts,
-            m_sourcePatchIds,
-            m_sourceTargetShapeIds,
-            m_patch2Shape,
-            m_shape2PatchOffsets,
-            m_shape2BodyFlat,
-            m_maxBodies);
-        cudaDeviceSynchronize();
-    }
-
-    view.patchPairs = m_patchPairs;
 
     const int templateTriCount = static_cast<int>(m_cubeTemplateTriSet->triangleIndices().size());
     const int templateEdgeCount = static_cast<int>(m_cubeTemplateTriSet->edgeIndices().size());
@@ -1045,26 +991,26 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
         cudaDeviceSynchronize();
     }
 
-    const int patchPairCount = static_cast<int>(m_patchPairs.size());
-    m_patchPairTriPairCounts.resize(patchPairCount);
+    const int shapePairCount = static_cast<int>(m_shapePairs.size());
+    m_patchPairTriPairCounts.resize(shapePairCount);
     m_patchPairTriPairCounts.reset();
     {
         const int threads = 128;
-        const int blocks = (patchPairCount + threads - 1) / threads;
-        cd_internal::CountTriPairsPerPatchPairKernel<<<blocks, threads>>>(
+        const int blocks = (shapePairCount + threads - 1) / threads;
+        cd_internal::CountTriPairsPerShapePairKernel<<<blocks, threads>>>(
             m_patchPairTriPairCounts,
-            m_patchPairs,
-            m_patch2TriOffsets);
+            m_shapePairs,
+            m_shape2TriOffsets);
         cudaDeviceSynchronize();
     }
 
-    const int totalCandidateTriPairs = patchPairCount > 0
+    const int totalCandidateTriPairs = shapePairCount > 0
         ? m_reduce.accumulate(m_patchPairTriPairCounts.begin(), m_patchPairTriPairCounts.size())
         : 0;
     if (totalCandidateTriPairs <= 0)
         return;
 
-    m_patchPairTriPairOffsets.resize(patchPairCount);
+    m_patchPairTriPairOffsets.resize(shapePairCount);
     m_patchPairTriPairOffsets.assign(m_patchPairTriPairCounts);
     m_scan.exclusive(m_patchPairTriPairOffsets, true);
 
@@ -1073,16 +1019,15 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
     m_candidatePatchPairId.resize(totalCandidateTriPairs);
     {
         const int threads = 128;
-        const int blocks = (patchPairCount + threads - 1) / threads;
-        cd_internal::SetTriPairsKernel<<<blocks, threads>>>(
+        const int blocks = (shapePairCount + threads - 1) / threads;
+        cd_internal::SetTriPairsFromShapePairsKernel<<<blocks, threads>>>(
             m_candidateTri0,
             m_candidateTri1,
             m_candidatePatchPairId,
             m_patchPairTriPairOffsets,
             m_patchPairTriPairCounts,
-            m_patchPairs,
-            m_patch2TriOffsets,
-            m_patch2TriIndices);
+            m_shapePairs,
+            m_shape2TriOffsets);
         cudaDeviceSynchronize();
     }
 
@@ -1392,9 +1337,11 @@ template<typename TDataType>
 void MeshCollisionDetector<TDataType>::narrow_phase(
     const RigidBody<TDataType>& rb,
     BatchCollisionConstraints& out,
-    int num_envs,
-    const std::vector<BodyPair>& bodyPairsHost)
+    int num_envs)
 {
+    detectMeshMeshInternal(rb, out, num_envs);
+
+#if 0
     if (m_bodyPairs.size() > 0)
     {
         const int threads = 128;
@@ -1419,6 +1366,7 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     }
 
     detectMeshMeshInternal(bodyPairsHost, rb, out, num_envs);
+#endif
 }
 
 template<typename TDataType>
@@ -1435,15 +1383,14 @@ void MeshCollisionDetector<TDataType>::Detect(
 
     out.collision_nums.reset();
 
-    std::vector<BodyPair> bodyPairsHost;
-
     if (!broad_phase(rb, num_envs))
         return;
 
-    if (!middle_phase(rb, num_envs, bodyPairsHost))
-        return;
+    // std::vector<BodyPair> bodyPairsHost;
+    // if (!middle_phase(rb, num_envs, bodyPairsHost))
+    //     return;
 
-    narrow_phase(rb, out, num_envs, bodyPairsHost);
+    narrow_phase(rb, out, num_envs);
 }
 
 template<typename TDataType>

@@ -673,7 +673,6 @@ void MeshCollisionDetector<TDataType>::resetQueryStaticMappingIfNeeded(
 
     bool ok = m_meshNarrowQuery->setStaticShape2PatchOffsets(shape2PatchOffsets);
     ok = ok && m_meshNarrowQuery->setStaticPatch2Shape(patch2Shape);
-
     std::vector<std::shared_ptr<LinearBVH<TDataType>>> dummyBvhs(shapeCount, nullptr);
     ok = ok && m_meshNarrowQuery->setStaticTargetBVHCache(dummyBvhs);
 
@@ -740,6 +739,7 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshByNeighborQuery(
     std::vector<int> patch2TriOffsets;
     std::vector<int> patch2TriIndices;
     std::vector<int> shape2PatchOffsets(shapeCount + 1, 0);
+    std::vector<int> shape2TriOffsets(shapeCount + 1, 0);
     std::vector<uint> patch2Shape;
     std::vector<int> shape2RigidBody(shapeCount, 0);
     std::vector<int> shape2ElementIds(shapeCount, 0);
@@ -790,6 +790,7 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshByNeighborQuery(
         }
 
         shape2PatchOffsets[s + 1] = shape2PatchOffsets[s] + templatePatchCount;
+        shape2TriOffsets[s + 1] = static_cast<int>(triIndices.size());
 
         for (int p = 0; p < templatePatchCount; ++p)
         {
@@ -886,10 +887,11 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshByNeighborQuery(
     }
 
     resetQueryStaticMappingIfNeeded(shapeCount, shape2PatchOffsets, patch2Shape);
-
     m_meshNarrowQuery->inDiscreteElements()->setDataPtr(m_meshDiscreteElements);
     m_meshNarrowQuery->inTriangleSet()->setDataPtr(m_meshTriangleSet);
     m_meshNarrowQuery->inPatchAABBs()->assign(patchAabbs);
+    m_meshNarrowQuery->inShape2PatchOffsets()->assign(shape2PatchOffsets);
+    m_meshNarrowQuery->inShape2TriOffsets()->assign(shape2TriOffsets);
     m_meshNarrowQuery->inPatch2TriOffsets()->assign(patch2TriOffsets);
     m_meshNarrowQuery->inPatch2TriIndices()->assign(patch2TriIndices);
     m_meshNarrowQuery->inCenter()->assign(centers);

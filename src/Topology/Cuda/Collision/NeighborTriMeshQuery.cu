@@ -1673,6 +1673,7 @@ namespace dyno
 		: NeighborElementQuery<TDataType>()
 	{
 		this->inAdjacentShapes()->tagOptional(true);
+		this->inShape2PatchOffsets()->tagOptional(true);
 		// this->inShape2PatchCounts()->tagOptional(true);
 		// this->inShape2RigidBodyIds()->tagOptional(true);
 		this->inShape2ElementIds()->tagOptional(true);

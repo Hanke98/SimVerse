@@ -66,3 +66,6 @@ save_picture_torque
 
 tests/Cuda/Test_Cholesky/data
 .codex
+
+.github/*
+examples/Cuda/SimNode/SimNodeInit/screen_record/*

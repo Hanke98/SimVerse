@@ -31,11 +31,6 @@ namespace {
 
 static constexpr int CD_MAX_CONTACTS_PER_ENV = 1024;
 
-template<typename Real>
-DYN_FUNC inline Real CD_Abs(Real v)
-{
-    return v >= Real(0) ? v : -v;
-}
 
 template<typename Real>
 __device__ inline void CD_WriteContact(
@@ -117,15 +112,15 @@ __global__ void CD_ComputeBodyAABBsKernel(
             const BoxInfo b = boxes(env_id, sidx);
             Coord center = pos + rot * b.center;
 
-            Real ex = CD_Abs(rot(0, 0)) * b.halfLength[0]
-                + CD_Abs(rot(0, 1)) * b.halfLength[1]
-                + CD_Abs(rot(0, 2)) * b.halfLength[2];
-            Real ey = CD_Abs(rot(1, 0)) * b.halfLength[0]
-                + CD_Abs(rot(1, 1)) * b.halfLength[1]
-                + CD_Abs(rot(1, 2)) * b.halfLength[2];
-            Real ez = CD_Abs(rot(2, 0)) * b.halfLength[0]
-                + CD_Abs(rot(2, 1)) * b.halfLength[1]
-                + CD_Abs(rot(2, 2)) * b.halfLength[2];
+            Real ex = std::abs(rot(0, 0)) * b.halfLength[0]
+                + std::abs(rot(0, 1)) * b.halfLength[1]
+                + std::abs(rot(0, 2)) * b.halfLength[2];
+            Real ey = std::abs(rot(1, 0)) * b.halfLength[0]
+                + std::abs(rot(1, 1)) * b.halfLength[1]
+                + std::abs(rot(1, 2)) * b.halfLength[2];
+            Real ez = std::abs(rot(2, 0)) * b.halfLength[0]
+                + std::abs(rot(2, 1)) * b.halfLength[1]
+                + std::abs(rot(2, 2)) * b.halfLength[2];
 
             Coord ext(ex + dHat, ey + dHat, ez + dHat);
             box.v0 = center - ext;

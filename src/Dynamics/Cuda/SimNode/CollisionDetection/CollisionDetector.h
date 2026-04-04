@@ -6,19 +6,16 @@
 namespace dyno {
 
     template<typename TDataType>
-    class ZJUCollisionDetector
+    class MeshCollisionDetector
     {
     public:
-        ZJUCollisionDetector<TDataType>() {};
-        ~ZJUCollisionDetector<TDataType>() {};
+        MeshCollisionDetector<TDataType>() {};
+        ~MeshCollisionDetector<TDataType>() {};
 
 
     
     protected:
-        DArray<int>              broad_phase_flags;
-        DArray<int>              broad_phase_offsets;
-        DArray<int>              narrow_phase_flags;
-        DArray<int>              narrow_phase_offsets;
+
 
         
 

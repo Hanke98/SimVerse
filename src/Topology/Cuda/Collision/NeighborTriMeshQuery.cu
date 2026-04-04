@@ -7,7 +7,6 @@
 #include "Platform.h"
 #include "Vector/Vector3D.h"
 #include "Timer.h"
-#include "NewTimer.h"
 #include <algorithm>
 #include <cmath>
 #include <cassert>
@@ -2226,7 +2225,7 @@ namespace dyno
 	{
 		// printf("[NeighborTriMeshQuery] BroadPhase started.\n");
 		// Build per-shape world AABBs, query broad-phase accelerator, then compact valid shape pairs.
-		NewTimer broadTimer;
+		CTimer broadTimer;
 		broadTimer.start();
 
 		auto inTopo = this->inDiscreteElements()->getDataPtr();
@@ -2362,7 +2361,7 @@ namespace dyno
 		pairCount.clear();
 
 		broadTimer.stop();
-		std::cout << "[NeighborTriMeshQuery] compute broad phase time: " << broadTimer.elapsedMilliseconds() << " ms" << std::endl;
+		std::cout << "[NeighborTriMeshQuery] compute broad phase time: " << broadTimer.getElapsedTime() << " ms" << std::endl;
 		return true;
 	}
 
@@ -2375,7 +2374,7 @@ namespace dyno
 		// - flatten source shape patches
 		// - query target patch BVH in target-rest space
 		// - compact overlap pairs
-		NewTimer middleTimer;
+		CTimer middleTimer;
 		middleTimer.start();
 
 		// Get potential shape pairs from broad phase
@@ -2741,7 +2740,7 @@ namespace dyno
 		// std::cout << "[NeighborTriMeshQuery] middlePhase found " << totalPairs << " patch pairs." << std::endl;
 		// printf("[NeighborTriMeshQuery] MiddlePhase completed.\n");
 		middleTimer.stop();
-		std::cout << "[NeighborTriMeshQuery] compute middle phase time: " << middleTimer.elapsedMilliseconds() << " ms" << std::endl;
+		std::cout << "[NeighborTriMeshQuery] compute middle phase time: " << middleTimer.getElapsedTime() << " ms" << std::endl;
 		
 		return true;
 	}
@@ -2753,7 +2752,7 @@ namespace dyno
 		// 1) build candidate triangle lists
 		// 2) count contacts (warp kernel)
 		// 3) scan+scatter final ContactPair output
-		NewTimer narrowTimer;
+		CTimer narrowTimer;
 		narrowTimer.start();
 		// printf("[NeighborTriMeshQuery] NarrowPhase started.\n");
 		auto& patchPairs = this->outPotentialPatchPairs()->getData();
@@ -3148,7 +3147,7 @@ namespace dyno
 			*/
 		}
 		narrowTimer.stop();
-		std::cout << "[NeighborTriMeshQuery] compute narrow phase time: " << narrowTimer.elapsedMilliseconds() << " ms" << std::endl;
+		std::cout << "[NeighborTriMeshQuery] compute narrow phase time: " << narrowTimer.getElapsedTime() << " ms" << std::endl;
 		// printf("[NeighborTriMeshQuery] NarrowPhase completed.\n");
 	}
 

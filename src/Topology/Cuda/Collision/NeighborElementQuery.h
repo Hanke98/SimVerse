@@ -48,7 +48,7 @@ namespace dyno {
 	protected:
 		void compute() override;
 
-	private:
+	protected:
 		DArray<AABB> mQueryAABB;
 		DArray<AABB> mQueriedAABB;
 

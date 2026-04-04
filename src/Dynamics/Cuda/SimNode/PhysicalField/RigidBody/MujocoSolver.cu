@@ -3159,6 +3159,8 @@ namespace dyno
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.point, num_envs, 1024);
         INIT_DYNO_ARRAY2D(rigid_body_system->collision_constraints.mu, num_envs, 1024);
 
+        m_collision_detector.Initialize(num_envs, rigid_body_system->max_bodies, *rigid_body_system);
+
         spdlog::info("[MujocoSolver Solver] Allocated solver state arrays based on DoF counts.");
         // Initialize mass matrix for isolated bodies
         InitInertiaKernel<<<32, 512>>>(rigid_body_system->batch_bodies, rigid_body_system->batch_inertia,
@@ -3672,17 +3674,9 @@ namespace dyno
         auto& collision_constraints = rigid_body_system->collision_constraints;
         collision_constraints.collision_nums.reset();
 
-        CollisonDetectionKernel<TDataType><<<32, 512>>>(
-            rigid_body_system->collision_constraints,
-            rigid_body_system->batch_bodies,
-            rigid_body_system->is_static,
-            rigid_body_system->batch_pos,
-            rigid_body_system->batch_rot,
-            rigid_body_system->shape_type,
-            rigid_body_system->shape_idx,
-            rigid_body_system->boxes,
-            num_envs);
-        cudaDeviceSynchronize();
+        m_collision_detector.Detect(*rigid_body_system, rigid_body_system->collision_constraints, num_envs);
+        m_collision_detector.DetectGround(*rigid_body_system, rigid_body_system->collision_constraints, num_envs);
+
         spdlog::info("Collision detection done.");
         
         UpdateAnchorConstarints<TDataType><<<32, 512>>>(

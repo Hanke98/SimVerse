@@ -52,6 +52,7 @@ namespace dyno
 		CT_SURFACE,
 		CT_VERTEX_SDF,
 		CT_VERTEX_FACE,
+		CT_EDGE_FACE,
 		CT_EDGE_EDGE,
 		CT_UNKNOWN
 	};

@@ -1,5 +1,6 @@
 # pragma once
 #include "RigidSolver.h"
+#include "../../CollisionDetection/CollisionDetector.h"
 
 #include <memory>
 
@@ -40,6 +41,7 @@ namespace dyno
 
     private:
         std::shared_ptr<BatchedCholeskySolver<typename TDataType::Real>> cholesky_solver = nullptr;
+        MeshCollisionDetector<TDataType> m_collision_detector;
     };
 }
 

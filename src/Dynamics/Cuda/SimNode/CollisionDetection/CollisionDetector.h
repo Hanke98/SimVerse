@@ -22,6 +22,12 @@ namespace dyno {
     class TriangleSet;
 
     template<typename TDataType>
+    class CollisionDetectionBroadPhase;
+
+    template<typename TDataType>
+    class DiscreteElements;
+
+    template<typename TDataType>
     class MeshCollisionDetector
     {
     public:
@@ -37,11 +43,15 @@ namespace dyno {
 
         void Initialize(int num_envs, int max_bodies, const RigidBody<TDataType>& rb);
         void Detect(const RigidBody<TDataType>& rb, BatchCollisionConstraints& out, int num_envs);
+        void DetectGround(const RigidBody<TDataType>& rb, BatchCollisionConstraints& out, int num_envs);
 
     private:
         void resetQueryStaticMappingIfNeeded(int shapeCount,
             const std::vector<int>& shape2PatchOffsets,
             const std::vector<uint>& patch2Shape);
+        void detectMeshMeshByNeighborQuery(const RigidBody<TDataType>& rb,
+            BatchCollisionConstraints& out,
+            int num_envs);
 
     private:
         bool m_initialized = false;
@@ -54,7 +64,12 @@ namespace dyno {
         std::vector<Coord> m_cubeVerticesHost;
         std::vector<Triangle> m_cubeTrianglesHost;
 
+        DArray<AABB> m_bodyAABBs;
+        DArray<BodyPair> m_bodyPairs;
+        std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> m_bodyBroadPhase;
+
         std::shared_ptr<NeighborMeshLevelQuery<TDataType>> m_meshNarrowQuery;
+        std::shared_ptr<DiscreteElements<TDataType>> m_meshDiscreteElements;
         std::shared_ptr<TriangleSet<TDataType>> m_meshTriangleSet;
         std::vector<ContactPair> m_meshContactsHost;
     };

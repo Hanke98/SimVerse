@@ -3,8 +3,13 @@
 #include <memory>
 #include <vector>
 
+#include <Algorithm/Reduction.h>
+#include <Algorithm/Scan.h>
 #include <Array/Array.h>
+#include <Array/ArrayList.h>
 #include <Array/Array2D.h>
+#include <STL/Pair.h>
+#include <Topology/TriangleSet.h>
 
 #include "MeshCollisionTypes.h"
 
@@ -16,16 +21,7 @@ namespace dyno {
     struct BatchCollisionConstraints;
 
     template<typename TDataType>
-    class NeighborMeshLevelQuery;
-
-    template<typename TDataType>
-    class TriangleSet;
-
-    template<typename TDataType>
     class CollisionDetectionBroadPhase;
-
-    template<typename TDataType>
-    class DiscreteElements;
 
     template<typename TDataType>
     class MeshCollisionDetector
@@ -36,6 +32,7 @@ namespace dyno {
         using Matrix = typename TDataType::Matrix;
         using AABB = TAlignedBox3D<Real>;
         using Triangle = TopologyModule::Triangle;
+        using PairUU = Pair<uint, uint>;
         using ContactPair = TContactPair<Real>;
 
         MeshCollisionDetector() {};
@@ -46,10 +43,9 @@ namespace dyno {
         void DetectGround(const RigidBody<TDataType>& rb, BatchCollisionConstraints& out, int num_envs);
 
     private:
-        void resetQueryStaticMappingIfNeeded(int shapeCount,
-            const std::vector<int>& shape2PatchOffsets,
-            const std::vector<uint>& patch2Shape);
-        void detectMeshMeshByNeighborQuery(const RigidBody<TDataType>& rb,
+        void refreshMeshShapeLayoutCache(int shapeCount);
+        void detectMeshMeshInternal(const std::vector<BodyPair>& bodyPairsHost,
+            const RigidBody<TDataType>& rb,
             BatchCollisionConstraints& out,
             int num_envs);
 
@@ -59,8 +55,10 @@ namespace dyno {
         int m_maxBodies = 0;
         int m_cachedMeshShapeCount = -1;
         Real m_dHat = Real(1e-3);
+        Real m_edgeEdgeActivationMargin = Real(3e-3);
 
         MeshTemplateData<TDataType> m_cubeTemplate;
+        std::shared_ptr<TriangleSet<TDataType>> m_cubeTemplateTriSet;
         std::vector<Coord> m_cubeVerticesHost;
         std::vector<Triangle> m_cubeTrianglesHost;
 
@@ -68,10 +66,58 @@ namespace dyno {
         DArray<BodyPair> m_bodyPairs;
         std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> m_bodyBroadPhase;
 
-        std::shared_ptr<NeighborMeshLevelQuery<TDataType>> m_meshNarrowQuery;
-        std::shared_ptr<DiscreteElements<TDataType>> m_meshDiscreteElements;
-        std::shared_ptr<TriangleSet<TDataType>> m_meshTriangleSet;
-        std::vector<ContactPair> m_meshContactsHost;
+        DArray<PairUU> m_shapePairs;
+        DArray<int> m_shape2BodyFlat;
+        DArray<Coord> m_shapeCenters;
+        DArray<Matrix> m_shapeRotations;
+        DArray<Coord> m_shapeHalfLengths;
+        DArray<Coord> m_shapeInvHalfLengths;
+
+        DArray<int> m_shape2PatchOffsets;
+        DArray<int> m_shape2TriOffsets;
+        DArray<int> m_shape2EdgeOffsets;
+        DArray<int> m_shape2VertexOffsets;
+        DArray<int> m_patch2Shape;
+        DArray<int> m_patch2TriOffsets;
+        DArray<int> m_patch2TriIndices;
+
+        DArray<int> m_sourcePatchIds;
+        DArray<int> m_sourceTargetShapeIds;
+        DArray<int> m_middleHitCounts;
+        DArray<int> m_middleHitOffsets;
+        DArrayList<int> m_middleHitLists;
+        DArray<PatchPair> m_patchPairs;
+
+        DArray<AABB> m_triAabbsWorld;
+        DArray<Coord> m_faceNormalsWorld;
+        DArray<Coord> m_edgeNormalsWorld;
+
+        DArray<int> m_patchPairTriPairCounts;
+        DArray<int> m_patchPairTriPairOffsets;
+        DArray<int> m_candidateTri0;
+        DArray<int> m_candidateTri1;
+        DArray<int> m_candidatePatchPairId;
+
+        DArray<int> m_coarsePassCounts;
+        DArray<int> m_coarsePassOffsets;
+        DArray<int> m_filteredTri0;
+        DArray<int> m_filteredTri1;
+        DArray<int> m_filteredPatchPairId;
+
+        DArray<int> m_primitivePassCounts;
+        DArray<int> m_primitivePassOffsets;
+        DArray<ContactPair> m_primitiveCandidateContacts;
+        DArray<unsigned long long> m_primitiveCandidateKeys;
+        DArray<int> m_primitiveCandidateSortedIndices;
+        DArray<int> m_primitiveCandidateKeepFlags;
+        DArray<int> m_selectedPrimitiveCounts;
+
+        DArray<int> m_triPairContactCounts;
+        DArray<int> m_triPairContactOffsets;
+        DArray<ContactPair> m_meshContacts;
+
+        Scan<int> m_scan;
+        Reduction<int> m_reduce;
     };
 
 }

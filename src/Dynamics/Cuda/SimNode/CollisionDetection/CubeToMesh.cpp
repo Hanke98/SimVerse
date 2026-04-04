@@ -2,26 +2,12 @@
 #include "MeshPatching/MeshTopologyBuilder.h"
 #include "MeshPatching/KMeansPatcher.h"
 #include "MeshPatching/PatchingTypes.h"
+#include "Topology/TriangleSet.h"
 
 #include <vector>
-#include <unordered_map>
-#include <cstdint>
 #include <algorithm>
-#include <cassert>
 
 namespace dyno {
-
-namespace {
-
-// Pack two vertex indices into a canonical edge key (smaller index in high bits)
-static inline uint64_t packEdgeKey(int a, int b)
-{
-    uint32_t lo = static_cast<uint32_t>(std::min(a, b));
-    uint32_t hi = static_cast<uint32_t>(std::max(a, b));
-    return (static_cast<uint64_t>(lo) << 32) | static_cast<uint64_t>(hi);
-}
-
-} // anonymous namespace
 
 template<typename TDataType>
 void GenerateUnitCubeMesh(MeshTemplateData<TDataType>& out)
@@ -30,9 +16,6 @@ void GenerateUnitCubeMesh(MeshTemplateData<TDataType>& out)
     using Coord = typename TDataType::Coord;
     using AABB = TAlignedBox3D<Real>;
     using Triangle = typename TopologyModule::Triangle;
-    using Edge = typename TopologyModule::Edge;
-    using Tri2Edg = typename TopologyModule::Tri2Edg;
-    using Edg2Tri = typename TopologyModule::Edg2Tri;
 
     // ========== 1. Generate unit cube geometry ==========
     // 8 vertices at (+/-1, +/-1, +/-1)
@@ -67,10 +50,16 @@ void GenerateUnitCubeMesh(MeshTemplateData<TDataType>& out)
     const int numVerts = 8;
     const int numTris = 12;
 
-    // ========== 2. Build mesh topology (face adjacency) ==========
+    // ========== 2. Build TriangleSet template geometry/topology ==========
+    TriangleSet<TDataType> cubeTriSet;
+    cubeTriSet.setPoints(vertices_host);
+    cubeTriSet.setTriangles(triangles_host);
+    cubeTriSet.update();
+
+    // ========== 3. Build mesh topology (face adjacency) ==========
     MeshTopologyHost topo = MeshTopologyBuilder::BuildFromTriangles(numVerts, triangles_host);
 
-    // ========== 3. Run KMeans patching ==========
+    // ========== 4. Run KMeans patching ==========
     PatchingParams params;
     params.targetFacesPerPatch = 256; // 12 faces << 256, so expect ~1 patch
     params.maxIters = 50;
@@ -81,7 +70,7 @@ void GenerateUnitCubeMesh(MeshTemplateData<TDataType>& out)
 
     const int numPatches = patchResult.numPatches;
 
-    // ========== 4. Compute rest-space AABB per patch ==========
+    // ========== 5. Compute rest-space AABB per patch ==========
     std::vector<AABB> patchAABBs_host(numPatches);
     for (int p = 0; p < numPatches; p++) {
         Coord vmin(Real(1e30), Real(1e30), Real(1e30));
@@ -102,78 +91,20 @@ void GenerateUnitCubeMesh(MeshTemplateData<TDataType>& out)
         patchAABBs_host[p].v1 = vmax;
     }
 
-    // ========== 5. Build edge topology ==========
-    // Build edge list, triangle-to-edge mapping, edge-to-face adjacency
-    std::unordered_map<uint64_t, int> edgeMap;
-    edgeMap.reserve(numTris * 3);
-
-    std::vector<Edge> edges_host;
-    std::vector<Tri2Edg> triangleEdges_host(numTris);
-
-    // Two-face adjacency per edge
-    struct EdgeFaces { int f0 = -1; int f1 = -1; };
-    std::vector<EdgeFaces> edgeFaces_tmp;
-
-    for (int f = 0; f < numTris; f++) {
-        const Triangle& tri = triangles_host[f];
-        int verts[3] = { static_cast<int>(tri[0]), static_cast<int>(tri[1]), static_cast<int>(tri[2]) };
-
-        for (int e = 0; e < 3; e++) {
-            int va = verts[e];
-            int vb = verts[(e + 1) % 3];
-            uint64_t key = packEdgeKey(va, vb);
-
-            auto it = edgeMap.find(key);
-            int edgeId;
-            if (it == edgeMap.end()) {
-                edgeId = static_cast<int>(edges_host.size());
-                edgeMap[key] = edgeId;
-                edges_host.push_back(Edge(std::min(va, vb), std::max(va, vb)));
-                edgeFaces_tmp.push_back(EdgeFaces{f, -1});
-            } else {
-                edgeId = it->second;
-                if (edgeFaces_tmp[edgeId].f1 == -1) {
-                    edgeFaces_tmp[edgeId].f1 = f;
-                }
-            }
-            triangleEdges_host[f][e] = edgeId;
-        }
-    }
-
-    const int numEdges = static_cast<int>(edges_host.size());
-
-    std::vector<Edg2Tri> edgeAdjacentFaces_host(numEdges);
-    for (int e = 0; e < numEdges; e++) {
-        edgeAdjacentFaces_host[e][0] = edgeFaces_tmp[e].f0;
-        edgeAdjacentFaces_host[e][1] = edgeFaces_tmp[e].f1;
-    }
-
-    // ========== 6. Build vertex-to-face adjacency (CSR) ==========
-    std::vector<int> vertexFaceCounts(numVerts, 0);
-    for (int f = 0; f < numTris; f++) {
-        const Triangle& tri = triangles_host[f];
-        for (int k = 0; k < 3; k++) {
-            vertexFaceCounts[tri[k]]++;
-        }
-    }
+    // ========== 6. Extract topology from TriangleSet ==========
+    const int numEdges = static_cast<int>(cubeTriSet.edgeIndices().size());
+    CArrayList<int> vertex2TriangleHost;
+    vertex2TriangleHost.assign(cubeTriSet.vertex2Triangle());
 
     std::vector<int> vertexFaceOffsets_host(numVerts + 1, 0);
-    for (int v = 0; v < numVerts; v++) {
-        vertexFaceOffsets_host[v + 1] = vertexFaceOffsets_host[v] + vertexFaceCounts[v];
-    }
+    for (int v = 0; v < numVerts; ++v)
+        vertexFaceOffsets_host[v] = static_cast<int>(vertex2TriangleHost.index()[v]);
+    vertexFaceOffsets_host[numVerts] = static_cast<int>(vertex2TriangleHost.elements().size());
 
-    int totalVF = vertexFaceOffsets_host[numVerts];
-    std::vector<int> vertexFaceIndices_host(totalVF);
-    std::vector<int> cursor(numVerts, 0);
-    for (int f = 0; f < numTris; f++) {
-        const Triangle& tri = triangles_host[f];
-        for (int k = 0; k < 3; k++) {
-            int v = tri[k];
-            int offset = vertexFaceOffsets_host[v] + cursor[v];
-            vertexFaceIndices_host[offset] = f;
-            cursor[v]++;
-        }
-    }
+    const int totalVF = static_cast<int>(vertex2TriangleHost.elements().size());
+    std::vector<int> vertexFaceIndices_host(totalVF, 0);
+    for (int i = 0; i < totalVF; ++i)
+        vertexFaceIndices_host[i] = vertex2TriangleHost.elements()[i];
 
     // ========== 7. Upload to GPU ==========
     out.numVertices = numVerts;
@@ -181,14 +112,9 @@ void GenerateUnitCubeMesh(MeshTemplateData<TDataType>& out)
     out.numPatches = numPatches;
     out.numEdges = numEdges;
 
-    // Geometry
-    CArray<Coord> vertices_ca(numVerts);
-    for (int i = 0; i < numVerts; i++) vertices_ca[i] = vertices_host[i];
-    out.vertices.assign(vertices_ca);
-
-    CArray<Triangle> triangles_ca(numTris);
-    for (int i = 0; i < numTris; i++) triangles_ca[i] = triangles_host[i];
-    out.triangles.assign(triangles_ca);
+    // Geometry/topology come from TriangleSet
+    out.vertices.assign(cubeTriSet.getPoints());
+    out.triangles.assign(cubeTriSet.triangleIndices());
 
     // Patches
     CArray<int> patchOffsets_ca(numPatches + 1);
@@ -203,18 +129,9 @@ void GenerateUnitCubeMesh(MeshTemplateData<TDataType>& out)
     for (int i = 0; i < numPatches; i++) patchAABBs_ca[i] = patchAABBs_host[i];
     out.patchAABBs.assign(patchAABBs_ca);
 
-    // Edge topology
-    CArray<Edge> edges_ca(numEdges);
-    for (int i = 0; i < numEdges; i++) edges_ca[i] = edges_host[i];
-    out.edges.assign(edges_ca);
-
-    CArray<Tri2Edg> triEdges_ca(numTris);
-    for (int i = 0; i < numTris; i++) triEdges_ca[i] = triangleEdges_host[i];
-    out.triangleEdges.assign(triEdges_ca);
-
-    CArray<Edg2Tri> edgeFaces_ca(numEdges);
-    for (int i = 0; i < numEdges; i++) edgeFaces_ca[i] = edgeAdjacentFaces_host[i];
-    out.edgeAdjacentFaces.assign(edgeFaces_ca);
+    out.edges.assign(cubeTriSet.edgeIndices());
+    out.triangleEdges.assign(cubeTriSet.triangle2Edge());
+    out.edgeAdjacentFaces.assign(cubeTriSet.edge2Triangle());
 
     // Vertex-face adjacency
     CArray<int> vfOffsets_ca(numVerts + 1);

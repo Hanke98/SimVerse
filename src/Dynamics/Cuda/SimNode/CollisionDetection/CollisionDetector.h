@@ -10,6 +10,7 @@
 #include <Array/Array2D.h>
 #include <STL/Pair.h>
 #include <Topology/TriangleSet.h>
+#include "Utils/SimBlockVector.h"
 
 #include "MeshCollisionTypes.h"
 
@@ -39,7 +40,6 @@ namespace dyno {
         using Matrix = typename TDataType::Matrix;
         using AABB = TAlignedBox3D<Real>;
         using Triangle = TopologyModule::Triangle;
-        using PairUU = Pair<uint, uint>;
         using ContactPair = TContactPair<Real>;
 
         MeshCollisionDetector() {};
@@ -55,7 +55,11 @@ namespace dyno {
         void narrow_phase(const RigidBody<TDataType>& rb,
             BatchCollisionConstraints& out,
             int num_envs);
-        void refreshMeshShapeLayoutCache(int shapeCount);
+        void refreshMeshShapeLayoutCache(const DArray<int>& batchBodies, int num_envs);
+        void runMeshMeshNarrowPhase(const RigidBody<TDataType>& rb,
+            const DArray<BodyContactId>& bodyPairs,
+            BatchCollisionConstraints& out,
+            int num_envs);
         void detectMeshMeshInternal(const RigidBody<TDataType>& rb,
             BatchCollisionConstraints& out,
             int num_envs);
@@ -64,7 +68,8 @@ namespace dyno {
         bool m_initialized = false;
         int m_numEnvs = 0;
         int m_maxBodies = 0;
-        int m_cachedMeshShapeCount = -1;
+        int m_cachedMeshLayoutEnvCount = -1;
+        std::vector<int> m_cachedMeshBodyCounts;
         Real m_dHat = Real(1e-3);
         Real m_edgeEdgeActivationMargin = Real(3e-3);
 
@@ -78,18 +83,13 @@ namespace dyno {
         DArray<BodyPair> m_bodyPairs;
         std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> m_bodyBroadPhase;
 
-        DArray<PairUU> m_shapePairs;
-        DArray<int> m_shape2BodyFlat;
-        DArray<Coord> m_shapeCenters;
-        DArray<Matrix> m_shapeRotations;
-        DArray<Coord> m_shapeHalfLengths;
-        DArray<Coord> m_shapeInvHalfLengths;
-
-        DArray<int> m_shape2PatchOffsets;
-        DArray<int> m_shape2TriOffsets;
-        DArray<int> m_shape2EdgeOffsets;
-        DArray<int> m_shape2VertexOffsets;
-        DArray<int> m_patch2Shape;
+        DevArr2D<int> m_body2PatchOffsets;
+        DevArr2D<int> m_body2TriOffsets;
+        DevArr2D<int> m_body2EdgeOffsets;
+        DevArr2D<int> m_body2VertexOffsets;
+        DArray<MeshBodyId> m_patch2Body;
+        DArray<MeshBodyId> m_tri2Body;
+        DArray<MeshBodyId> m_edge2Body;
         DArray<int> m_patch2TriOffsets;
         DArray<int> m_patch2TriIndices;
 

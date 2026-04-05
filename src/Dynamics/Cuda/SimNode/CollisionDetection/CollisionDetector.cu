@@ -206,7 +206,8 @@ __device__ inline void CD_WriteContact(
     const Vector<Real, 3>& point,
     Real mu)
 {
-    if (depth <= Real(0))
+    // Keep zero-depth contacts so edge-face/edge-edge activation contacts survive narrow phase.
+    if (depth < Real(0))
         return;
 
     int idx = atomicAdd(&out.collision_nums[env_id], 1);
@@ -870,7 +871,7 @@ __global__ void CD_AppendMeshContactsKernel(
         localA,
         localB,
         cp.interpenetration,
-        -normal,
+        normal,
         point,
         mu);
 }

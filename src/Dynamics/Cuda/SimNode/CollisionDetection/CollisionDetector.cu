@@ -47,22 +47,24 @@ void CD_BuildUnitCubeGeometry(
     using Coord = typename TDataType::Coord;
     using Triangle = typename TopologyModule::Triangle;
 
-    vertices.resize(8);
-    for (int i = 0; i < 8; ++i)
-    {
-        const Real x = (i & 1) ? Real(1) : Real(-1);
-        const Real y = (i & 2) ? Real(1) : Real(-1);
-        const Real z = (i & 4) ? Real(1) : Real(-1);
-        vertices[i] = Coord(x, y, z);
-    }
+    vertices = {
+        Coord(Real(-1), Real(-1), Real(-1)),
+        Coord(Real(-1), Real(1), Real(-1)),
+        Coord(Real(1), Real(-1), Real(-1)),
+        Coord(Real(1), Real(1), Real(-1)),
+        Coord(Real(1), Real(-1), Real(1)),
+        Coord(Real(1), Real(1), Real(1)),
+        Coord(Real(-1), Real(-1), Real(1)),
+        Coord(Real(-1), Real(1), Real(1))
+    };
 
     triangles = {
-        Triangle(0, 3, 1), Triangle(0, 2, 3),
+        Triangle(0, 1, 3), Triangle(0, 3, 2),
+        Triangle(2, 3, 5), Triangle(2, 5, 4),
         Triangle(4, 5, 7), Triangle(4, 7, 6),
-        Triangle(0, 1, 5), Triangle(0, 5, 4),
-        Triangle(2, 7, 3), Triangle(2, 6, 7),
-        Triangle(0, 4, 6), Triangle(0, 6, 2),
-        Triangle(1, 3, 7), Triangle(1, 7, 5)
+        Triangle(6, 7, 1), Triangle(6, 1, 0),
+        Triangle(1, 7, 5), Triangle(1, 5, 3),
+        Triangle(6, 0, 2), Triangle(6, 2, 4)
     };
 }
 
@@ -212,7 +214,7 @@ __device__ inline void CD_WriteContact(
     {
         out.body_idxs(env_id, idx) = Pair<int, int>(body_a, body_b);
         out.depth(env_id, idx) = depth;
-        out.normal(env_id, idx) = -normal;
+        out.normal(env_id, idx) = normal;
         out.point(env_id, idx) = point;
         out.mu(env_id, idx) = mu;
     }
@@ -868,7 +870,7 @@ __global__ void CD_AppendMeshContactsKernel(
         localA,
         localB,
         cp.interpenetration,
-        normal,
+        -normal,
         point,
         mu);
 }

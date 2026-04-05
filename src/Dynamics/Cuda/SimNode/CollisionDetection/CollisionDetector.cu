@@ -32,7 +32,6 @@ namespace dyno {
 namespace {
 
 static constexpr int CD_MAX_CONTACTS_PER_ENV = 1024;
-static constexpr bool CD_ENABLE_TEMP_NORMAL_PROBE = true;
 
 inline int CD_FlatBodyIndex(int maxBodies, int envId, int bodyId)
 {
@@ -832,13 +831,7 @@ __global__ void CD_AppendMeshContactsKernel(
     BatchCollisionConstraints out,
     DArray<TContactPair<typename TDataType::Real>> contacts,
     DArray<int> batch_bodies,
-    DArray2D<Vector<typename TDataType::Real, 3>> batch_pos,
     DevArr2D<typename TDataType::Real> friction_mu,
-    DArray<int> probeContactCounts,
-    DArray<int> probePositiveDotCounts,
-    DArray<int> probeInvalidCounts,
-    DArray<typename TDataType::Real> probeAngleDegSums,
-    DArray<typename TDataType::Real> probeCosSums,
     int maxBodies,
     int num_envs)
 {
@@ -853,6 +846,13 @@ __global__ void CD_AppendMeshContactsKernel(
     if (cp.bodyId1 < 0 || cp.bodyId2 < 0)
         return;
 
+    // The SimNode solver consumes hard contacts with a real penetration depth.
+    // Zero-depth shell contacts remain filtered out, but edge-edge contacts with
+    // positive penetration need to survive for offset box stacking.
+    if ((cp.contactType != CT_VERTEX_FACE && cp.contactType != CT_EDGE_FACE && cp.contactType != CT_EDGE_EDGE)
+        || cp.interpenetration <= Real(1e-6))
+        return;
+
     int envA = cp.bodyId1 / maxBodies;
     int envB = cp.bodyId2 / maxBodies;
     if (envA != envB || envA < 0 || envA >= num_envs)
@@ -865,50 +865,14 @@ __global__ void CD_AppendMeshContactsKernel(
     if (localA >= batch_bodies[envA] || localB >= batch_bodies[envA])
         return;
 
-    // For (bodyId1, bodyId2), TContactPair normal1 is oriented from body2 to body1.
-    Coord normal = cp.normal1;
+    // Topology TContactPair stores normal2 as the world-space contact normal on body2.
+    // That matches the manifold normal convention used by the SimNode solver.
+    Coord normal = cp.normal2;
     if (normal.normSquared() < Real(1e-12))
-        normal = -cp.normal2;
-    Coord point = cp.pos2;
+        normal = -cp.normal1;
+    Coord point = (cp.pos1 + cp.pos2) * Real(0.5);
 
     Real mu = sqrtf(friction_mu(envA, localA) * friction_mu(envA, localB));
-
-    if (CD_ENABLE_TEMP_NORMAL_PROBE
-        && envA < probeContactCounts.size()
-        && envA < probePositiveDotCounts.size()
-        && envA < probeInvalidCounts.size()
-        && envA < probeAngleDegSums.size()
-        && envA < probeCosSums.size())
-    {
-        const Real epsSqr = Real(1e-12);
-        Coord bodyDir = batch_pos(envA, localB) - batch_pos(envA, localA);
-        const Real bodyDirNormSqr = bodyDir.normSquared();
-        const Real normalNormSqr = normal.normSquared();
-        if (bodyDirNormSqr > epsSqr && normalNormSqr > epsSqr)
-        {
-            bodyDir /= sqrt(bodyDirNormSqr);
-            Coord unitNormal = normal;
-            unitNormal /= sqrt(normalNormSqr);
-
-            Real cosTheta = unitNormal.dot(bodyDir);
-            if (cosTheta > Real(1))
-                cosTheta = Real(1);
-            else if (cosTheta < Real(-1))
-                cosTheta = Real(-1);
-
-            const Real angleDeg = acos(cosTheta) * Real(57.29577951308232);
-
-            atomicAdd(&probeContactCounts[envA], 1);
-            atomicAdd(&probeAngleDegSums[envA], angleDeg);
-            atomicAdd(&probeCosSums[envA], cosTheta);
-            if (cosTheta > Real(0))
-                atomicAdd(&probePositiveDotCounts[envA], 1);
-        }
-        else
-        {
-            atomicAdd(&probeInvalidCounts[envA], 1);
-        }
-    }
 
     CD_WriteContact<Real>(
         out,
@@ -916,7 +880,7 @@ __global__ void CD_AppendMeshContactsKernel(
         localA,
         localB,
         cp.interpenetration,
-        normal,
+        -normal,
         point,
         mu);
 }
@@ -1652,6 +1616,7 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
         m_worklistEdgeIds.clear();
     else
         m_worklistEdgeIds.assign(worklistEdgeIdsHost);
+    cudaDeviceSynchronize();
 
     m_patchPairs.clear();
 
@@ -1892,83 +1857,14 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
         m_selectedPrimitiveCounts);
     cudaDeviceSynchronize();
 
-    if (CD_ENABLE_TEMP_NORMAL_PROBE)
-    {
-        if (m_probeContactCounts.size() != static_cast<uint>(num_envs))
-            m_probeContactCounts.resize(num_envs);
-        if (m_probePositiveDotCounts.size() != static_cast<uint>(num_envs))
-            m_probePositiveDotCounts.resize(num_envs);
-        if (m_probeInvalidCounts.size() != static_cast<uint>(num_envs))
-            m_probeInvalidCounts.resize(num_envs);
-        if (m_probeAngleDegSums.size() != static_cast<uint>(num_envs))
-            m_probeAngleDegSums.resize(num_envs);
-        if (m_probeCosSums.size() != static_cast<uint>(num_envs))
-            m_probeCosSums.resize(num_envs);
-
-        m_probeContactCounts.reset();
-        m_probePositiveDotCounts.reset();
-        m_probeInvalidCounts.reset();
-        m_probeAngleDegSums.reset();
-        m_probeCosSums.reset();
-    }
-
     CD_AppendMeshContactsKernel<TDataType><<<(totalContacts + 127) / 128, 128>>>(
         out,
         m_meshContacts,
         rb.batch_bodies,
-        rb.batch_pos,
         rb.friction_mu,
-        m_probeContactCounts,
-        m_probePositiveDotCounts,
-        m_probeInvalidCounts,
-        m_probeAngleDegSums,
-        m_probeCosSums,
         m_maxBodies,
         num_envs);
     cudaDeviceSynchronize();
-
-    if (CD_ENABLE_TEMP_NORMAL_PROBE)
-    {
-        CArray<int> hProbeContactCounts;
-        CArray<int> hProbePositiveDotCounts;
-        CArray<int> hProbeInvalidCounts;
-        CArray<Real> hProbeAngleDegSums;
-        CArray<Real> hProbeCosSums;
-        hProbeContactCounts.assign(m_probeContactCounts);
-        hProbePositiveDotCounts.assign(m_probePositiveDotCounts);
-        hProbeInvalidCounts.assign(m_probeInvalidCounts);
-        hProbeAngleDegSums.assign(m_probeAngleDegSums);
-        hProbeCosSums.assign(m_probeCosSums);
-
-        for (int envId = 0; envId < num_envs && envId < static_cast<int>(hProbeContactCounts.size()); ++envId)
-        {
-            const int count = hProbeContactCounts[envId];
-            const int positiveCount = envId < static_cast<int>(hProbePositiveDotCounts.size()) ? hProbePositiveDotCounts[envId] : 0;
-            const int invalidCount = envId < static_cast<int>(hProbeInvalidCounts.size()) ? hProbeInvalidCounts[envId] : 0;
-            if (count <= 0 && invalidCount <= 0)
-                continue;
-
-            const Real meanAngleDeg = count > 0
-                ? hProbeAngleDegSums[envId] / Real(count)
-                : Real(0);
-            const Real meanCos = count > 0
-                ? hProbeCosSums[envId] / Real(count)
-                : Real(0);
-            const Real positiveRatio = count > 0
-                ? Real(positiveCount) / Real(count)
-                : Real(0);
-
-            spdlog::info(
-                "[MeshCollisionDetector][NormalProbe] frame={} env={} contacts={} meanAngleDeg={:.3f} meanCos={:.4f} cosPositiveRatio={:.3f} invalid={}",
-                m_probeFrameId,
-                envId,
-                count,
-                static_cast<double>(meanAngleDeg),
-                static_cast<double>(meanCos),
-                static_cast<double>(positiveRatio),
-                invalidCount);
-        }
-    }
 
 }
 
@@ -1992,9 +1888,6 @@ void MeshCollisionDetector<TDataType>::Detect(
         spdlog::warn("[MeshCollisionDetector] Detect called before Initialize.");
         return;
     }
-
-    if (CD_ENABLE_TEMP_NORMAL_PROBE)
-        ++m_probeFrameId;
 
     out.collision_nums.reset();
 

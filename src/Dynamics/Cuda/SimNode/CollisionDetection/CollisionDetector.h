@@ -142,14 +142,6 @@ namespace dyno {
         DArray<int> m_triPairContactOffsets;
         DArray<ContactPair> m_meshContacts;
 
-        // Temporary probe buffers for debugging mesh-contact normal orientation.
-        DArray<int> m_probeContactCounts;
-        DArray<int> m_probePositiveDotCounts;
-        DArray<int> m_probeInvalidCounts;
-        DArray<Real> m_probeAngleDegSums;
-        DArray<Real> m_probeCosSums;
-        unsigned long long m_probeFrameId = 0;
-
         Scan<int> m_scan;
         Reduction<int> m_reduce;
     };

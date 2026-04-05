@@ -902,6 +902,7 @@ void MeshCollisionDetector<TDataType>::refreshMeshShapeLayoutCache(
         totalBodies += bodyCounts[envId];
     }
 
+    // if the num_envs and bodyCounts do not change, then return to avoid rebuilding
     if (m_cachedMeshLayoutEnvCount == num_envs && m_cachedMeshBodyCounts == bodyCounts)
         return;
 
@@ -1024,28 +1025,11 @@ void MeshCollisionDetector<TDataType>::refreshMeshShapeLayoutCache(
     m_body2EdgeOffsets.Assign(body2EdgeOffsets, bodyCounts);
     m_body2VertexOffsets.Assign(body2VertexOffsets, bodyCounts);
 
-    CArray<MeshBodyId> dPatch2Body(static_cast<uint>(patch2Body.size()));
-    CArray<MeshBodyId> dTri2Body(static_cast<uint>(tri2Body.size()));
-    CArray<MeshBodyId> dEdge2Body(static_cast<uint>(edge2Body.size()));
-    CArray<int> dPatch2TriOffsets(static_cast<uint>(patch2TriOffsets.size()));
-    CArray<int> dPatch2TriIndices(static_cast<uint>(patch2TriIndices.size()));
-
-    for (uint i = 0; i < dPatch2Body.size(); ++i)
-        dPatch2Body[i] = patch2Body[i];
-    for (uint i = 0; i < dTri2Body.size(); ++i)
-        dTri2Body[i] = tri2Body[i];
-    for (uint i = 0; i < dEdge2Body.size(); ++i)
-        dEdge2Body[i] = edge2Body[i];
-    for (uint i = 0; i < dPatch2TriOffsets.size(); ++i)
-        dPatch2TriOffsets[i] = patch2TriOffsets[i];
-    for (uint i = 0; i < dPatch2TriIndices.size(); ++i)
-        dPatch2TriIndices[i] = patch2TriIndices[i];
-
-    m_patch2Body.assign(dPatch2Body);
-    m_tri2Body.assign(dTri2Body);
-    m_edge2Body.assign(dEdge2Body);
-    m_patch2TriOffsets.assign(dPatch2TriOffsets);
-    m_patch2TriIndices.assign(dPatch2TriIndices);
+    m_patch2Body.assign(patch2Body);
+    m_tri2Body.assign(tri2Body);
+    m_edge2Body.assign(edge2Body);
+    m_patch2TriOffsets.assign(patch2TriOffsets);
+    m_patch2TriIndices.assign(patch2TriIndices);
     m_cachedMeshLayoutEnvCount = num_envs;
     m_cachedMeshBodyCounts = bodyCounts;
 }

@@ -53,6 +53,12 @@ namespace dyno {
         int body_b;
     };
 
+    struct BodyContactId {
+        int env_id = INVLIDA_ID;
+        int body_id_1 = INVLIDA_ID; // env-local rigid body id
+        int body_id_2 = INVLIDA_ID; // env-local rigid body id
+    };
+
     enum PairType : int {
         PRIM_PRIM = 0,
         PRIM_MESH = 1,

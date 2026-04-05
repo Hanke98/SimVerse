@@ -50,7 +50,7 @@ __device__ inline void CD_WriteContact(
     {
         out.body_idxs(env_id, idx) = Pair<int, int>(body_a, body_b);
         out.depth(env_id, idx) = depth;
-        out.normal(env_id, idx) = normal;
+        out.normal(env_id, idx) = -normal;
         out.point(env_id, idx) = point;
         out.mu(env_id, idx) = mu;
     }
@@ -1339,7 +1339,420 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     BatchCollisionConstraints& out,
     int num_envs)
 {
-    detectMeshMeshInternal(rb, out, num_envs);
+    // detectMeshMeshInternal(rb, out, num_envs);
+
+    CArray<int> hBatchBodies;
+    CArrayList<int> hContactList;
+    hBatchBodies.assign(rb.batch_bodies);
+    hContactList.assign(m_bodyBroadPhase->outContactList()->getData());
+
+    CArray2D<int> hShapeType;
+    CArray2D<int> hShapeIdx;
+    CArray2D<Coord> hPos;
+    CArray2D<Matrix> hRot;
+    CArray2D<BoxInfo> hBoxes;
+
+    hShapeType.assign(rb.shape_type);
+    hShapeIdx.assign(rb.shape_idx);
+    hPos.assign(rb.batch_pos);
+    hRot.assign(rb.batch_rot);
+    hBoxes.assign(rb.boxes);
+
+    HostBlockVector<int> hIsStatic;
+    HostBlockVector<int> hParentIdx;
+    rb.is_static.Download(hIsStatic);
+    rb.parent_idx.Download(hParentIdx);
+
+    std::vector<int> shape2BodyFlatHost;
+    std::vector<Coord> shapeCentersHost;
+    std::vector<Matrix> shapeRotationsHost;
+    std::vector<Coord> shapeHalfLengthsHost;
+    std::vector<Coord> shapeInvHalfLengthsHost;
+    std::vector<int> flatBodyToShape(num_envs * m_maxBodies, -1);
+    shape2BodyFlatHost.reserve(num_envs * 8);
+    shapeCentersHost.reserve(num_envs * 8);
+    shapeRotationsHost.reserve(num_envs * 8);
+    shapeHalfLengthsHost.reserve(num_envs * 8);
+    shapeInvHalfLengthsHost.reserve(num_envs * 8);
+
+    for (int env = 0; env < num_envs; ++env)
+    {
+        const int bodyCount = hBatchBodies[env];
+        for (int b = 0; b < bodyCount; ++b)
+        {
+            if (hShapeType(env, b) != 1)
+                continue;
+
+            const int sidx = hShapeIdx(env, b);
+            const BoxInfo box = hBoxes(env, sidx);
+            const Coord bodyPos = hPos(env, b);
+            const Matrix bodyRot = hRot(env, b);
+
+            const int flatBody = env * m_maxBodies + b;
+            const int shapeId = static_cast<int>(shape2BodyFlatHost.size());
+            flatBodyToShape[flatBody] = shapeId;
+            shape2BodyFlatHost.push_back(flatBody);
+            shapeCentersHost.push_back(bodyPos + bodyRot * box.center);
+            shapeRotationsHost.push_back(bodyRot * box.rot.toMatrix3x3());
+            shapeHalfLengthsHost.push_back(box.halfLength);
+            shapeInvHalfLengthsHost.push_back(Coord(
+                box.halfLength[0] != Real(0) ? Real(1) / box.halfLength[0] : Real(0),
+                box.halfLength[1] != Real(0) ? Real(1) / box.halfLength[1] : Real(0),
+                box.halfLength[2] != Real(0) ? Real(1) / box.halfLength[2] : Real(0)));
+        }
+    }
+
+    const int shapeCount = static_cast<int>(shape2BodyFlatHost.size());
+    if (shapeCount < 2)
+        return;
+
+    refreshMeshShapeLayoutCache(shapeCount);
+
+    CArray<int> dShape2BodyFlat(shapeCount);
+    CArray<Coord> dShapeCenters(shapeCount);
+    CArray<Matrix> dShapeRotations(shapeCount);
+    CArray<Coord> dShapeHalfLengths(shapeCount);
+    CArray<Coord> dShapeInvHalfLengths(shapeCount);
+    for (int i = 0; i < shapeCount; ++i)
+    {
+        dShape2BodyFlat[i] = shape2BodyFlatHost[i];
+        dShapeCenters[i] = shapeCentersHost[i];
+        dShapeRotations[i] = shapeRotationsHost[i];
+        dShapeHalfLengths[i] = shapeHalfLengthsHost[i];
+        dShapeInvHalfLengths[i] = shapeInvHalfLengthsHost[i];
+    }
+
+    m_shape2BodyFlat.assign(dShape2BodyFlat);
+    m_shapeCenters.assign(dShapeCenters);
+    m_shapeRotations.assign(dShapeRotations);
+    m_shapeHalfLengths.assign(dShapeHalfLengths);
+    m_shapeInvHalfLengths.assign(dShapeInvHalfLengths);
+
+    std::unordered_set<uint64_t> pairSet;
+    std::vector<PairUU> shapePairsHost;
+    shapePairsHost.reserve(128);
+
+    const int totalBodies = num_envs * m_maxBodies;
+    for (int q = 0; q < totalBodies && q < static_cast<int>(hContactList.size()); ++q)
+    {
+        const int envA = q / m_maxBodies;
+        const int bodyA = q - envA * m_maxBodies;
+        if (envA < 0 || envA >= num_envs)
+            continue;
+        if (bodyA < 0 || bodyA >= m_maxBodies || bodyA >= hBatchBodies[envA])
+            continue;
+        if (hShapeType(envA, bodyA) != 1)
+            continue;
+
+        auto& nbr = hContactList[q];
+        for (auto it = nbr.begin(); it != nbr.end(); ++it)
+        {
+            const int r = *it;
+            const int envB = r / m_maxBodies;
+            const int bodyB = r - envB * m_maxBodies;
+            if (envA != envB)
+                continue;
+            if (bodyB < 0 || bodyB >= m_maxBodies || bodyB >= hBatchBodies[envA])
+                continue;
+            if (bodyA == bodyB)
+                continue;
+            if (hShapeType(envA, bodyB) != 1)
+                continue;
+
+            int a = bodyA;
+            int b = bodyB;
+            if (a > b)
+            {
+                const int t = a;
+                a = b;
+                b = t;
+            }
+
+            if (!hIsStatic.Empty()
+                && hIsStatic.AtBlock(envA, a)
+                && hIsStatic.AtBlock(envA, b))
+                continue;
+            if (!hParentIdx.Empty())
+            {
+                if (hParentIdx.AtBlock(envA, a) == b
+                    || hParentIdx.AtBlock(envA, b) == a)
+                    continue;
+            }
+
+            const uint64_t key = (static_cast<uint64_t>(envA) << 40)
+                | (static_cast<uint64_t>(a) << 20)
+                | static_cast<uint64_t>(b);
+            if (!pairSet.insert(key).second)
+                continue;
+
+            const int flatA = envA * m_maxBodies + a;
+            const int flatB = envA * m_maxBodies + b;
+            const int shapeA = flatBodyToShape[flatA];
+            const int shapeB = flatBodyToShape[flatB];
+            if (shapeA < 0 || shapeB < 0)
+                continue;
+
+            shapePairsHost.emplace_back(static_cast<uint>(shapeA), static_cast<uint>(shapeB));
+        }
+    }
+
+    if (shapePairsHost.empty())
+        return;
+
+    CArray<PairUU> dShapePairs(static_cast<uint>(shapePairsHost.size()));
+    for (uint i = 0; i < dShapePairs.size(); ++i)
+        dShapePairs[i] = shapePairsHost[i];
+    m_shapePairs.assign(dShapePairs);
+    m_patchPairs.clear();
+
+    cd_internal::MeshShapeView<TDataType> view{
+        m_cubeTemplateTriSet->getPoints(),
+        m_cubeTemplateTriSet->triangleIndices(),
+        m_cubeTemplateTriSet->triangle2Edge(),
+        m_cubeTemplateTriSet->edgeIndices(),
+        m_cubeTemplateTriSet->edge2Triangle(),
+        m_shapePairs,
+        m_shape2BodyFlat,
+        m_shapeCenters,
+        m_shapeRotations,
+        m_shapeHalfLengths,
+        m_shapeInvHalfLengths,
+        m_shape2PatchOffsets,
+        m_shape2TriOffsets,
+        m_shape2EdgeOffsets,
+        m_shape2VertexOffsets,
+        m_patch2Shape,
+        m_patch2TriOffsets,
+        m_patch2TriIndices,
+        m_cubeTemplate.patchAABBs,
+        m_patchPairs,
+        m_triAabbsWorld,
+        m_faceNormalsWorld,
+        m_edgeNormalsWorld,
+        m_dHat,
+        m_edgeEdgeActivationMargin
+    };
+
+    const int templateTriCount = static_cast<int>(m_cubeTemplateTriSet->triangleIndices().size());
+    const int templateEdgeCount = static_cast<int>(m_cubeTemplateTriSet->edgeIndices().size());
+    const int triCount = shapeCount * templateTriCount;
+    const int edgeCount = shapeCount * templateEdgeCount;
+    if (triCount <= 0)
+        return;
+
+    m_triAabbsWorld.resize(triCount);
+    m_faceNormalsWorld.resize(triCount);
+    if (edgeCount > 0)
+        m_edgeNormalsWorld.resize(edgeCount);
+
+    view.triangleAabbsWorld = m_triAabbsWorld;
+    view.faceNormalsWorld = m_faceNormalsWorld;
+    view.edgeNormalsWorld = m_edgeNormalsWorld;
+
+    {
+        const int threads = 128;
+        const int triBlocks = (triCount + threads - 1) / threads;
+        cd_internal::PrepareTriangleWorldDataKernel<decltype(view)><<<triBlocks, threads>>>(view);
+        if (edgeCount > 0)
+        {
+            const int edgeBlocks = (edgeCount + threads - 1) / threads;
+            cd_internal::PrepareEdgeNormalsWorldKernel<decltype(view)><<<edgeBlocks, threads>>>(view);
+        }
+        cudaDeviceSynchronize();
+    }
+
+    const int shapePairCount = static_cast<int>(m_shapePairs.size());
+    if (shapePairCount <= 0)
+        return;
+
+    m_patchPairTriPairCounts.resize(shapePairCount);
+    m_patchPairTriPairCounts.reset();
+
+    cd_internal::CountTriPairsPerShapePairKernel<<<(shapePairCount + 127) / 128, 128>>>(
+        m_patchPairTriPairCounts,
+        m_shapePairs,
+        m_shape2TriOffsets);
+    cudaDeviceSynchronize();
+
+    const int totalCandidateTriPairs = m_reduce.accumulate(
+        m_patchPairTriPairCounts.begin(),
+        m_patchPairTriPairCounts.size());
+    if (totalCandidateTriPairs <= 0)
+        return;
+
+    m_patchPairTriPairOffsets.resize(shapePairCount);
+    m_patchPairTriPairOffsets.assign(m_patchPairTriPairCounts);
+    m_scan.exclusive(m_patchPairTriPairOffsets, true);
+
+    m_candidateTri0.resize(totalCandidateTriPairs);
+    m_candidateTri1.resize(totalCandidateTriPairs);
+    m_candidatePatchPairId.resize(totalCandidateTriPairs);
+
+    cd_internal::SetTriPairsFromShapePairsKernel<<<(shapePairCount + 127) / 128, 128>>>(
+        m_candidateTri0,
+        m_candidateTri1,
+        m_candidatePatchPairId,
+        m_patchPairTriPairOffsets,
+        m_patchPairTriPairCounts,
+        m_shapePairs,
+        m_shape2TriOffsets);
+    cudaDeviceSynchronize();
+
+    m_coarsePassCounts.resize(totalCandidateTriPairs);
+    m_coarsePassCounts.reset();
+
+    cd_internal::CountCoarsePassedTriPairsKernel<AABB, Real><<<(totalCandidateTriPairs + 127) / 128, 128>>>(
+        m_coarsePassCounts,
+        m_candidateTri0,
+        m_candidateTri1,
+        m_triAabbsWorld,
+        m_dHat);
+    cudaDeviceSynchronize();
+
+    const int totalFilteredTriPairs = m_reduce.accumulate(
+        m_coarsePassCounts.begin(),
+        m_coarsePassCounts.size());
+    if (totalFilteredTriPairs <= 0)
+        return;
+
+    m_coarsePassOffsets.resize(totalCandidateTriPairs);
+    m_coarsePassOffsets.assign(m_coarsePassCounts);
+    m_scan.exclusive(m_coarsePassOffsets, true);
+
+    m_filteredTri0.resize(totalFilteredTriPairs);
+    m_filteredTri1.resize(totalFilteredTriPairs);
+    m_filteredPatchPairId.resize(totalFilteredTriPairs);
+
+    cd_internal::SetCoarsePassedTriPairsKernel<<<(totalCandidateTriPairs + 127) / 128, 128>>>(
+        m_filteredTri0,
+        m_filteredTri1,
+        m_filteredPatchPairId,
+        m_candidateTri0,
+        m_candidateTri1,
+        m_candidatePatchPairId,
+        m_coarsePassOffsets,
+        m_coarsePassCounts);
+    cudaDeviceSynchronize();
+
+    const int primitivePassSlotCount = totalFilteredTriPairs * cd_internal::MESH_PASS_COUNT;
+    if (primitivePassSlotCount <= 0)
+        return;
+
+    m_primitivePassCounts.resize(primitivePassSlotCount);
+    m_primitivePassCounts.reset();
+
+    cd_internal::CountPrimitiveCandidatesPerPassKernel<decltype(view)><<<(primitivePassSlotCount + 127) / 128, 128>>>(
+        m_primitivePassCounts,
+        m_filteredTri0,
+        m_filteredTri1,
+        m_filteredPatchPairId,
+        view);
+    cudaDeviceSynchronize();
+
+    const int totalPrimitiveCandidates = m_reduce.accumulate(
+        m_primitivePassCounts.begin(),
+        m_primitivePassCounts.size());
+
+    m_primitivePassOffsets.resize(primitivePassSlotCount);
+    m_primitivePassOffsets.assign(m_primitivePassCounts);
+    m_scan.exclusive(m_primitivePassOffsets, true);
+
+    if (totalPrimitiveCandidates <= 0)
+        return;
+
+    m_primitiveCandidateContacts.resize(totalPrimitiveCandidates);
+    m_primitiveCandidateKeys.resize(totalPrimitiveCandidates);
+    m_primitiveCandidateSortedIndices.resize(totalPrimitiveCandidates);
+    m_primitiveCandidateKeepFlags.resize(totalPrimitiveCandidates);
+    m_primitiveCandidateKeepFlags.reset();
+
+    cd_internal::SetPrimitiveCandidatesPerPassKernel<decltype(view)><<<(primitivePassSlotCount + 127) / 128, 128>>>(
+        m_primitiveCandidateContacts,
+        m_primitiveCandidateKeys,
+        m_primitivePassOffsets,
+        m_primitivePassCounts,
+        m_filteredTri0,
+        m_filteredTri1,
+        m_filteredPatchPairId,
+        view);
+    cudaDeviceSynchronize();
+
+    cd_internal::InitPrimitiveCandidateIndicesKernel<<<(totalPrimitiveCandidates + 127) / 128, 128>>>(
+        m_primitiveCandidateSortedIndices);
+    cudaDeviceSynchronize();
+
+    thrust::stable_sort_by_key(
+        thrust::device,
+        m_primitiveCandidateKeys.begin(),
+        m_primitiveCandidateKeys.begin() + m_primitiveCandidateKeys.size(),
+        m_primitiveCandidateSortedIndices.begin());
+
+    cd_internal::MarkMinDepthCandidatesPerPrimitiveKeyKernel<ContactPair, Real><<<(totalPrimitiveCandidates + 127) / 128, 128>>>(
+        m_primitiveCandidateKeepFlags,
+        m_primitiveCandidateKeys,
+        m_primitiveCandidateSortedIndices,
+        m_primitiveCandidateContacts,
+        Real(1e-6),
+        Real(1e-4));
+    cudaDeviceSynchronize();
+
+    const Real crossTypePositionEps = m_edgeEdgeActivationMargin > Real(2e-4)
+        ? m_edgeEdgeActivationMargin * Real(0.5)
+        : Real(1e-4);
+    cd_internal::SuppressRedundantEdgeFaceAgainstVertexFaceKernel<ContactPair, Real><<<(totalFilteredTriPairs + 127) / 128, 128>>>(
+        m_primitiveCandidateKeepFlags,
+        m_primitivePassCounts,
+        m_primitivePassOffsets,
+        m_primitiveCandidateContacts,
+        crossTypePositionEps,
+        Real(1e-4));
+    cudaDeviceSynchronize();
+
+    m_selectedPrimitiveCounts.resize(totalFilteredTriPairs);
+    m_selectedPrimitiveCounts.reset();
+    cd_internal::CountSelectedPrimitiveContactsPerTriPairKernel<<<(totalFilteredTriPairs + 127) / 128, 128>>>(
+        m_selectedPrimitiveCounts,
+        m_primitivePassCounts,
+        m_primitivePassOffsets,
+        m_primitiveCandidateKeepFlags);
+    cudaDeviceSynchronize();
+
+    m_triPairContactCounts.resize(totalFilteredTriPairs);
+    m_triPairContactCounts.reset();
+    cd_internal::SetFinalContactCountsKernel<<<(totalFilteredTriPairs + 127) / 128, 128>>>(
+        m_triPairContactCounts,
+        m_selectedPrimitiveCounts);
+    cudaDeviceSynchronize();
+
+    const int totalContacts = m_reduce.accumulate(
+        m_triPairContactCounts.begin(),
+        m_triPairContactCounts.size());
+    if (totalContacts <= 0)
+        return;
+
+    m_triPairContactOffsets.resize(totalFilteredTriPairs);
+    m_triPairContactOffsets.assign(m_triPairContactCounts);
+    m_scan.exclusive(m_triPairContactOffsets, true);
+
+    m_meshContacts.resize(totalContacts);
+    cd_internal::SetFinalContactsPerTriPairKernel<ContactPair><<<(totalFilteredTriPairs + 127) / 128, 128>>>(
+        m_meshContacts,
+        m_triPairContactOffsets,
+        m_primitivePassCounts,
+        m_primitivePassOffsets,
+        m_primitiveCandidateKeepFlags,
+        m_primitiveCandidateContacts,
+        m_selectedPrimitiveCounts);
+    cudaDeviceSynchronize();
+
+    CD_AppendMeshContactsKernel<TDataType><<<(totalContacts + 127) / 128, 128>>>(
+        out,
+        m_meshContacts,
+        rb.batch_bodies,
+        rb.friction_mu,
+        m_maxBodies,
+        num_envs);
+    cudaDeviceSynchronize();
 
 #if 0
     if (m_bodyPairs.size() > 0)

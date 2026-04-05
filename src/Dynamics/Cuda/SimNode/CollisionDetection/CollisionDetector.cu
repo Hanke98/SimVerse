@@ -829,7 +829,7 @@ __global__ void CD_GroundCollisionKernel(
 } // namespace
 
 template<typename TDataType>
-void MeshCollisionDetector<TDataType>::Initialize(int num_envs, int max_bodies, const RigidBody<TDataType>&)
+void MeshCollisionDetector<TDataType>::Initialize(int num_envs, int max_bodies, const RigidBody<TDataType>& rb)
 {
     m_numEnvs = num_envs;
     m_maxBodies = max_bodies;
@@ -880,6 +880,8 @@ void MeshCollisionDetector<TDataType>::Initialize(int num_envs, int max_bodies, 
     m_bodyBroadPhase->varSelfCollision()->setValue(true);
     m_bodyBroadPhase->varAccelerationStructure()->setCurrentKey(CollisionDetectionBroadPhase<TDataType>::BVH);
     m_bodyBroadPhase->varGridSizeLimit()->setValue(Real(0.01));
+
+    refreshMeshShapeLayoutCache(rb.batch_bodies, num_envs);
 
     m_initialized = true;
     spdlog::info("[MeshCollisionDetector] Initialized (envs={}, maxBodies={})", num_envs, max_bodies);

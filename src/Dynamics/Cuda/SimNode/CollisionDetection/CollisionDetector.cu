@@ -1667,14 +1667,7 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     {
         const BodyContactId pair = hBodyContactPairs[q];
         const int envA = pair.env_id;
-        if (envA < 0 || envA >= num_envs)
-            continue;
-        const int bodyA = pair.body_id_1;
-        const int bodyB = pair.body_id_2;
-        if (bodyA < 0 || bodyA >= m_maxBodies || bodyB < 0 || bodyB >= m_maxBodies)
-            continue;
-        if (bodyA >= hBatchBodies[envA] || bodyB >= hBatchBodies[envA])
-            continue;
+        // TODO: only support cube now
         if (hShapeType(envA, bodyA) != 1 || hShapeType(envA, bodyB) != 1)
             continue;
 

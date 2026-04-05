@@ -243,11 +243,42 @@ __device__ inline bool CD_DecodeBroadPhaseBodyIndex(
     return true;
 }
 
+__device__ inline bool CD_IsCanonicalBroadPhasePair(
+    int env_id,
+    int body_id,
+    int nbr_env_id,
+    int nbr_body_id)
+{
+    if (nbr_env_id != env_id || nbr_body_id == body_id)
+        return false;
+
+    return body_id < nbr_body_id;
+}
+
+__device__ inline bool CD_ShouldSkipBroadPhasePair(
+    int env_id,
+    int body_id,
+    int nbr_body_id,
+    const DevArr2D<int>& is_static,
+    const DevArr2D<int>& parent_idx)
+{
+    if (is_static(env_id, body_id) && is_static(env_id, nbr_body_id))
+        return true;
+
+    if (parent_idx(env_id, body_id) == nbr_body_id
+        || parent_idx(env_id, nbr_body_id) == body_id)
+        return true;
+
+    return false;
+}
+
 __global__ void CD_CountBodyContactListSize(
     DArray<int> num,
     DArrayList<int> contactList,
     DArray<int> batch_bodies,
     DArray<int> batch_body_offset,
+    DevArr2D<int> is_static,
+    DevArr2D<int> parent_idx,
     int num_envs)
 {
     int tId = threadIdx.x + (blockIdx.x * blockDim.x);
@@ -283,7 +314,9 @@ __global__ void CD_CountBodyContactListSize(
             nbr_body_id))
             continue;
 
-        if (nbr_env_id != env_id || nbr_body_id == body_id)
+        if (!CD_IsCanonicalBroadPhasePair(env_id, body_id, nbr_env_id, nbr_body_id))
+            continue;
+        if (CD_ShouldSkipBroadPhasePair(env_id, body_id, nbr_body_id, is_static, parent_idx))
             continue;
 
         ++validCount;
@@ -298,6 +331,8 @@ __global__ void CD_SetupBodyContactIds(
     DArrayList<int> contactList,
     DArray<int> batch_bodies,
     DArray<int> batch_body_offset,
+    DevArr2D<int> is_static,
+    DevArr2D<int> parent_idx,
     int num_envs)
 {
     int tId = threadIdx.x + (blockIdx.x * blockDim.x);
@@ -332,7 +367,9 @@ __global__ void CD_SetupBodyContactIds(
             nbr_body_id))
             continue;
 
-        if (nbr_env_id != env_id || nbr_body_id == body_id)
+        if (!CD_IsCanonicalBroadPhasePair(env_id, body_id, nbr_env_id, nbr_body_id))
+            continue;
+        if (CD_ShouldSkipBroadPhasePair(env_id, body_id, nbr_body_id, is_static, parent_idx))
             continue;
 
         BodyContactId id;
@@ -1480,6 +1517,8 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
             contactList,
             rb.batch_bodies,
             rb.batch_body_offset,
+            rb.is_static,
+            rb.parent_idx,
             num_envs);
         cudaDeviceSynchronize();
     }
@@ -1505,6 +1544,8 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
             contactList,
             rb.batch_bodies,
             rb.batch_body_offset,
+            rb.is_static,
+            rb.parent_idx,
             num_envs);
         cudaDeviceSynchronize();
     }
@@ -1619,12 +1660,6 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     hRot.assign(rb.batch_rot);
     hBoxes.assign(rb.boxes);
 
-    HostBlockVector<int> hIsStatic;
-    HostBlockVector<int> hParentIdx;
-    rb.is_static.Download(hIsStatic);
-    rb.parent_idx.Download(hParentIdx);
-
-    std::unordered_set<uint64_t> pairSet;
     std::vector<PairUU> shapePairsHost;
     shapePairsHost.reserve(128);
 
@@ -1640,36 +1675,11 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
             continue;
         if (bodyA >= hBatchBodies[envA] || bodyB >= hBatchBodies[envA])
             continue;
-        if (bodyA == bodyB)
-            continue;
         if (hShapeType(envA, bodyA) != 1 || hShapeType(envA, bodyB) != 1)
             continue;
 
-        int a = bodyA;
-        int b = bodyB;
-        if (a > b)
-        {
-            const int t = a;
-            a = b;
-            b = t;
-        }
-
-        if (!hIsStatic.Empty()
-            && hIsStatic.AtBlock(envA, a)
-            && hIsStatic.AtBlock(envA, b))
-            continue;
-        if (!hParentIdx.Empty())
-        {
-            if (hParentIdx.AtBlock(envA, a) == b
-                || hParentIdx.AtBlock(envA, b) == a)
-                continue;
-        }
-
-        const uint64_t key = (static_cast<uint64_t>(envA) << 40)
-            | (static_cast<uint64_t>(a) << 20)
-            | static_cast<uint64_t>(b);
-        if (!pairSet.insert(key).second)
-            continue;
+        const int a = bodyA;
+        const int b = bodyB;
 
         const int shapeA = envA * m_maxBodies + a;
         const int shapeB = envA * m_maxBodies + b;

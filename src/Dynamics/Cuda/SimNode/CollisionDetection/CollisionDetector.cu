@@ -64,6 +64,7 @@ template<typename TDataType>
 __global__ void CD_ComputeBodyAABBsKernel(
     DArray<TAlignedBox3D<typename TDataType::Real>> bodyAabbs,
     DArray<int> batch_bodies,
+    DArray<int> batch_body_offset,
     DArray2D<Vector<typename TDataType::Real, 3>> batch_pos,
     DArray2D<SquareMatrix<typename TDataType::Real, 3>> batch_rot,
     DArray2D<int> shape_type,
@@ -72,7 +73,8 @@ __global__ void CD_ComputeBodyAABBsKernel(
     DArray2D<SphereInfo> spheres,
     DArray2D<CapsuleInfo> capsules,
     typename TDataType::Real dHat,
-    int maxBodies)
+    int num_envs,
+    int totalBodies)
 {
     using Real = typename TDataType::Real;
     using Coord = Vector<Real, 3>;
@@ -80,17 +82,46 @@ __global__ void CD_ComputeBodyAABBsKernel(
     using AABB = TAlignedBox3D<Real>;
 
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= bodyAabbs.size())
+    if (tid >= bodyAabbs.size() || tid >= totalBodies)
         return;
-
-    int env_id = tid / maxBodies;
-    int body_id = tid - env_id * maxBodies;
 
     AABB box;
     box.v0 = Coord(Real(1e30));
     box.v1 = Coord(Real(-1e30));
 
-    if (env_id < batch_bodies.size() && body_id < batch_bodies[env_id])
+    int envCount = num_envs;
+    if (envCount > batch_bodies.size())
+        envCount = batch_bodies.size();
+    if (envCount > batch_body_offset.size())
+        envCount = batch_body_offset.size();
+
+    int left = 0;
+    int right = envCount - 1;
+    int env_id = -1;
+    while (left <= right)
+    {
+        const int mid = left + ((right - left) >> 1);
+        const int offset = batch_body_offset[mid];
+        if (offset <= tid)
+        {
+            env_id = mid;
+            left = mid + 1;
+        }
+        else
+        {
+            right = mid - 1;
+        }
+    }
+
+    if (env_id < 0 || env_id >= envCount)
+    {
+        printf("env_id error in compute AABB");
+        return;
+    }
+
+    const int body_id = tid - batch_body_offset[env_id];
+
+    if (body_id >= 0 && body_id < batch_bodies[env_id])
     {
         int st = shape_type(env_id, body_id);
         int sidx = shape_idx(env_id, body_id);
@@ -138,9 +169,179 @@ __global__ void CD_ComputeBodyAABBsKernel(
             box.v0 = p0.minimum(p1) - Coord(r);
             box.v1 = p0.maximum(p1) + Coord(r);
         }
+        else if (st == 6)
+        {
+            //TODO: compute compact AABB for mesh
+        }
     }
 
     bodyAabbs[tid] = box;
+}
+
+__device__ inline int CD_FindEnvIdByBodyOffset(
+    const DArray<int>& batch_body_offset,
+    int num_envs,
+    int flat_body_id)
+{
+    int left = 0;
+    int right = num_envs - 1;
+    int env_id = -1;
+
+    while (left <= right)
+    {
+        const int mid = left + ((right - left) >> 1);
+        const int offset = batch_body_offset[mid];
+        if (offset <= flat_body_id)
+        {
+            env_id = mid;
+            left = mid + 1;
+        }
+        else
+        {
+            right = mid - 1;
+        }
+    }
+
+    return env_id;
+}
+
+__device__ inline bool CD_DecodeBroadPhaseBodyIndex(
+    int encodedId,
+    const DArray<int>& batch_bodies,
+    const DArray<int>& batch_body_offset,
+    int num_envs,
+    int& env_id,
+    int& local_body_id)
+{
+    if (encodedId < 0)
+        return false;
+
+    int envCount = num_envs;
+    if (envCount > batch_bodies.size())
+        envCount = batch_bodies.size();
+    if (envCount > batch_body_offset.size())
+        envCount = batch_body_offset.size();
+    if (envCount <= 0)
+        return false;
+
+    env_id = CD_FindEnvIdByBodyOffset(batch_body_offset, envCount, encodedId);
+    if (env_id < 0 || env_id >= envCount)
+    {
+        printf("invalid env_id in collision detection\n");
+        return false;
+    }
+        
+
+    local_body_id = encodedId - batch_body_offset[env_id];
+
+    if (local_body_id < 0 || local_body_id >= batch_bodies[env_id])
+    {
+        printf("invalid local_body_id in collision detection\n");
+        return false;
+    }
+
+    return true;
+}
+
+__global__ void CD_CountBodyContactListSize(
+    DArray<int> num,
+    DArrayList<int> contactList,
+    DArray<int> batch_bodies,
+    DArray<int> batch_body_offset,
+    int num_envs)
+{
+    int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+    if (tId >= contactList.size())
+        return;
+
+    int env_id = -1;
+    int body_id = -1;
+    if (!CD_DecodeBroadPhaseBodyIndex(
+        tId,
+        batch_bodies,
+        batch_body_offset,
+        num_envs,
+        env_id,
+        body_id))
+    {
+        num[tId] = 0;
+        return;
+    }
+
+    int validCount = 0;
+    auto& list_i = contactList[tId];
+    for (int j = 0; j < list_i.size(); ++j)
+    {
+        int nbr_env_id = -1;
+        int nbr_body_id = -1;
+        if (!CD_DecodeBroadPhaseBodyIndex(
+            list_i[j],
+            batch_bodies,
+            batch_body_offset,
+            num_envs,
+            nbr_env_id,
+            nbr_body_id))
+            continue;
+
+        if (nbr_env_id != env_id || nbr_body_id == body_id)
+            continue;
+
+        ++validCount;
+    }
+
+    num[tId] = validCount;
+}
+
+__global__ void CD_SetupBodyContactIds(
+    DArray<BodyContactId> ids,
+    DArray<int> index,
+    DArrayList<int> contactList,
+    DArray<int> batch_bodies,
+    DArray<int> batch_body_offset,
+    int num_envs)
+{
+    int tId = threadIdx.x + (blockIdx.x * blockDim.x);
+    if (tId >= contactList.size())
+        return;
+
+    int env_id = -1;
+    int body_id = -1;
+    if (!CD_DecodeBroadPhaseBodyIndex(
+        tId,
+        batch_bodies,
+        batch_body_offset,
+        num_envs,
+        env_id,
+        body_id))
+        return;
+
+    const int base = index[tId];
+
+    auto& list_i = contactList[tId];
+    int cursor = 0;
+    for (int j = 0; j < list_i.size(); ++j)
+    {
+        int nbr_env_id = -1;
+        int nbr_body_id = -1;
+        if (!CD_DecodeBroadPhaseBodyIndex(
+            list_i[j],
+            batch_bodies,
+            batch_body_offset,
+            num_envs,
+            nbr_env_id,
+            nbr_body_id))
+            continue;
+
+        if (nbr_env_id != env_id || nbr_body_id == body_id)
+            continue;
+
+        BodyContactId id;
+        id.env_id = env_id;
+        id.body_id_1 = body_id;
+        id.body_id_2 = nbr_body_id;
+        ids[base + cursor] = id;
+        ++cursor;
+    }
 }
 
 template<typename TDataType>
@@ -1222,9 +1423,19 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
     const RigidBody<TDataType>& rb,
     int num_envs)
 {
-    const int totalBodies = num_envs * m_maxBodies;
+    CArray<int> hBatchBodies;
+    hBatchBodies.assign(rb.batch_bodies);
+
+    int totalBodies = 0;
+    for (int env_id = 0; env_id < num_envs && env_id < static_cast<int>(hBatchBodies.size()); ++env_id)
+        totalBodies += hBatchBodies[env_id];
+
     if (totalBodies <= 0)
+    {
+        m_bodyAABBs.resize(0);
+        m_bodyContactPairs.resize(0);
         return false;
+    }
 
     if (m_bodyAABBs.size() != static_cast<uint>(totalBodies))
         m_bodyAABBs.resize(totalBodies);
@@ -1235,6 +1446,7 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
         CD_ComputeBodyAABBsKernel<TDataType><<<blocks, threads>>>(
             m_bodyAABBs,
             rb.batch_bodies,
+            rb.batch_body_offset,
             rb.batch_pos,
             rb.batch_rot,
             rb.shape_type,
@@ -1243,13 +1455,59 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
             rb.spheres,
             rb.capsules,
             m_dHat,
-            m_maxBodies);
+            num_envs,
+            totalBodies);
         cudaDeviceSynchronize();
     }
 
     m_bodyBroadPhase->inSource()->assign(m_bodyAABBs);
     m_bodyBroadPhase->inTarget()->assign(m_bodyAABBs);
     m_bodyBroadPhase->update();
+
+    auto& contactList = m_bodyBroadPhase->outContactList()->getData();
+    if (contactList.size() == 0 || contactList.elementSize() == 0)
+    {
+        m_bodyContactPairs.resize(0);
+        return true;
+    }
+
+    DArray<int> count(contactList.size());
+    {
+        const int threads = 128;
+        const int blocks = (contactList.size() + threads - 1) / threads;
+        CD_CountBodyContactListSize<<<blocks, threads>>>(
+            count,
+            contactList,
+            rb.batch_bodies,
+            rb.batch_body_offset,
+            num_envs);
+        cudaDeviceSynchronize();
+    }
+
+    const int totalSize = count.size() > 0
+        ? m_reduce.accumulate(count.begin(), count.size())
+        : 0;
+    if (totalSize <= 0)
+    {
+        m_bodyContactPairs.resize(0);
+        return true;
+    }
+
+    m_scan.exclusive(count);
+
+    m_bodyContactPairs.resize(totalSize);
+    {
+        const int threads = 128;
+        const int blocks = (contactList.size() + threads - 1) / threads;
+        CD_SetupBodyContactIds<<<blocks, threads>>>(
+            m_bodyContactPairs,
+            count,
+            contactList,
+            rb.batch_bodies,
+            rb.batch_body_offset,
+            num_envs);
+        cudaDeviceSynchronize();
+    }
 
     return true;
 }
@@ -1341,10 +1599,13 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
 {
     // detectMeshMeshInternal(rb, out, num_envs);
 
+    if (m_bodyContactPairs.size() == 0)
+        return;
+
     CArray<int> hBatchBodies;
-    CArrayList<int> hContactList;
+    CArray<BodyContactId> hBodyContactPairs;
     hBatchBodies.assign(rb.batch_bodies);
-    hContactList.assign(m_bodyBroadPhase->outContactList()->getData());
+    hBodyContactPairs.assign(m_bodyContactPairs);
 
     CArray2D<int> hShapeType;
     CArray2D<int> hShapeIdx;
@@ -1363,47 +1624,63 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     rb.is_static.Download(hIsStatic);
     rb.parent_idx.Download(hParentIdx);
 
-    std::vector<int> shape2BodyFlatHost;
-    std::vector<Coord> shapeCentersHost;
-    std::vector<Matrix> shapeRotationsHost;
-    std::vector<Coord> shapeHalfLengthsHost;
-    std::vector<Coord> shapeInvHalfLengthsHost;
-    std::vector<int> flatBodyToShape(num_envs * m_maxBodies, -1);
-    shape2BodyFlatHost.reserve(num_envs * 8);
-    shapeCentersHost.reserve(num_envs * 8);
-    shapeRotationsHost.reserve(num_envs * 8);
-    shapeHalfLengthsHost.reserve(num_envs * 8);
-    shapeInvHalfLengthsHost.reserve(num_envs * 8);
+    std::unordered_set<uint64_t> pairSet;
+    std::vector<PairUU> shapePairsHost;
+    shapePairsHost.reserve(128);
 
-    for (int env = 0; env < num_envs; ++env)
+    for (int q = 0; q < static_cast<int>(hBodyContactPairs.size()); ++q)
     {
-        const int bodyCount = hBatchBodies[env];
-        for (int b = 0; b < bodyCount; ++b)
+        const BodyContactId pair = hBodyContactPairs[q];
+        const int envA = pair.env_id;
+        if (envA < 0 || envA >= num_envs)
+            continue;
+        const int bodyA = pair.body_id_1;
+        const int bodyB = pair.body_id_2;
+        if (bodyA < 0 || bodyA >= m_maxBodies || bodyB < 0 || bodyB >= m_maxBodies)
+            continue;
+        if (bodyA >= hBatchBodies[envA] || bodyB >= hBatchBodies[envA])
+            continue;
+        if (bodyA == bodyB)
+            continue;
+        if (hShapeType(envA, bodyA) != 1 || hShapeType(envA, bodyB) != 1)
+            continue;
+
+        int a = bodyA;
+        int b = bodyB;
+        if (a > b)
         {
-            if (hShapeType(env, b) != 1)
-                continue;
-
-            const int sidx = hShapeIdx(env, b);
-            const BoxInfo box = hBoxes(env, sidx);
-            const Coord bodyPos = hPos(env, b);
-            const Matrix bodyRot = hRot(env, b);
-
-            const int flatBody = env * m_maxBodies + b;
-            const int shapeId = static_cast<int>(shape2BodyFlatHost.size());
-            flatBodyToShape[flatBody] = shapeId;
-            shape2BodyFlatHost.push_back(flatBody);
-            shapeCentersHost.push_back(bodyPos + bodyRot * box.center);
-            shapeRotationsHost.push_back(bodyRot * box.rot.toMatrix3x3());
-            shapeHalfLengthsHost.push_back(box.halfLength);
-            shapeInvHalfLengthsHost.push_back(Coord(
-                box.halfLength[0] != Real(0) ? Real(1) / box.halfLength[0] : Real(0),
-                box.halfLength[1] != Real(0) ? Real(1) / box.halfLength[1] : Real(0),
-                box.halfLength[2] != Real(0) ? Real(1) / box.halfLength[2] : Real(0)));
+            const int t = a;
+            a = b;
+            b = t;
         }
+
+        if (!hIsStatic.Empty()
+            && hIsStatic.AtBlock(envA, a)
+            && hIsStatic.AtBlock(envA, b))
+            continue;
+        if (!hParentIdx.Empty())
+        {
+            if (hParentIdx.AtBlock(envA, a) == b
+                || hParentIdx.AtBlock(envA, b) == a)
+                continue;
+        }
+
+        const uint64_t key = (static_cast<uint64_t>(envA) << 40)
+            | (static_cast<uint64_t>(a) << 20)
+            | static_cast<uint64_t>(b);
+        if (!pairSet.insert(key).second)
+            continue;
+
+        const int shapeA = envA * m_maxBodies + a;
+        const int shapeB = envA * m_maxBodies + b;
+        shapePairsHost.emplace_back(static_cast<uint>(shapeA), static_cast<uint>(shapeB));
     }
 
-    const int shapeCount = static_cast<int>(shape2BodyFlatHost.size());
-    if (shapeCount < 2)
+    if (shapePairsHost.empty())
+        return;
+
+    const int shapeCount = num_envs * m_maxBodies;
+    if (shapeCount <= 0)
         return;
 
     refreshMeshShapeLayoutCache(shapeCount);
@@ -1415,11 +1692,35 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     CArray<Coord> dShapeInvHalfLengths(shapeCount);
     for (int i = 0; i < shapeCount; ++i)
     {
-        dShape2BodyFlat[i] = shape2BodyFlatHost[i];
-        dShapeCenters[i] = shapeCentersHost[i];
-        dShapeRotations[i] = shapeRotationsHost[i];
-        dShapeHalfLengths[i] = shapeHalfLengthsHost[i];
-        dShapeInvHalfLengths[i] = shapeInvHalfLengthsHost[i];
+        dShape2BodyFlat[i] = i;
+        dShapeCenters[i] = Coord(0);
+        dShapeRotations[i] = Matrix::identityMatrix();
+        dShapeHalfLengths[i] = Coord(0);
+        dShapeInvHalfLengths[i] = Coord(0);
+    }
+
+    for (int env = 0; env < num_envs; ++env)
+    {
+        const int bodyCount = hBatchBodies[env] < m_maxBodies ? hBatchBodies[env] : m_maxBodies;
+        for (int b = 0; b < bodyCount; ++b)
+        {
+            if (hShapeType(env, b) != 1)
+                continue;
+
+            const int shapeId = env * m_maxBodies + b;
+            const int sidx = hShapeIdx(env, b);
+            const BoxInfo box = hBoxes(env, sidx);
+            const Coord bodyPos = hPos(env, b);
+            const Matrix bodyRot = hRot(env, b);
+
+            dShapeCenters[shapeId] = bodyPos + bodyRot * box.center;
+            dShapeRotations[shapeId] = bodyRot * box.rot.toMatrix3x3();
+            dShapeHalfLengths[shapeId] = box.halfLength;
+            dShapeInvHalfLengths[shapeId] = Coord(
+                box.halfLength[0] != Real(0) ? Real(1) / box.halfLength[0] : Real(0),
+                box.halfLength[1] != Real(0) ? Real(1) / box.halfLength[1] : Real(0),
+                box.halfLength[2] != Real(0) ? Real(1) / box.halfLength[2] : Real(0));
+        }
     }
 
     m_shape2BodyFlat.assign(dShape2BodyFlat);
@@ -1427,77 +1728,6 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     m_shapeRotations.assign(dShapeRotations);
     m_shapeHalfLengths.assign(dShapeHalfLengths);
     m_shapeInvHalfLengths.assign(dShapeInvHalfLengths);
-
-    std::unordered_set<uint64_t> pairSet;
-    std::vector<PairUU> shapePairsHost;
-    shapePairsHost.reserve(128);
-
-    const int totalBodies = num_envs * m_maxBodies;
-    for (int q = 0; q < totalBodies && q < static_cast<int>(hContactList.size()); ++q)
-    {
-        const int envA = q / m_maxBodies;
-        const int bodyA = q - envA * m_maxBodies;
-        if (envA < 0 || envA >= num_envs)
-            continue;
-        if (bodyA < 0 || bodyA >= m_maxBodies || bodyA >= hBatchBodies[envA])
-            continue;
-        if (hShapeType(envA, bodyA) != 1)
-            continue;
-
-        auto& nbr = hContactList[q];
-        for (auto it = nbr.begin(); it != nbr.end(); ++it)
-        {
-            const int r = *it;
-            const int envB = r / m_maxBodies;
-            const int bodyB = r - envB * m_maxBodies;
-            if (envA != envB)
-                continue;
-            if (bodyB < 0 || bodyB >= m_maxBodies || bodyB >= hBatchBodies[envA])
-                continue;
-            if (bodyA == bodyB)
-                continue;
-            if (hShapeType(envA, bodyB) != 1)
-                continue;
-
-            int a = bodyA;
-            int b = bodyB;
-            if (a > b)
-            {
-                const int t = a;
-                a = b;
-                b = t;
-            }
-
-            if (!hIsStatic.Empty()
-                && hIsStatic.AtBlock(envA, a)
-                && hIsStatic.AtBlock(envA, b))
-                continue;
-            if (!hParentIdx.Empty())
-            {
-                if (hParentIdx.AtBlock(envA, a) == b
-                    || hParentIdx.AtBlock(envA, b) == a)
-                    continue;
-            }
-
-            const uint64_t key = (static_cast<uint64_t>(envA) << 40)
-                | (static_cast<uint64_t>(a) << 20)
-                | static_cast<uint64_t>(b);
-            if (!pairSet.insert(key).second)
-                continue;
-
-            const int flatA = envA * m_maxBodies + a;
-            const int flatB = envA * m_maxBodies + b;
-            const int shapeA = flatBodyToShape[flatA];
-            const int shapeB = flatBodyToShape[flatB];
-            if (shapeA < 0 || shapeB < 0)
-                continue;
-
-            shapePairsHost.emplace_back(static_cast<uint>(shapeA), static_cast<uint>(shapeB));
-        }
-    }
-
-    if (shapePairsHost.empty())
-        return;
 
     CArray<PairUU> dShapePairs(static_cast<uint>(shapePairsHost.size()));
     for (uint i = 0; i < dShapePairs.size(); ++i)

@@ -23,6 +23,13 @@ namespace dyno {
     template<typename TDataType>
     class CollisionDetectionBroadPhase;
 
+    struct BodyContactId
+	{
+        int env_id = INVLIDA_ID;
+		int body_id_1 = INVLIDA_ID; // env-local rigid body id
+		int body_id_2 = INVLIDA_ID; // env-local rigid body id
+	};
+
     template<typename TDataType>
     class MeshCollisionDetector
     {
@@ -67,6 +74,7 @@ namespace dyno {
         std::vector<Triangle> m_cubeTrianglesHost;
 
         DArray<AABB> m_bodyAABBs;
+        DArray<BodyContactId> m_bodyContactPairs;
         DArray<BodyPair> m_bodyPairs;
         std::shared_ptr<CollisionDetectionBroadPhase<TDataType>> m_bodyBroadPhase;
 

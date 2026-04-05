@@ -48,6 +48,8 @@ namespace dyno {
         void Initialize(int num_envs, int max_bodies, const RigidBody<TDataType>& rb);
         void Detect(const RigidBody<TDataType>& rb, BatchCollisionConstraints& out, int num_envs);
         void DetectGround(const RigidBody<TDataType>& rb, BatchCollisionConstraints& out, int num_envs);
+        int RegisterMeshTemplate(const std::vector<Coord>& vertices, const std::vector<Triangle>& triangles);
+        void SetBodyMeshTemplate(int envId, int bodyId, int templateId);
 
     private:
         bool broad_phase(const RigidBody<TDataType>& rb, int num_envs);
@@ -55,7 +57,7 @@ namespace dyno {
         void narrow_phase(const RigidBody<TDataType>& rb,
             BatchCollisionConstraints& out,
             int num_envs);
-        void refreshMeshShapeLayoutCache(const DArray<int>& batchBodies, int num_envs);
+        void refreshMeshShapeLayoutCache(const RigidBody<TDataType>& rb, int num_envs);
         void runMeshMeshNarrowPhase(const RigidBody<TDataType>& rb,
             const DArray<BodyContactId>& bodyPairs,
             BatchCollisionConstraints& out,
@@ -63,20 +65,30 @@ namespace dyno {
         void detectMeshMeshInternal(const RigidBody<TDataType>& rb,
             BatchCollisionConstraints& out,
             int num_envs);
+        void rebuildMeshTemplateViews();
+        void initializeDefaultBodyTemplateMapping(const RigidBody<TDataType>& rb, int num_envs);
+        int hostBodyTemplateId(int envId, int bodyId) const;
+        int hostBodyTriOffset(int envId, int bodyId) const;
+        int hostBodyEdgeOffset(int envId, int bodyId) const;
 
     private:
         bool m_initialized = false;
         int m_numEnvs = 0;
         int m_maxBodies = 0;
+        int m_meshTemplateVersion = 0;
+        int m_cachedMeshLayoutVersion = -1;
         int m_cachedMeshLayoutEnvCount = -1;
         std::vector<int> m_cachedMeshBodyCounts;
         Real m_dHat = Real(1e-3);
         Real m_edgeEdgeActivationMargin = Real(3e-3);
 
-        MeshTemplateData<TDataType> m_cubeTemplate;
-        std::shared_ptr<TriangleSet<TDataType>> m_cubeTemplateTriSet;
-        std::vector<Coord> m_cubeVerticesHost;
-        std::vector<Triangle> m_cubeTrianglesHost;
+        std::vector<MeshTemplateData<TDataType>> m_meshTemplates;
+        std::vector<std::shared_ptr<TriangleSet<TDataType>>> m_meshTemplateBuilders;
+        DArray<MeshTemplateKernelView<TDataType>> m_meshTemplateViews;
+        DevArr2D<int> m_bodyToMeshTemplate;
+        std::vector<int> m_bodyToMeshTemplateHost;
+        std::vector<int> m_body2TriOffsetsHost;
+        std::vector<int> m_body2EdgeOffsetsHost;
 
         DArray<AABB> m_bodyAABBs;
         DArray<BodyContactId> m_bodyContactPairs;
@@ -103,6 +115,8 @@ namespace dyno {
         DArray<AABB> m_triAabbsWorld;
         DArray<Coord> m_faceNormalsWorld;
         DArray<Coord> m_edgeNormalsWorld;
+        DArray<int> m_worklistTriIds;
+        DArray<int> m_worklistEdgeIds;
 
         DArray<int> m_patchPairTriPairCounts;
         DArray<int> m_patchPairTriPairOffsets;

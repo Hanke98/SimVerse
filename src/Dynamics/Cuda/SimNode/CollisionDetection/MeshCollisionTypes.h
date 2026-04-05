@@ -47,6 +47,33 @@ namespace dyno {
         LinearBVH<TDataType> patchBVH;
     };
 
+    template<typename TDataType>
+    struct MeshTemplateKernelView {
+        using Real = typename TDataType::Real;
+        using Coord = typename TDataType::Coord;
+        using AABB = TAlignedBox3D<Real>;
+        using Triangle = typename TopologyModule::Triangle;
+        using Edge = typename TopologyModule::Edge;
+        using Tri2Edg = typename TopologyModule::Tri2Edg;
+        using Edg2Tri = typename TopologyModule::Edg2Tri;
+
+        int numVertices = 0;
+        int numTriangles = 0;
+        int numPatches = 0;
+        int numEdges = 0;
+
+        DArray<Coord> vertices;
+        DArray<Triangle> triangles;
+        DArray<int> patchOffsets;
+        DArray<int> patchFaces;
+        DArray<AABB> patchAABBs;
+        DArray<Edge> edges;
+        DArray<Tri2Edg> triangleEdges;
+        DArray<Edg2Tri> edgeAdjacentFaces;
+        DArray<int> vertexFaceOffsets;
+        DArray<int> vertexFaceIndices;
+    };
+
     struct BodyPair {
         int env_id;
         int body_a;   // canonical: body_a < body_b

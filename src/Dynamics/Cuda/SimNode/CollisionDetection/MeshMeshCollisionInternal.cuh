@@ -40,12 +40,9 @@ struct MeshShapeView
     using Tri2Edg = TopologyModule::Tri2Edg;
     using Edg2Tri = TopologyModule::Edg2Tri;
     using ContactPair = TContactPair<Real>;
+    using TemplateView = MeshTemplateKernelView<TDataType>;
 
-    DArray<Coord> templateVertices;
-    DArray<Triangle> templateTriangles;
-    DArray<Tri2Edg> triangleEdges;
-    DArray<Edge> edgeVertices;
-    DArray<Edg2Tri> edgeAdjacentFaces;
+    DArray<TemplateView> meshTemplates;
     DArray<BodyContactId> bodyPairs;
     DArray<int> batchBodies;
     DArray2D<int> shapeTypes;
@@ -54,6 +51,7 @@ struct MeshShapeView
     DArray2D<Matrix> batchRotations;
     DArray2D<BoxInfo> boxes;
     int maxBodies = 0;
+    DevArr2D<int> bodyToMeshTemplate;
 
     DevArr2D<int> body2PatchOffsets;
     DevArr2D<int> body2TriOffsets;
@@ -65,7 +63,6 @@ struct MeshShapeView
     DArray<int> patch2TriOffsets;
     DArray<int> patch2TriIndices;
 
-    DArray<AABB> templatePatchAabbs;
     DArray<PatchPair> patchPairs;
 
     DArray<AABB> triangleAabbsWorld;
@@ -237,9 +234,69 @@ DYN_FUNC inline int getBodyLayoutBase(
 }
 
 template<typename View>
-DYN_FUNC inline int getTemplatePatchCount(const View& view)
+DYN_FUNC inline int getBodyTemplateId(
+    const View& view,
+    int envId,
+    int bodyId)
 {
-    return view.templatePatchAabbs.size() > 0 ? static_cast<int>(view.templatePatchAabbs.size()) : 1;
+    if (!isValidBodyId(view, envId, bodyId))
+        return -1;
+    if (envId < 0 || envId >= view.bodyToMeshTemplate.NumBlocks())
+        return -1;
+    if (bodyId < 0 || bodyId >= view.bodyToMeshTemplate.BlockSize(envId))
+        return -1;
+    const int templateId = view.bodyToMeshTemplate(envId, bodyId);
+    return templateId >= 0 && templateId < view.meshTemplates.size() ? templateId : -1;
+}
+
+template<typename View>
+DYN_FUNC inline const typename View::TemplateView* getBodyTemplateView(
+    const View& view,
+    int envId,
+    int bodyId)
+{
+    const int templateId = getBodyTemplateId(view, envId, bodyId);
+    return templateId >= 0 ? &view.meshTemplates[templateId] : nullptr;
+}
+
+template<typename View>
+DYN_FUNC inline int getBodyTemplatePatchCount(
+    const View& view,
+    int envId,
+    int bodyId)
+{
+    const auto* tpl = getBodyTemplateView(view, envId, bodyId);
+    return tpl != nullptr ? (tpl->numPatches > 0 ? tpl->numPatches : 1) : 0;
+}
+
+template<typename View>
+DYN_FUNC inline int getBodyTemplateTriangleCount(
+    const View& view,
+    int envId,
+    int bodyId)
+{
+    const auto* tpl = getBodyTemplateView(view, envId, bodyId);
+    return tpl != nullptr ? tpl->numTriangles : 0;
+}
+
+template<typename View>
+DYN_FUNC inline int getBodyTemplateEdgeCount(
+    const View& view,
+    int envId,
+    int bodyId)
+{
+    const auto* tpl = getBodyTemplateView(view, envId, bodyId);
+    return tpl != nullptr ? tpl->numEdges : 0;
+}
+
+template<typename View>
+DYN_FUNC inline int getBodyTemplateVertexCount(
+    const View& view,
+    int envId,
+    int bodyId)
+{
+    const auto* tpl = getBodyTemplateView(view, envId, bodyId);
+    return tpl != nullptr ? tpl->numVertices : 0;
 }
 
 template<typename View>
@@ -291,16 +348,20 @@ DYN_FUNC inline bool getWorldVertex(
     int bodyId,
     typename View::Coord& p)
 {
+    const auto* tpl = getBodyTemplateView(view, envId, bodyId);
+    if (tpl == nullptr)
+        return false;
+
     const int begin = getBodyLayoutBase(view, view.body2VertexOffsets, envId, bodyId);
     if (begin < 0)
         return false;
 
-    const int end = begin + static_cast<int>(view.templateVertices.size());
+    const int end = begin + tpl->numVertices;
     if (globalVertexId < begin || globalVertexId >= end)
         return false;
 
     const int localVertexId = globalVertexId - begin;
-    if (localVertexId < 0 || localVertexId >= view.templateVertices.size())
+    if (localVertexId < 0 || localVertexId >= tpl->numVertices)
         return false;
 
     typename View::Coord shapeCenter;
@@ -309,7 +370,7 @@ DYN_FUNC inline bool getWorldVertex(
     if (!getBodyBoxTransform(view, envId, bodyId, shapeCenter, shapeRotation, halfLength))
         return false;
 
-    const auto& local = view.templateVertices[localVertexId];
+    const auto& local = tpl->vertices[localVertexId];
     const auto scaled = scalePoint<typename View::Real, typename View::Coord>(local, halfLength);
     p = shapeCenter + shapeRotation * scaled;
     return true;
@@ -325,19 +386,23 @@ DYN_FUNC inline bool getWorldTriangle(
     typename View::Coord& p1,
     typename View::Coord& p2)
 {
+    const auto* tpl = getBodyTemplateView(view, envId, bodyId);
+    if (tpl == nullptr)
+        return false;
+
     const int begin = getBodyLayoutBase(view, view.body2TriOffsets, envId, bodyId);
     if (begin < 0)
         return false;
 
-    const int end = begin + static_cast<int>(view.templateTriangles.size());
+    const int end = begin + tpl->numTriangles;
     if (globalTriId < begin || globalTriId >= end)
         return false;
 
     const int localTriId = globalTriId - begin;
-    if (localTriId < 0 || localTriId >= view.templateTriangles.size())
+    if (localTriId < 0 || localTriId >= tpl->numTriangles)
         return false;
 
-    const auto tri = view.templateTriangles[localTriId];
+    const auto tri = tpl->triangles[localTriId];
     const int vertexBase = getBodyLayoutBase(view, view.body2VertexOffsets, envId, bodyId);
     if (vertexBase < 0)
         return false;
@@ -355,19 +420,23 @@ DYN_FUNC inline bool getWorldEdge(
     int bodyId,
     TSegment3D<typename View::Real>& segment)
 {
+    const auto* tpl = getBodyTemplateView(view, envId, bodyId);
+    if (tpl == nullptr)
+        return false;
+
     const int begin = getBodyLayoutBase(view, view.body2EdgeOffsets, envId, bodyId);
     if (begin < 0)
         return false;
 
-    const int end = begin + static_cast<int>(view.edgeVertices.size());
+    const int end = begin + tpl->numEdges;
     if (globalEdgeId < begin || globalEdgeId >= end)
         return false;
 
     const int localEdgeId = globalEdgeId - begin;
-    if (localEdgeId < 0 || localEdgeId >= view.edgeVertices.size())
+    if (localEdgeId < 0 || localEdgeId >= tpl->numEdges)
         return false;
 
-    const auto edge = view.edgeVertices[localEdgeId];
+    const auto edge = tpl->edges[localEdgeId];
     typename View::Coord p0;
     typename View::Coord p1;
     const int vertexBase = getBodyLayoutBase(view, view.body2VertexOffsets, envId, bodyId);
@@ -457,7 +526,6 @@ __global__ void CountPatchPairHitsKernel(
     DArray<int> counts,
     DArray<int> sourcePatchIds,
     DArray<MeshBodyId> sourceTargetBodies,
-    DArray<typename View::AABB> templatePatchAabbs,
     LinearBVH<TDataType> templatePatchBvh,
     View view)
 {
@@ -473,7 +541,8 @@ __global__ void CountPatchPairHitsKernel(
         return;
     }
 
-    const int targetPatchCount = getTemplatePatchCount(view);
+    const auto* targetTemplate = getBodyTemplateView(view, targetBody.env_id, targetBody.body_id);
+    const int targetPatchCount = getBodyTemplatePatchCount(view, targetBody.env_id, targetBody.body_id);
     if (targetPatchCount <= 0)
     {
         counts[sourceId] = 0;
@@ -489,14 +558,18 @@ __global__ void CountPatchPairHitsKernel(
 
     if (targetPatchCount == 1)
     {
-        counts[sourceId] = (templatePatchAabbs.size() > 0 && sourceAabb.checkOverlap(templatePatchAabbs[0])) ? 1 : 0;
+        counts[sourceId] = (targetTemplate != nullptr
+            && targetTemplate->patchAABBs.size() > 0
+            && sourceAabb.checkOverlap(targetTemplate->patchAABBs[0])) ? 1 : 0;
         return;
     }
 
     int hitCount = 0;
     for (int localPatchId = 0; localPatchId < targetPatchCount; ++localPatchId)
     {
-        if (localPatchId < templatePatchAabbs.size() && sourceAabb.checkOverlap(templatePatchAabbs[localPatchId]))
+        if (targetTemplate != nullptr
+            && localPatchId < targetTemplate->patchAABBs.size()
+            && sourceAabb.checkOverlap(targetTemplate->patchAABBs[localPatchId]))
             ++hitCount;
     }
     counts[sourceId] = hitCount;
@@ -507,7 +580,6 @@ __global__ void RequestPatchPairHitsKernel(
     DArrayList<int> hitLists,
     DArray<int> sourcePatchIds,
     DArray<MeshBodyId> sourceTargetBodies,
-    DArray<typename View::AABB> templatePatchAabbs,
     LinearBVH<TDataType> templatePatchBvh,
     View view)
 {
@@ -523,7 +595,8 @@ __global__ void RequestPatchPairHitsKernel(
     if (!hasBodyLayoutEntry(view, view.body2PatchOffsets, targetBody.env_id, targetBody.body_id))
         return;
 
-    const int targetPatchCount = getTemplatePatchCount(view);
+    const auto* targetTemplate = getBodyTemplateView(view, targetBody.env_id, targetBody.body_id);
+    const int targetPatchCount = getBodyTemplatePatchCount(view, targetBody.env_id, targetBody.body_id);
     if (targetPatchCount <= 0)
         return;
 
@@ -533,14 +606,18 @@ __global__ void RequestPatchPairHitsKernel(
 
     if (targetPatchCount == 1)
     {
-        if (templatePatchAabbs.size() > 0 && sourceAabb.checkOverlap(templatePatchAabbs[0]))
+        if (targetTemplate != nullptr
+            && targetTemplate->patchAABBs.size() > 0
+            && sourceAabb.checkOverlap(targetTemplate->patchAABBs[0]))
             list.insert(0);
         return;
     }
 
     for (int localPatchId = 0; localPatchId < targetPatchCount; ++localPatchId)
     {
-        if (localPatchId < templatePatchAabbs.size() && sourceAabb.checkOverlap(templatePatchAabbs[localPatchId]))
+        if (targetTemplate != nullptr
+            && localPatchId < targetTemplate->patchAABBs.size()
+            && sourceAabb.checkOverlap(targetTemplate->patchAABBs[localPatchId]))
             list.insert(localPatchId);
     }
 }
@@ -604,14 +681,11 @@ __global__ void SetPatchPairsFromHitListsKernel(
 }
 
 template<typename View>
-__global__ void PrepareTriangleWorldDataKernel(View view)
+__device__ inline void PrepareTriangleWorldDataAtId(
+    View view,
+    int triId)
 {
     using Coord = typename View::Coord;
-    using Real = typename View::Real;
-
-    int triId = threadIdx.x + blockIdx.x * blockDim.x;
-    if (triId >= view.triangleAabbsWorld.size() || triId >= view.faceNormalsWorld.size())
-        return;
 
     if (triId >= view.tri2Body.size())
         return;
@@ -636,22 +710,47 @@ __global__ void PrepareTriangleWorldDataKernel(View view)
 }
 
 template<typename View>
-__global__ void PrepareEdgeNormalsWorldKernel(View view)
+__global__ void PrepareTriangleWorldDataKernel(View view)
+{
+    int triId = threadIdx.x + blockIdx.x * blockDim.x;
+    if (triId >= view.triangleAabbsWorld.size() || triId >= view.faceNormalsWorld.size())
+        return;
+
+    PrepareTriangleWorldDataAtId(view, triId);
+}
+
+template<typename View>
+__global__ void PrepareTriangleWorldDataWorklistKernel(
+    DArray<int> triIds,
+    View view)
+{
+    int workId = threadIdx.x + blockIdx.x * blockDim.x;
+    if (workId >= triIds.size())
+        return;
+
+    const int triId = triIds[workId];
+    if (triId < 0 || triId >= view.triangleAabbsWorld.size() || triId >= view.faceNormalsWorld.size())
+        return;
+
+    PrepareTriangleWorldDataAtId(view, triId);
+}
+
+template<typename View>
+__device__ inline void PrepareEdgeNormalsWorldAtId(
+    View view,
+    int edgeId)
 {
     using Coord = typename View::Coord;
     using Real = typename View::Real;
-
-    int edgeId = threadIdx.x + blockIdx.x * blockDim.x;
-    if (edgeId >= view.edgeNormalsWorld.size())
-        return;
 
     if (edgeId >= view.edge2Body.size())
         return;
 
     const MeshBodyId owner = view.edge2Body[edgeId];
+    const auto* ownerTemplate = getBodyTemplateView(view, owner.env_id, owner.body_id);
     const int edgeBase = getBodyLayoutBase(view, view.body2EdgeOffsets, owner.env_id, owner.body_id);
     const int triBase = getBodyLayoutBase(view, view.body2TriOffsets, owner.env_id, owner.body_id);
-    if (edgeBase < 0 || triBase < 0)
+    if (ownerTemplate == nullptr || edgeBase < 0 || triBase < 0)
     {
         view.edgeNormalsWorld[edgeId] = Coord(1, 0, 0);
         return;
@@ -661,9 +760,9 @@ __global__ void PrepareEdgeNormalsWorldKernel(View view)
     const Real epsSqr = Real(1e-12);
 
     Coord edgeNormal(0);
-    if (localEdgeId >= 0 && localEdgeId < view.edgeAdjacentFaces.size())
+    if (localEdgeId >= 0 && localEdgeId < ownerTemplate->numEdges)
     {
-        const auto adjacentFaces = view.edgeAdjacentFaces[localEdgeId];
+        const auto adjacentFaces = ownerTemplate->edgeAdjacentFaces[localEdgeId];
         const int face0 = adjacentFaces[0] != -1 ? triBase + adjacentFaces[0] : -1;
         const int face1 = adjacentFaces[1] != -1 ? triBase + adjacentFaces[1] : -1;
         if (face0 != -1 && face0 < view.faceNormalsWorld.size()
@@ -695,6 +794,32 @@ __global__ void PrepareEdgeNormalsWorldKernel(View view)
     }
 
     view.edgeNormalsWorld[edgeId] = normalizeOrFallback(edgeNormal, Coord(1, 0, 0));
+}
+
+template<typename View>
+__global__ void PrepareEdgeNormalsWorldKernel(View view)
+{
+    int edgeId = threadIdx.x + blockIdx.x * blockDim.x;
+    if (edgeId >= view.edgeNormalsWorld.size())
+        return;
+
+    PrepareEdgeNormalsWorldAtId(view, edgeId);
+}
+
+template<typename View>
+__global__ void PrepareEdgeNormalsWorldWorklistKernel(
+    DArray<int> edgeIds,
+    View view)
+{
+    int workId = threadIdx.x + blockIdx.x * blockDim.x;
+    if (workId >= edgeIds.size())
+        return;
+
+    const int edgeId = edgeIds[workId];
+    if (edgeId < 0 || edgeId >= view.edgeNormalsWorld.size())
+        return;
+
+    PrepareEdgeNormalsWorldAtId(view, edgeId);
 }
 
 DYN_FUNC inline int getPairPassSlot(int pairId, int passType)
@@ -965,11 +1090,12 @@ DYN_FUNC inline bool tryEdgeTriangleContact(
 
     const int targetTriBase = getBodyLayoutBase(view, view.body2TriOffsets, targetBody.env_id, targetBody.body_id);
     const int targetEdgeBase = getBodyLayoutBase(view, view.body2EdgeOffsets, targetBody.env_id, targetBody.body_id);
-    if (targetTriBase < 0 || targetEdgeBase < 0)
+    const auto* targetTemplate = getBodyTemplateView(view, targetBody.env_id, targetBody.body_id);
+    if (targetTemplate == nullptr || targetTriBase < 0 || targetEdgeBase < 0)
         return false;
 
     const int targetLocalTriId = targetTriId - targetTriBase;
-    if (targetLocalTriId < 0 || targetLocalTriId >= view.triangleEdges.size())
+    if (targetLocalTriId < 0 || targetLocalTriId >= targetTemplate->numTriangles)
         return false;
 
     if (regionType == MESH_REGION_FACE)
@@ -998,7 +1124,7 @@ DYN_FUNC inline bool tryEdgeTriangleContact(
 
     if (regionType == MESH_REGION_EDGE)
     {
-        const int targetEdgeId = targetEdgeBase + view.triangleEdges[targetLocalTriId][localEdgeId];
+        const int targetEdgeId = targetEdgeBase + targetTemplate->triangleEdges[targetLocalTriId][localEdgeId];
         if (!buildEdgeEdgeContact(view, sourceEdgeId, sourceBody, targetEdgeId, targetBody, contactPoint, nTarget, depth))
             return false;
         contactType = CT_EDGE_EDGE;
@@ -1009,7 +1135,7 @@ DYN_FUNC inline bool tryEdgeTriangleContact(
     {
         int edge0 = -1;
         int edge1 = -1;
-        if (!getLocalIncidentEdges(view.triangleEdges[targetLocalTriId], localVertexId, edge0, edge1))
+        if (!getLocalIncidentEdges(targetTemplate->triangleEdges[targetLocalTriId], localVertexId, edge0, edge1))
             return false;
 
         int bestTargetEdge = -1;
@@ -1181,88 +1307,79 @@ DYN_FUNC inline bool buildTriPairContext(
     return true;
 }
 
+template<typename View>
 __global__ void CountTriPairsPerBodyPairKernel(
     DArray<int> counts,
-    DArray<BodyContactId> bodyPairs,
-    DArray<int> batchBodies,
-    DArray2D<int> shapeTypes,
-    DevArr2D<int> body2TriOffsets,
-    int triPerBody)
+    View view)
 {
     int pairId = threadIdx.x + blockIdx.x * blockDim.x;
-    if (pairId >= counts.size() || pairId >= bodyPairs.size())
+    if (pairId >= counts.size() || pairId >= view.bodyPairs.size())
         return;
 
-    const BodyContactId pair = bodyPairs[pairId];
-    if (pair.env_id < 0 || pair.env_id >= batchBodies.size()
+    const BodyContactId pair = view.bodyPairs[pairId];
+    if (pair.env_id < 0 || pair.env_id >= view.batchBodies.size()
         || pair.body_id_1 < 0 || pair.body_id_2 < 0
-        || pair.body_id_1 >= batchBodies[pair.env_id]
-        || pair.body_id_2 >= batchBodies[pair.env_id])
+        || pair.body_id_1 >= view.batchBodies[pair.env_id]
+        || pair.body_id_2 >= view.batchBodies[pair.env_id])
     {
         counts[pairId] = 0;
         return;
     }
 
-    if (shapeTypes(pair.env_id, pair.body_id_1) != 1
-        || shapeTypes(pair.env_id, pair.body_id_2) != 1)
+    if (view.shapeTypes(pair.env_id, pair.body_id_1) != 1
+        || view.shapeTypes(pair.env_id, pair.body_id_2) != 1)
     {
         counts[pairId] = 0;
         return;
     }
 
-    if (triPerBody <= 0
-        || pair.env_id >= body2TriOffsets.NumBlocks()
-        || pair.body_id_1 >= body2TriOffsets.BlockSize(pair.env_id)
-        || pair.body_id_2 >= body2TriOffsets.BlockSize(pair.env_id))
+    const int begin0 = getBodyLayoutBase(view, view.body2TriOffsets, pair.env_id, pair.body_id_1);
+    const int begin1 = getBodyLayoutBase(view, view.body2TriOffsets, pair.env_id, pair.body_id_2);
+    const int count0 = getBodyTemplateTriangleCount(view, pair.env_id, pair.body_id_1);
+    const int count1 = getBodyTemplateTriangleCount(view, pair.env_id, pair.body_id_2);
+    if (begin0 < 0 || begin1 < 0 || count0 <= 0 || count1 <= 0)
     {
         counts[pairId] = 0;
         return;
     }
 
-    counts[pairId] = triPerBody * triPerBody;
+    counts[pairId] = count0 * count1;
 }
 
+template<typename View>
 __global__ void SetTriPairsFromBodyPairsKernel(
     DArray<int> tri0Out,
     DArray<int> tri1Out,
     DArray<int> pairIdOut,
     DArray<int> offsets,
     DArray<int> counts,
-    DArray<BodyContactId> bodyPairs,
-    DArray<int> batchBodies,
-    DArray2D<int> shapeTypes,
-    DevArr2D<int> body2TriOffsets,
-    int triPerBody)
+    View view)
 {
     int pairId = threadIdx.x + blockIdx.x * blockDim.x;
-    if (pairId >= bodyPairs.size() || pairId >= offsets.size() || pairId >= counts.size())
+    if (pairId >= view.bodyPairs.size() || pairId >= offsets.size() || pairId >= counts.size())
         return;
 
     const int count = counts[pairId];
     if (count <= 0)
         return;
 
-    const BodyContactId pair = bodyPairs[pairId];
-    if (pair.env_id < 0 || pair.env_id >= batchBodies.size()
+    const BodyContactId pair = view.bodyPairs[pairId];
+    if (pair.env_id < 0 || pair.env_id >= view.batchBodies.size()
         || pair.body_id_1 < 0 || pair.body_id_2 < 0
-        || pair.body_id_1 >= batchBodies[pair.env_id]
-        || pair.body_id_2 >= batchBodies[pair.env_id])
+        || pair.body_id_1 >= view.batchBodies[pair.env_id]
+        || pair.body_id_2 >= view.batchBodies[pair.env_id])
         return;
 
-    if (shapeTypes(pair.env_id, pair.body_id_1) != 1
-        || shapeTypes(pair.env_id, pair.body_id_2) != 1)
+    if (view.shapeTypes(pair.env_id, pair.body_id_1) != 1
+        || view.shapeTypes(pair.env_id, pair.body_id_2) != 1)
         return;
 
-    if (triPerBody <= 0
-        || pair.env_id >= body2TriOffsets.NumBlocks()
-        || pair.body_id_1 >= body2TriOffsets.BlockSize(pair.env_id)
-        || pair.body_id_2 >= body2TriOffsets.BlockSize(pair.env_id))
+    const int begin0 = getBodyLayoutBase(view, view.body2TriOffsets, pair.env_id, pair.body_id_1);
+    const int begin1 = getBodyLayoutBase(view, view.body2TriOffsets, pair.env_id, pair.body_id_2);
+    const int count0 = getBodyTemplateTriangleCount(view, pair.env_id, pair.body_id_1);
+    const int count1 = getBodyTemplateTriangleCount(view, pair.env_id, pair.body_id_2);
+    if (begin0 < 0 || begin1 < 0 || count0 <= 0 || count1 <= 0)
         return;
-
-    const int begin0 = body2TriOffsets(pair.env_id, pair.body_id_1);
-    const int begin1 = body2TriOffsets(pair.env_id, pair.body_id_2);
-    const int count0 = triPerBody;
-    const int count1 = triPerBody;
 
     const int base = offsets[pairId];
     for (int i = 0; i < count0; ++i)
@@ -1377,16 +1494,17 @@ DYN_FUNC inline int processPrimitivePass(
 
     int count = 0;
     const int sourceTriBase = getBodyLayoutBase(view, view.body2TriOffsets, sourceBody.env_id, sourceBody.body_id);
-    if (sourceTriBase < 0)
+    const auto* sourceTemplate = getBodyTemplateView(view, sourceBody.env_id, sourceBody.body_id);
+    if (sourceTemplate == nullptr || sourceTriBase < 0)
         return 0;
 
     const int localSourceTriId = sourceTriId - sourceTriBase;
-    if (localSourceTriId < 0 || localSourceTriId >= view.templateTriangles.size())
+    if (localSourceTriId < 0 || localSourceTriId >= sourceTemplate->numTriangles)
         return 0;
 
     if (vertexPass)
     {
-        const auto sourceTriIndices = view.templateTriangles[localSourceTriId];
+        const auto sourceTriIndices = sourceTemplate->triangles[localSourceTriId];
         const int vertexBase = getBodyLayoutBase(view, view.body2VertexOffsets, sourceBody.env_id, sourceBody.body_id);
         if (vertexBase < 0)
             return 0;
@@ -1430,7 +1548,7 @@ DYN_FUNC inline int processPrimitivePass(
     const int edgeBase = getBodyLayoutBase(view, view.body2EdgeOffsets, sourceBody.env_id, sourceBody.body_id);
     if (edgeBase < 0)
         return 0;
-    const auto sourceTriEdges = view.triangleEdges[localSourceTriId];
+    const auto sourceTriEdges = sourceTemplate->triangleEdges[localSourceTriId];
     for (int localEdgeId = 0; localEdgeId < 3; ++localEdgeId)
     {
         const int localTemplateEdgeId = sourceTriEdges[localEdgeId];

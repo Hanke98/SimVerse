@@ -243,64 +243,11 @@ __device__ inline bool CD_DecodeBroadPhaseBodyIndex(
     return true;
 }
 
-__device__ inline bool CD_IsValidBroadPhaseBodyPair(
-    const DArrayList<int>& contactList,
-    int body_flat_id,
-    int neighbor_idx,
-    int env_id,
-    int body_id,
-    const DArray<int>& batch_bodies,
-    const DArray<int>& batch_body_offset,
-    const DArray<int>& flat_is_static,
-    const DArray<int>& flat_parent_idx,
-    int num_envs,
-    int& nbr_body_id)
-{
-    const int nbr_encoded_id = contactList[body_flat_id][neighbor_idx];
-
-    int nbr_env_id = -1;
-    if (!CD_DecodeBroadPhaseBodyIndex(
-        nbr_encoded_id,
-        batch_bodies,
-        batch_body_offset,
-        num_envs,
-        nbr_env_id,
-        nbr_body_id))
-        return false;
-
-    if (nbr_env_id != env_id || nbr_body_id <= body_id)
-        return false;
-
-    if (body_flat_id < 0 || body_flat_id >= flat_is_static.size()
-        || nbr_encoded_id < 0 || nbr_encoded_id >= flat_is_static.size()
-        || body_flat_id >= flat_parent_idx.size()
-        || nbr_encoded_id >= flat_parent_idx.size())
-        return false;
-
-    if (flat_is_static[body_flat_id] && flat_is_static[nbr_encoded_id])
-        return false;
-
-    if (flat_parent_idx[body_flat_id] == nbr_body_id
-        || flat_parent_idx[nbr_encoded_id] == body_id)
-        return false;
-
-    auto& list_i = contactList[body_flat_id];
-    for (int k = 0; k < neighbor_idx; ++k)
-    {
-        if (list_i[k] == nbr_encoded_id)
-            return false;
-    }
-
-    return true;
-}
-
 __global__ void CD_CountBodyContactListSize(
     DArray<int> num,
     DArrayList<int> contactList,
     DArray<int> batch_bodies,
     DArray<int> batch_body_offset,
-    DArray<int> flat_is_static,
-    DArray<int> flat_parent_idx,
     int num_envs)
 {
     int tId = threadIdx.x + (blockIdx.x * blockDim.x);
@@ -325,19 +272,18 @@ __global__ void CD_CountBodyContactListSize(
     auto& list_i = contactList[tId];
     for (int j = 0; j < list_i.size(); ++j)
     {
+        int nbr_env_id = -1;
         int nbr_body_id = -1;
-        if (!CD_IsValidBroadPhaseBodyPair(
-            contactList,
-            tId,
-            j,
-            env_id,
-            body_id,
+        if (!CD_DecodeBroadPhaseBodyIndex(
+            list_i[j],
             batch_bodies,
             batch_body_offset,
-            flat_is_static,
-            flat_parent_idx,
             num_envs,
+            nbr_env_id,
             nbr_body_id))
+            continue;
+
+        if (nbr_env_id != env_id || nbr_body_id == body_id)
             continue;
 
         ++validCount;
@@ -352,8 +298,6 @@ __global__ void CD_SetupBodyContactIds(
     DArrayList<int> contactList,
     DArray<int> batch_bodies,
     DArray<int> batch_body_offset,
-    DArray<int> flat_is_static,
-    DArray<int> flat_parent_idx,
     int num_envs)
 {
     int tId = threadIdx.x + (blockIdx.x * blockDim.x);
@@ -377,19 +321,18 @@ __global__ void CD_SetupBodyContactIds(
     int cursor = 0;
     for (int j = 0; j < list_i.size(); ++j)
     {
+        int nbr_env_id = -1;
         int nbr_body_id = -1;
-        if (!CD_IsValidBroadPhaseBodyPair(
-            contactList,
-            tId,
-            j,
-            env_id,
-            body_id,
+        if (!CD_DecodeBroadPhaseBodyIndex(
+            list_i[j],
             batch_bodies,
             batch_body_offset,
-            flat_is_static,
-            flat_parent_idx,
             num_envs,
+            nbr_env_id,
             nbr_body_id))
+            continue;
+
+        if (nbr_env_id != env_id || nbr_body_id == body_id)
             continue;
 
         BodyContactId id;
@@ -1193,35 +1136,33 @@ void MeshCollisionDetector<TDataType>::detectMeshMeshInternal(
     m_shapePairs.assign(dShapePairs);
     m_patchPairs.clear();
 
-    cd_internal::MeshShapeView<TDataType> view{};
-    view.templateVertices = m_cubeTemplateTriSet->getPoints();
-    view.templateTriangles = m_cubeTemplateTriSet->triangleIndices();
-    view.triangleEdges = m_cubeTemplateTriSet->triangle2Edge();
-    view.edgeVertices = m_cubeTemplateTriSet->edgeIndices();
-    view.edgeAdjacentFaces = m_cubeTemplateTriSet->edge2Triangle();
-    view.shapePairs = m_shapePairs;
-    view.bodyContactPairs = DArray<BodyContactId>();
-    view.bodyFlatToShape = m_bodyFlatToShape;
-    view.maxBodies = m_maxBodies;
-    view.shape2BodyFlat = m_shape2BodyFlat;
-    view.shapeCenters = m_shapeCenters;
-    view.shapeRotations = m_shapeRotations;
-    view.shapeHalfLengths = m_shapeHalfLengths;
-    view.shapeInvHalfLengths = m_shapeInvHalfLengths;
-    view.shape2PatchOffsets = m_shape2PatchOffsets;
-    view.shape2TriOffsets = m_shape2TriOffsets;
-    view.shape2EdgeOffsets = m_shape2EdgeOffsets;
-    view.shape2VertexOffsets = m_shape2VertexOffsets;
-    view.patch2Shape = m_patch2Shape;
-    view.patch2TriOffsets = m_patch2TriOffsets;
-    view.patch2TriIndices = m_patch2TriIndices;
-    view.templatePatchAabbs = m_cubeTemplate.patchAABBs;
-    view.patchPairs = m_patchPairs;
-    view.triangleAabbsWorld = m_triAabbsWorld;
-    view.faceNormalsWorld = m_faceNormalsWorld;
-    view.edgeNormalsWorld = m_edgeNormalsWorld;
-    view.dHat = m_dHat;
-    view.edgeEdgeActivationMargin = m_edgeEdgeActivationMargin;
+    cd_internal::MeshShapeView<TDataType> view{
+        m_cubeTemplateTriSet->getPoints(),
+        m_cubeTemplateTriSet->triangleIndices(),
+        m_cubeTemplateTriSet->triangle2Edge(),
+        m_cubeTemplateTriSet->edgeIndices(),
+        m_cubeTemplateTriSet->edge2Triangle(),
+        m_shapePairs,
+        m_shape2BodyFlat,
+        m_shapeCenters,
+        m_shapeRotations,
+        m_shapeHalfLengths,
+        m_shapeInvHalfLengths,
+        m_shape2PatchOffsets,
+        m_shape2TriOffsets,
+        m_shape2EdgeOffsets,
+        m_shape2VertexOffsets,
+        m_patch2Shape,
+        m_patch2TriOffsets,
+        m_patch2TriIndices,
+        m_cubeTemplate.patchAABBs,
+        m_patchPairs,
+        m_triAabbsWorld,
+        m_faceNormalsWorld,
+        m_edgeNormalsWorld,
+        m_dHat,
+        m_edgeEdgeActivationMargin
+    };
 
     const int templateTriCount = static_cast<int>(m_cubeTemplateTriSet->triangleIndices().size());
     const int templateEdgeCount = static_cast<int>(m_cubeTemplateTriSet->edgeIndices().size());
@@ -1483,13 +1424,7 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
     int num_envs)
 {
     CArray<int> hBatchBodies;
-    CArray<int> hBatchBodyOffset;
-    HostBlockVector<int> hIsStatic;
-    HostBlockVector<int> hParentIdx;
     hBatchBodies.assign(rb.batch_bodies);
-    hBatchBodyOffset.assign(rb.batch_body_offset);
-    rb.is_static.Download(hIsStatic);
-    rb.parent_idx.Download(hParentIdx);
 
     int totalBodies = 0;
     for (int env_id = 0; env_id < num_envs && env_id < static_cast<int>(hBatchBodies.size()); ++env_id)
@@ -1504,32 +1439,6 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
 
     if (m_bodyAABBs.size() != static_cast<uint>(totalBodies))
         m_bodyAABBs.resize(totalBodies);
-
-    std::vector<int> flatIsStaticHost(totalBodies, 0);
-    std::vector<int> flatParentHost(totalBodies, -1);
-    for (int env_id = 0; env_id < num_envs && env_id < static_cast<int>(hBatchBodies.size()) && env_id < static_cast<int>(hBatchBodyOffset.size()); ++env_id)
-    {
-        const int bodyCount = hBatchBodies[env_id];
-        const int bodyOffset = hBatchBodyOffset[env_id];
-        for (int body_id = 0; body_id < bodyCount; ++body_id)
-        {
-            const int flat_body_id = bodyOffset + body_id;
-            if (flat_body_id < 0 || flat_body_id >= totalBodies)
-                continue;
-
-            if (!hIsStatic.Empty()
-                && env_id < hIsStatic.NumBlocks()
-                && body_id < hIsStatic.BlockSize(env_id))
-                flatIsStaticHost[flat_body_id] = hIsStatic.AtBlock(env_id, body_id);
-            if (!hParentIdx.Empty()
-                && env_id < hParentIdx.NumBlocks()
-                && body_id < hParentIdx.BlockSize(env_id))
-                flatParentHost[flat_body_id] = hParentIdx.AtBlock(env_id, body_id);
-        }
-    }
-
-    m_bodyFlatIsStatic.assign(flatIsStaticHost);
-    m_bodyFlatParentIdx.assign(flatParentHost);
 
     {
         const int threads = 128;
@@ -1571,8 +1480,6 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
             contactList,
             rb.batch_bodies,
             rb.batch_body_offset,
-            m_bodyFlatIsStatic,
-            m_bodyFlatParentIdx,
             num_envs);
         cudaDeviceSynchronize();
     }
@@ -1598,8 +1505,6 @@ bool MeshCollisionDetector<TDataType>::broad_phase(
             contactList,
             rb.batch_bodies,
             rb.batch_body_offset,
-            m_bodyFlatIsStatic,
-            m_bodyFlatParentIdx,
             num_envs);
         cudaDeviceSynchronize();
     }
@@ -1698,7 +1603,9 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
         return;
 
     CArray<int> hBatchBodies;
+    CArray<BodyContactId> hBodyContactPairs;
     hBatchBodies.assign(rb.batch_bodies);
+    hBodyContactPairs.assign(m_bodyContactPairs);
 
     CArray2D<int> hShapeType;
     CArray2D<int> hShapeIdx;
@@ -1712,21 +1619,85 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     hRot.assign(rb.batch_rot);
     hBoxes.assign(rb.boxes);
 
-    const int totalFlatBodies = num_envs * m_maxBodies;
-    if (totalFlatBodies <= 0)
+    HostBlockVector<int> hIsStatic;
+    HostBlockVector<int> hParentIdx;
+    rb.is_static.Download(hIsStatic);
+    rb.parent_idx.Download(hParentIdx);
+
+    std::unordered_set<uint64_t> pairSet;
+    std::vector<PairUU> shapePairsHost;
+    shapePairsHost.reserve(128);
+
+    for (int q = 0; q < static_cast<int>(hBodyContactPairs.size()); ++q)
+    {
+        const BodyContactId pair = hBodyContactPairs[q];
+        const int envA = pair.env_id;
+        if (envA < 0 || envA >= num_envs)
+            continue;
+        const int bodyA = pair.body_id_1;
+        const int bodyB = pair.body_id_2;
+        if (bodyA < 0 || bodyA >= m_maxBodies || bodyB < 0 || bodyB >= m_maxBodies)
+            continue;
+        if (bodyA >= hBatchBodies[envA] || bodyB >= hBatchBodies[envA])
+            continue;
+        if (bodyA == bodyB)
+            continue;
+        if (hShapeType(envA, bodyA) != 1 || hShapeType(envA, bodyB) != 1)
+            continue;
+
+        int a = bodyA;
+        int b = bodyB;
+        if (a > b)
+        {
+            const int t = a;
+            a = b;
+            b = t;
+        }
+
+        if (!hIsStatic.Empty()
+            && hIsStatic.AtBlock(envA, a)
+            && hIsStatic.AtBlock(envA, b))
+            continue;
+        if (!hParentIdx.Empty())
+        {
+            if (hParentIdx.AtBlock(envA, a) == b
+                || hParentIdx.AtBlock(envA, b) == a)
+                continue;
+        }
+
+        const uint64_t key = (static_cast<uint64_t>(envA) << 40)
+            | (static_cast<uint64_t>(a) << 20)
+            | static_cast<uint64_t>(b);
+        if (!pairSet.insert(key).second)
+            continue;
+
+        const int shapeA = envA * m_maxBodies + a;
+        const int shapeB = envA * m_maxBodies + b;
+        shapePairsHost.emplace_back(static_cast<uint>(shapeA), static_cast<uint>(shapeB));
+    }
+
+    if (shapePairsHost.empty())
         return;
 
-    std::vector<int> bodyFlatToShapeHost(totalFlatBodies, -1);
-    std::vector<int> shape2BodyFlatHost;
-    std::vector<Coord> shapeCentersHost;
-    std::vector<Matrix> shapeRotationsHost;
-    std::vector<Coord> shapeHalfLengthsHost;
-    std::vector<Coord> shapeInvHalfLengthsHost;
-    shape2BodyFlatHost.reserve(totalFlatBodies);
-    shapeCentersHost.reserve(totalFlatBodies);
-    shapeRotationsHost.reserve(totalFlatBodies);
-    shapeHalfLengthsHost.reserve(totalFlatBodies);
-    shapeInvHalfLengthsHost.reserve(totalFlatBodies);
+    const int shapeCount = num_envs * m_maxBodies;
+    if (shapeCount <= 0)
+        return;
+
+    refreshMeshShapeLayoutCache(shapeCount);
+
+    CArray<int> dShape2BodyFlat(shapeCount);
+    CArray<Coord> dShapeCenters(shapeCount);
+    CArray<Matrix> dShapeRotations(shapeCount);
+    CArray<Coord> dShapeHalfLengths(shapeCount);
+    CArray<Coord> dShapeInvHalfLengths(shapeCount);
+    for (int i = 0; i < shapeCount; ++i)
+    {
+        dShape2BodyFlat[i] = i;
+        dShapeCenters[i] = Coord(0);
+        dShapeRotations[i] = Matrix::identityMatrix();
+        dShapeHalfLengths[i] = Coord(0);
+        dShapeInvHalfLengths[i] = Coord(0);
+    }
 
     for (int env = 0; env < num_envs; ++env)
     {
@@ -1736,88 +1707,61 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
             if (hShapeType(env, b) != 1)
                 continue;
 
-            const int flatBody = env * m_maxBodies + b;
-            const int shapeId = static_cast<int>(shape2BodyFlatHost.size());
+            const int shapeId = env * m_maxBodies + b;
             const int sidx = hShapeIdx(env, b);
             const BoxInfo box = hBoxes(env, sidx);
             const Coord bodyPos = hPos(env, b);
             const Matrix bodyRot = hRot(env, b);
 
-            bodyFlatToShapeHost[flatBody] = shapeId;
-            shape2BodyFlatHost.push_back(flatBody);
-            shapeCentersHost.push_back(bodyPos + bodyRot * box.center);
-            shapeRotationsHost.push_back(bodyRot * box.rot.toMatrix3x3());
-            shapeHalfLengthsHost.push_back(box.halfLength);
-            shapeInvHalfLengthsHost.push_back(Coord(
+            dShapeCenters[shapeId] = bodyPos + bodyRot * box.center;
+            dShapeRotations[shapeId] = bodyRot * box.rot.toMatrix3x3();
+            dShapeHalfLengths[shapeId] = box.halfLength;
+            dShapeInvHalfLengths[shapeId] = Coord(
                 box.halfLength[0] != Real(0) ? Real(1) / box.halfLength[0] : Real(0),
                 box.halfLength[1] != Real(0) ? Real(1) / box.halfLength[1] : Real(0),
-                box.halfLength[2] != Real(0) ? Real(1) / box.halfLength[2] : Real(0)));
+                box.halfLength[2] != Real(0) ? Real(1) / box.halfLength[2] : Real(0));
         }
     }
 
-    const int shapeCount = static_cast<int>(shape2BodyFlatHost.size());
-    if (shapeCount < 2)
-        return;
-
-    refreshMeshShapeLayoutCache(shapeCount);
-
-    CArray<int> dBodyFlatToShape(static_cast<uint>(bodyFlatToShapeHost.size()));
-    for (uint i = 0; i < dBodyFlatToShape.size(); ++i)
-        dBodyFlatToShape[i] = bodyFlatToShapeHost[i];
-
-    CArray<int> dShape2BodyFlat(shapeCount);
-    CArray<Coord> dShapeCenters(shapeCount);
-    CArray<Matrix> dShapeRotations(shapeCount);
-    CArray<Coord> dShapeHalfLengths(shapeCount);
-    CArray<Coord> dShapeInvHalfLengths(shapeCount);
-    for (int i = 0; i < shapeCount; ++i)
-    {
-        dShape2BodyFlat[i] = shape2BodyFlatHost[i];
-        dShapeCenters[i] = shapeCentersHost[i];
-        dShapeRotations[i] = shapeRotationsHost[i];
-        dShapeHalfLengths[i] = shapeHalfLengthsHost[i];
-        dShapeInvHalfLengths[i] = shapeInvHalfLengthsHost[i];
-    }
-
-    m_bodyFlatToShape.assign(dBodyFlatToShape);
     m_shape2BodyFlat.assign(dShape2BodyFlat);
     m_shapeCenters.assign(dShapeCenters);
     m_shapeRotations.assign(dShapeRotations);
     m_shapeHalfLengths.assign(dShapeHalfLengths);
     m_shapeInvHalfLengths.assign(dShapeInvHalfLengths);
 
-    m_shapePairs.clear();
+    CArray<PairUU> dShapePairs(static_cast<uint>(shapePairsHost.size()));
+    for (uint i = 0; i < dShapePairs.size(); ++i)
+        dShapePairs[i] = shapePairsHost[i];
+    m_shapePairs.assign(dShapePairs);
     m_patchPairs.clear();
 
-    cd_internal::MeshShapeView<TDataType> view{};
-    view.templateVertices = m_cubeTemplateTriSet->getPoints();
-    view.templateTriangles = m_cubeTemplateTriSet->triangleIndices();
-    view.triangleEdges = m_cubeTemplateTriSet->triangle2Edge();
-    view.edgeVertices = m_cubeTemplateTriSet->edgeIndices();
-    view.edgeAdjacentFaces = m_cubeTemplateTriSet->edge2Triangle();
-    view.shapePairs = m_shapePairs;
-    view.bodyContactPairs = m_bodyContactPairs;
-    view.bodyFlatToShape = m_bodyFlatToShape;
-    view.maxBodies = m_maxBodies;
-    view.shape2BodyFlat = m_shape2BodyFlat;
-    view.shapeCenters = m_shapeCenters;
-    view.shapeRotations = m_shapeRotations;
-    view.shapeHalfLengths = m_shapeHalfLengths;
-    view.shapeInvHalfLengths = m_shapeInvHalfLengths;
-    view.shape2PatchOffsets = m_shape2PatchOffsets;
-    view.shape2TriOffsets = m_shape2TriOffsets;
-    view.shape2EdgeOffsets = m_shape2EdgeOffsets;
-    view.shape2VertexOffsets = m_shape2VertexOffsets;
-    view.patch2Shape = m_patch2Shape;
-    view.patch2TriOffsets = m_patch2TriOffsets;
-    view.patch2TriIndices = m_patch2TriIndices;
-    view.templatePatchAabbs = m_cubeTemplate.patchAABBs;
-    view.patchPairs = m_patchPairs;
-    view.triangleAabbsWorld = m_triAabbsWorld;
-    view.faceNormalsWorld = m_faceNormalsWorld;
-    view.edgeNormalsWorld = m_edgeNormalsWorld;
-    view.dHat = m_dHat;
-    view.edgeEdgeActivationMargin = m_edgeEdgeActivationMargin;
+    cd_internal::MeshShapeView<TDataType> view{
+        m_cubeTemplateTriSet->getPoints(),
+        m_cubeTemplateTriSet->triangleIndices(),
+        m_cubeTemplateTriSet->triangle2Edge(),
+        m_cubeTemplateTriSet->edgeIndices(),
+        m_cubeTemplateTriSet->edge2Triangle(),
+        m_shapePairs,
+        m_shape2BodyFlat,
+        m_shapeCenters,
+        m_shapeRotations,
+        m_shapeHalfLengths,
+        m_shapeInvHalfLengths,
+        m_shape2PatchOffsets,
+        m_shape2TriOffsets,
+        m_shape2EdgeOffsets,
+        m_shape2VertexOffsets,
+        m_patch2Shape,
+        m_patch2TriOffsets,
+        m_patch2TriIndices,
+        m_cubeTemplate.patchAABBs,
+        m_patchPairs,
+        m_triAabbsWorld,
+        m_faceNormalsWorld,
+        m_edgeNormalsWorld,
+        m_dHat,
+        m_edgeEdgeActivationMargin
+    };
 
     const int templateTriCount = static_cast<int>(m_cubeTemplateTriSet->triangleIndices().size());
     const int templateEdgeCount = static_cast<int>(m_cubeTemplateTriSet->edgeIndices().size());
@@ -1847,19 +1791,17 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
         cudaDeviceSynchronize();
     }
 
-    const int bodyPairCount = static_cast<int>(m_bodyContactPairs.size());
-    if (bodyPairCount <= 0)
+    const int shapePairCount = static_cast<int>(m_shapePairs.size());
+    if (shapePairCount <= 0)
         return;
 
-    m_patchPairTriPairCounts.resize(bodyPairCount);
+    m_patchPairTriPairCounts.resize(shapePairCount);
     m_patchPairTriPairCounts.reset();
 
-    cd_internal::CountTriPairsPerBodyPairKernel<<<(bodyPairCount + 127) / 128, 128>>>(
+    cd_internal::CountTriPairsPerShapePairKernel<<<(shapePairCount + 127) / 128, 128>>>(
         m_patchPairTriPairCounts,
-        m_bodyContactPairs,
-        m_bodyFlatToShape,
-        m_shape2TriOffsets,
-        m_maxBodies);
+        m_shapePairs,
+        m_shape2TriOffsets);
     cudaDeviceSynchronize();
 
     const int totalCandidateTriPairs = m_reduce.accumulate(
@@ -1868,7 +1810,7 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     if (totalCandidateTriPairs <= 0)
         return;
 
-    m_patchPairTriPairOffsets.resize(bodyPairCount);
+    m_patchPairTriPairOffsets.resize(shapePairCount);
     m_patchPairTriPairOffsets.assign(m_patchPairTriPairCounts);
     m_scan.exclusive(m_patchPairTriPairOffsets, true);
 
@@ -1876,16 +1818,14 @@ void MeshCollisionDetector<TDataType>::narrow_phase(
     m_candidateTri1.resize(totalCandidateTriPairs);
     m_candidatePatchPairId.resize(totalCandidateTriPairs);
 
-    cd_internal::SetTriPairsFromBodyPairsKernel<<<(bodyPairCount + 127) / 128, 128>>>(
+    cd_internal::SetTriPairsFromShapePairsKernel<<<(shapePairCount + 127) / 128, 128>>>(
         m_candidateTri0,
         m_candidateTri1,
         m_candidatePatchPairId,
         m_patchPairTriPairOffsets,
         m_patchPairTriPairCounts,
-        m_bodyContactPairs,
-        m_bodyFlatToShape,
-        m_shape2TriOffsets,
-        m_maxBodies);
+        m_shapePairs,
+        m_shape2TriOffsets);
     cudaDeviceSynchronize();
 
     m_coarsePassCounts.resize(totalCandidateTriPairs);

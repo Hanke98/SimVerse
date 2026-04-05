@@ -47,9 +47,6 @@ struct MeshShapeView
     DArray<Edge> edgeVertices;
     DArray<Edg2Tri> edgeAdjacentFaces;
     DArray<Pair<uint, uint>> shapePairs;
-    DArray<BodyContactId> bodyContactPairs;
-    DArray<int> bodyFlatToShape;
-    int maxBodies = 0;
 
     DArray<int> shape2BodyFlat;
     DArray<Coord> shapeCenters;
@@ -1008,25 +1005,6 @@ DYN_FUNC inline bool buildTriPairContext(
         ctx.tri0Shape = static_cast<int>(pair.first);
         ctx.tri1Shape = static_cast<int>(pair.second);
     }
-    else if (pairId >= 0 && pairId < view.bodyContactPairs.size())
-    {
-        if (view.maxBodies <= 0)
-            return false;
-
-        const BodyContactId pair = view.bodyContactPairs[pairId];
-        if (pair.env_id < 0 || pair.body_id_1 < 0 || pair.body_id_2 < 0)
-            return false;
-
-        ctx.bodyId1 = pair.env_id * view.maxBodies + pair.body_id_1;
-        ctx.bodyId2 = pair.env_id * view.maxBodies + pair.body_id_2;
-        if (ctx.bodyId1 < 0 || ctx.bodyId2 < 0
-            || ctx.bodyId1 >= view.bodyFlatToShape.size()
-            || ctx.bodyId2 >= view.bodyFlatToShape.size())
-            return false;
-
-        ctx.tri0Shape = view.bodyFlatToShape[ctx.bodyId1];
-        ctx.tri1Shape = view.bodyFlatToShape[ctx.bodyId2];
-    }
     else
     {
         return false;
@@ -1036,11 +1014,8 @@ DYN_FUNC inline bool buildTriPairContext(
         || ctx.tri0Shape >= view.shape2BodyFlat.size() || ctx.tri1Shape >= view.shape2BodyFlat.size())
         return false;
 
-    if (ctx.bodyId1 < 0 || ctx.bodyId2 < 0)
-    {
-        ctx.bodyId1 = view.shape2BodyFlat[ctx.tri0Shape];
-        ctx.bodyId2 = view.shape2BodyFlat[ctx.tri1Shape];
-    }
+    ctx.bodyId1 = view.shape2BodyFlat[ctx.tri0Shape];
+    ctx.bodyId2 = view.shape2BodyFlat[ctx.tri1Shape];
 
     typename View::Coord p00, p01, p02;
     typename View::Coord p10, p11, p12;
@@ -1053,114 +1028,6 @@ DYN_FUNC inline bool buildTriPairContext(
     ctx.triangle0 = TTriangle3D<typename View::Real>(p00, p01, p02);
     ctx.triangle1 = TTriangle3D<typename View::Real>(p10, p11, p12);
     return true;
-}
-
-__global__ void CountTriPairsPerBodyPairKernel(
-    DArray<int> counts,
-    DArray<BodyContactId> bodyPairs,
-    DArray<int> bodyFlatToShape,
-    DArray<int> shape2TriOffsets,
-    int maxBodies)
-{
-    int pairId = threadIdx.x + blockIdx.x * blockDim.x;
-    if (pairId >= counts.size() || pairId >= bodyPairs.size() || maxBodies <= 0)
-        return;
-
-    const BodyContactId pair = bodyPairs[pairId];
-    if (pair.env_id < 0 || pair.body_id_1 < 0 || pair.body_id_2 < 0)
-    {
-        counts[pairId] = 0;
-        return;
-    }
-
-    const int flat0 = pair.env_id * maxBodies + pair.body_id_1;
-    const int flat1 = pair.env_id * maxBodies + pair.body_id_2;
-    if (flat0 < 0 || flat1 < 0
-        || flat0 >= bodyFlatToShape.size()
-        || flat1 >= bodyFlatToShape.size())
-    {
-        counts[pairId] = 0;
-        return;
-    }
-
-    const int shape0 = bodyFlatToShape[flat0];
-    const int shape1 = bodyFlatToShape[flat1];
-    if (shape0 < 0 || shape1 < 0
-        || shape0 + 1 >= shape2TriOffsets.size()
-        || shape1 + 1 >= shape2TriOffsets.size())
-    {
-        counts[pairId] = 0;
-        return;
-    }
-
-    int count0 = shape2TriOffsets[shape0 + 1] - shape2TriOffsets[shape0];
-    int count1 = shape2TriOffsets[shape1 + 1] - shape2TriOffsets[shape1];
-    count0 = count0 > 0 ? count0 : 0;
-    count1 = count1 > 0 ? count1 : 0;
-    counts[pairId] = count0 * count1;
-}
-
-__global__ void SetTriPairsFromBodyPairsKernel(
-    DArray<int> tri0Out,
-    DArray<int> tri1Out,
-    DArray<int> pairIdOut,
-    DArray<int> offsets,
-    DArray<int> counts,
-    DArray<BodyContactId> bodyPairs,
-    DArray<int> bodyFlatToShape,
-    DArray<int> shape2TriOffsets,
-    int maxBodies)
-{
-    int pairId = threadIdx.x + blockIdx.x * blockDim.x;
-    if (pairId >= bodyPairs.size() || pairId >= offsets.size() || pairId >= counts.size() || maxBodies <= 0)
-        return;
-
-    const int count = counts[pairId];
-    if (count <= 0)
-        return;
-
-    const BodyContactId pair = bodyPairs[pairId];
-    if (pair.env_id < 0 || pair.body_id_1 < 0 || pair.body_id_2 < 0)
-        return;
-
-    const int flat0 = pair.env_id * maxBodies + pair.body_id_1;
-    const int flat1 = pair.env_id * maxBodies + pair.body_id_2;
-    if (flat0 < 0 || flat1 < 0
-        || flat0 >= bodyFlatToShape.size()
-        || flat1 >= bodyFlatToShape.size())
-        return;
-
-    const int shape0 = bodyFlatToShape[flat0];
-    const int shape1 = bodyFlatToShape[flat1];
-    if (shape0 < 0 || shape1 < 0
-        || shape0 + 1 >= shape2TriOffsets.size()
-        || shape1 + 1 >= shape2TriOffsets.size())
-        return;
-
-    const int begin0 = shape2TriOffsets[shape0];
-    const int end0 = shape2TriOffsets[shape0 + 1];
-    const int begin1 = shape2TriOffsets[shape1];
-    const int end1 = shape2TriOffsets[shape1 + 1];
-    const int count0 = end0 - begin0;
-    const int count1 = end1 - begin1;
-    if (count0 <= 0 || count1 <= 0)
-        return;
-
-    const int base = offsets[pairId];
-    for (int i = 0; i < count0; ++i)
-    {
-        const int tri0 = begin0 + i;
-        for (int j = 0; j < count1; ++j)
-        {
-            const int outIdx = base + i * count1 + j;
-            if (outIdx >= tri0Out.size() || outIdx >= tri1Out.size() || outIdx >= pairIdOut.size())
-                return;
-
-            tri0Out[outIdx] = tri0;
-            tri1Out[outIdx] = begin1 + j;
-            pairIdOut[outIdx] = pairId;
-        }
-    }
 }
 
 __global__ void CountTriPairsPerShapePairKernel(

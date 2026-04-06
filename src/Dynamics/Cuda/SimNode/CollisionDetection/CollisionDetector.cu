@@ -846,11 +846,9 @@ __global__ void CD_AppendMeshContactsKernel(
     if (cp.bodyId1 < 0 || cp.bodyId2 < 0)
         return;
 
-    // The SimNode solver consumes hard contacts with a real penetration depth.
-    // Zero-depth shell contacts remain filtered out, but edge-edge contacts with
-    // positive penetration need to survive for offset box stacking.
+    // Keep zero-depth activation contacts from mesh narrow phase.
     if ((cp.contactType != CT_VERTEX_FACE && cp.contactType != CT_EDGE_FACE && cp.contactType != CT_EDGE_EDGE)
-        || cp.interpenetration <= Real(1e-6))
+        || cp.interpenetration < Real(0))
         return;
 
     int envA = cp.bodyId1 / maxBodies;
@@ -865,11 +863,10 @@ __global__ void CD_AppendMeshContactsKernel(
     if (localA >= batch_bodies[envA] || localB >= batch_bodies[envA])
         return;
 
-    // Topology TContactPair stores normal2 as the world-space contact normal on body2.
-    // That matches the manifold normal convention used by the SimNode solver.
-    Coord normal = cp.normal2;
+    // Mesh narrow phase convention: normal1 points from bodyId2 toward bodyId1.
+    Coord normal = cp.normal1;
     if (normal.normSquared() < Real(1e-12))
-        normal = -cp.normal1;
+        normal = -cp.normal2;
     Coord point = (cp.pos1 + cp.pos2) * Real(0.5);
 
     Real mu = sqrtf(friction_mu(envA, localA) * friction_mu(envA, localB));
@@ -880,7 +877,7 @@ __global__ void CD_AppendMeshContactsKernel(
         localA,
         localB,
         cp.interpenetration,
-        -normal,
+        normal,
         point,
         mu);
 }

@@ -1301,6 +1301,8 @@ DYN_FUNC inline void writeContact(
     contact.localId2 = tri1;
     contact.pos1 = contactPoint;
     contact.pos2 = contactPoint;
+    // Keep a single convention for solver assembly:
+    // normal1 points from bodyId2 toward bodyId1, and normal2 is its opposite.
     if (targetIsTri1)
     {
         contact.normal1 = nTarget;

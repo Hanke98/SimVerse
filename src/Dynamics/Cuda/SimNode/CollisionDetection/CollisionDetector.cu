@@ -1727,7 +1727,8 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
         m_coarsePassCounts.size());
     if (totalFilteredTriPairs <= 0)
         return;
-
+    
+    // compute exclusive prefix sum of coarse pass counts to get offsets for each candidate triangle pair.
     m_coarsePassOffsets.resize(totalCandidateTriPairs);
     m_coarsePassOffsets.assign(m_coarsePassCounts);
     m_scan.exclusive(m_coarsePassOffsets, true);
@@ -1735,7 +1736,8 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
     m_filteredTri0.resize(totalFilteredTriPairs);
     m_filteredTri1.resize(totalFilteredTriPairs);
     m_filteredPatchPairId.resize(totalFilteredTriPairs);
-
+    
+    // set the filtered triangle pairs and their corresponding patch pair ids.
     cd_internal::SetCoarsePassedTriPairsKernel<<<(totalCandidateTriPairs + 127) / 128, 128>>>(
         m_filteredTri0,
         m_filteredTri1,
@@ -1746,7 +1748,7 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
         m_coarsePassOffsets,
         m_coarsePassCounts);
     cudaDeviceSynchronize();
-
+    
     const int primitivePassSlotCount = totalFilteredTriPairs * cd_internal::MESH_PASS_COUNT;
     if (primitivePassSlotCount <= 0)
         return;

@@ -1192,9 +1192,10 @@ DYN_FUNC inline bool tryEdgeTriangleContact(
         if (useFaceContact)
         {
             contactPoint = cTarget;
-            depth = (cTarget - cSource).dot(nTarget);
-            if (depth < Real(0))
-                depth = Real(0);
+            // Match NeighborMeshLevelQuery raw semantics: edge-face carries
+            // support normal/point, while penetration depth is provided by
+            // vertex-face contacts.
+            depth = Real(0);
             contactType = CT_EDGE_FACE;
             return true;
         }

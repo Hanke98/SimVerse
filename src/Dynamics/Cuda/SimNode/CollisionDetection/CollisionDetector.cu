@@ -1654,12 +1654,16 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
     {
         const int threads = 128;
         const int triBlocks = (static_cast<int>(m_worklistTriIds.size()) + threads - 1) / threads;
+
+        // for each triangle in the worklist, compute its world-space AABB and normal.
         cd_internal::PrepareTriangleWorldDataWorklistKernel<decltype(view)><<<triBlocks, threads>>>(
             m_worklistTriIds,
             view);
         if (m_worklistEdgeIds.size() > 0)
         {
             const int edgeBlocks = (static_cast<int>(m_worklistEdgeIds.size()) + threads - 1) / threads;
+
+            // for each edge in the worklist, compute its world-space normal.
             cd_internal::PrepareEdgeNormalsWorldWorklistKernel<decltype(view)><<<edgeBlocks, threads>>>(
                 m_worklistEdgeIds,
                 view);
@@ -1674,6 +1678,7 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
     m_patchPairTriPairCounts.resize(bodyPairCount);
     m_patchPairTriPairCounts.reset();
 
+    // for each body pair, count how many triangle pairs.
     cd_internal::CountTriPairsPerBodyPairKernel<decltype(view)><<<(bodyPairCount + 127) / 128, 128>>>(
         m_patchPairTriPairCounts,
         view);
@@ -1684,15 +1689,17 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
         m_patchPairTriPairCounts.size());
     if (totalCandidateTriPairs <= 0)
         return;
-
+    
+    // compute exclusive prefix sum of triangle pair counts to get offsets for each body pair.
     m_patchPairTriPairOffsets.resize(bodyPairCount);
     m_patchPairTriPairOffsets.assign(m_patchPairTriPairCounts);
     m_scan.exclusive(m_patchPairTriPairOffsets, true);
 
-    m_candidateTri0.resize(totalCandidateTriPairs);
-    m_candidateTri1.resize(totalCandidateTriPairs);
-    m_candidatePatchPairId.resize(totalCandidateTriPairs);
-
+    m_candidateTri0.resize(totalCandidateTriPairs); // global triangle id of the first triangle in the candidate pair
+    m_candidateTri1.resize(totalCandidateTriPairs); // global triangle id of the second triangle in the candidate pair
+    m_candidatePatchPairId.resize(totalCandidateTriPairs); // patch pair id that the triangle pair belongs to
+    
+    // for each body pair, set the candidate triangle pairs and their corresponding patch pair ids.
     cd_internal::SetTriPairsFromBodyPairsKernel<decltype(view)><<<(bodyPairCount + 127) / 128, 128>>>(
         m_candidateTri0,
         m_candidateTri1,
@@ -1704,7 +1711,9 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
 
     m_coarsePassCounts.resize(totalCandidateTriPairs);
     m_coarsePassCounts.reset();
-
+    
+    // for each candidate triangle pair, perform a coarse culling test using their world-space AABBs and the distance threshold. 
+    // Count how many pairs pass the coarse culling for each candidate pair.
     cd_internal::CountCoarsePassedTriPairsKernel<AABB, Real><<<(totalCandidateTriPairs + 127) / 128, 128>>>(
         m_coarsePassCounts,
         m_candidateTri0,

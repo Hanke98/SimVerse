@@ -7,6 +7,7 @@
 #include "CollisionDetection/CollisionDetector.h"
 #include "MeshCollisionTypes.h"
 #include "Utils/SimBlockVector.h"
+#include "spdlog/spdlog.h"
 
 namespace dyno {
 namespace cd_internal {
@@ -167,23 +168,26 @@ DYN_FUNC inline Coord buildRobustFaceNormal(const Coord& p0, const Coord& p1, co
         normal.normalize();
         return normal;
     }
+    // if the triangle is degenerate, we attempt to compute a stable normal using the longest edge direction as a reference. 
+    printf("Degenerate triangle with vertices (%f, %f, %f), (%f, %f, %f), (%f, %f, %f). Attempting to compute a stable normal.\n",
+        p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p2[0], p2[1], p2[2]);
 
-    // Coord longestEdge = p1 - p0;
-    // Real longestEdgeLen = longestEdge.normSquared();
+    Coord longestEdge = p1 - p0;
+    Real longestEdgeLen = longestEdge.normSquared();
 
-    // Coord edge1 = p2 - p1;
-    // Real edge1Len = edge1.normSquared();
-    // if (edge1Len > longestEdgeLen)
-    // {
-    //     longestEdge = edge1;
-    //     longestEdgeLen = edge1Len;
-    // }
+    Coord edge1 = p2 - p1;
+    Real edge1Len = edge1.normSquared();
+    if (edge1Len > longestEdgeLen)
+    {
+        longestEdge = edge1;
+        longestEdgeLen = edge1Len;
+    }
 
-    // Coord edge2 = p0 - p2;
-    // if (edge2.normSquared() > longestEdgeLen)
-    //     longestEdge = edge2;
+    Coord edge2 = p0 - p2;
+    if (edge2.normSquared() > longestEdgeLen)
+        longestEdge = edge2;
 
-    // return stablePerpendicular(longestEdge);
+    return stablePerpendicular(longestEdge);
 }
 
 template<typename Real>
@@ -366,15 +370,29 @@ DYN_FUNC inline bool getWorldVertex(
     if (localVertexId < 0 || localVertexId >= tpl->numVertices)
         return false;
 
-    typename View::Coord shapeCenter;
-    typename View::Matrix shapeRotation;
-    typename View::Coord halfLength;
-    if (!getBodyBoxTransform(view, envId, bodyId, shapeCenter, shapeRotation, halfLength))
+    if (!isValidBodyId(view, envId, bodyId))
         return false;
 
+    const auto bodyPos = view.batchPositions(envId, bodyId);
+    const auto bodyRot = view.batchRotations(envId, bodyId);
     const auto& local = tpl->vertices[localVertexId];
-    const auto scaled = scalePoint<typename View::Real, typename View::Coord>(local, halfLength);
-    p = shapeCenter + shapeRotation * scaled;
+    const int shapeType = view.shapeTypes(envId, bodyId);
+    if (shapeType == 1)
+    {
+        const int shapeIdx = view.shapeIndices(envId, bodyId);
+        if (shapeIdx < 0)
+            return false;
+
+        const auto halfLength = view.boxes(envId, shapeIdx).halfLength;
+        const auto scaled = scalePoint<typename View::Real, typename View::Coord>(local, halfLength);
+        p = bodyPos + bodyRot * scaled;
+    }
+    else
+    {
+        // Generic path for non-box rigid bodies and arbitrary mesh templates.
+        p = bodyPos + bodyRot * local;
+    }
+
     return true;
 }
 
@@ -406,13 +424,41 @@ DYN_FUNC inline bool getWorldTriangle(
         return false;
     // get the vertex indices for the triangle
     const auto tri = tpl->triangles[localTriId];
-    const int vertexBase = getBodyLayoutBase(view, view.body2VertexOffsets, envId, bodyId);
-    if (vertexBase < 0)
+    if (!isValidBodyId(view, envId, bodyId))
         return false;
 
-    return getWorldVertex(view, vertexBase + tri[0], envId, bodyId, p0)
-        && getWorldVertex(view, vertexBase + tri[1], envId, bodyId, p1)
-        && getWorldVertex(view, vertexBase + tri[2], envId, bodyId, p2);
+    if (tri[0] < 0 || tri[0] >= tpl->numVertices
+        || tri[1] < 0 || tri[1] >= tpl->numVertices
+        || tri[2] < 0 || tri[2] >= tpl->numVertices)
+        return false;
+
+    const auto bodyPos = view.batchPositions(envId, bodyId);
+    const auto bodyRot = view.batchRotations(envId, bodyId);
+    const int shapeType = view.shapeTypes(envId, bodyId);
+
+    const auto& local0 = tpl->vertices[tri[0]];
+    const auto& local1 = tpl->vertices[tri[1]];
+    const auto& local2 = tpl->vertices[tri[2]];
+    if (shapeType == 1)
+    {
+        const int shapeIdx = view.shapeIndices(envId, bodyId);
+        if (shapeIdx < 0)
+            return false;
+
+        const auto halfLength = view.boxes(envId, shapeIdx).halfLength;
+        p0 = bodyPos + bodyRot * scalePoint<typename View::Real, typename View::Coord>(local0, halfLength);
+        p1 = bodyPos + bodyRot * scalePoint<typename View::Real, typename View::Coord>(local1, halfLength);
+        p2 = bodyPos + bodyRot * scalePoint<typename View::Real, typename View::Coord>(local2, halfLength);
+    }
+    else
+    {
+        // Generic path for non-box rigid bodies and arbitrary mesh templates.
+        p0 = bodyPos + bodyRot * local0;
+        p1 = bodyPos + bodyRot * local1;
+        p2 = bodyPos + bodyRot * local2;
+    }
+
+    return true;
 }
 
 template<typename View>
@@ -702,6 +748,7 @@ __device__ inline void PrepareTriangleWorldDataAtId(
         box.v1 = Coord(0);
         view.triangleAabbsWorld[triId] = box;
         view.faceNormalsWorld[triId] = Coord(1, 0, 0);
+        printf("Failed to get world triangle for triId %d. Setting default AABB and normal.", triId);
         return;
     }
 
@@ -756,6 +803,7 @@ __device__ inline void PrepareEdgeNormalsWorldAtId(
     if (ownerTemplate == nullptr || edgeBase < 0 || triBase < 0)
     {
         view.edgeNormalsWorld[edgeId] = Coord(1, 0, 0);
+        printf("Failed to get owner template or layout base for edgeId %d. Setting default normal.", edgeId);
         return;
     }
 
@@ -789,6 +837,7 @@ __device__ inline void PrepareEdgeNormalsWorldAtId(
 
     if (edgeNormal.normSquared() <= epsSqr)
     {
+        printf("EdgeId %d has invalid normal from adjacent faces. Attempting to compute stable normal from edge geometry.\n", edgeId);
         TSegment3D<Real> edgeSegment;
         if (getWorldEdge(view, edgeId, owner.env_id, owner.body_id, edgeSegment))
             edgeNormal = stablePerpendicular(edgeSegment.direction());
@@ -796,7 +845,7 @@ __device__ inline void PrepareEdgeNormalsWorldAtId(
             edgeNormal = Coord(1, 0, 0);
     }
 
-    view.edgeNormalsWorld[edgeId] = normalizeOrFallback(edgeNormal, Coord(1, 0, 0));
+    view.edgeNormalsWorld[edgeId] = edgeNormal;
 }
 
 template<typename View>
@@ -1318,21 +1367,15 @@ __global__ void CountTriPairsPerBodyPairKernel(
     View view)
 {
     int pairId = threadIdx.x + blockIdx.x * blockDim.x;
-    if (pairId >= counts.size() || pairId >= view.bodyPairs.size())
+    if (pairId >= counts.size())
         return;
 
     const BodyContactId pair = view.bodyPairs[pairId];
-    if (pair.env_id < 0 || pair.env_id >= view.batchBodies.size()
-        || pair.body_id_1 < 0 || pair.body_id_2 < 0
-        || pair.body_id_1 >= view.batchBodies[pair.env_id]
-        || pair.body_id_2 >= view.batchBodies[pair.env_id])
-    {
-        counts[pairId] = 0;
-        return;
-    }
 
-    if (view.shapeTypes(pair.env_id, pair.body_id_1) != 1
-        || view.shapeTypes(pair.env_id, pair.body_id_2) != 1)
+    const int shapeType0 = view.shapeTypes(pair.env_id, pair.body_id_1);
+    const int shapeType1 = view.shapeTypes(pair.env_id, pair.body_id_2);
+    if ((shapeType0 != 1 && shapeType0 != 6)
+        || (shapeType1 != 1 && shapeType1 != 6))
     {
         counts[pairId] = 0;
         return;
@@ -1369,14 +1412,11 @@ __global__ void SetTriPairsFromBodyPairsKernel(
         return;
 
     const BodyContactId pair = view.bodyPairs[pairId];
-    if (pair.env_id < 0 || pair.env_id >= view.batchBodies.size()
-        || pair.body_id_1 < 0 || pair.body_id_2 < 0
-        || pair.body_id_1 >= view.batchBodies[pair.env_id]
-        || pair.body_id_2 >= view.batchBodies[pair.env_id])
-        return;
 
-    if (view.shapeTypes(pair.env_id, pair.body_id_1) != 1
-        || view.shapeTypes(pair.env_id, pair.body_id_2) != 1)
+    const int shapeType0 = view.shapeTypes(pair.env_id, pair.body_id_1);
+    const int shapeType1 = view.shapeTypes(pair.env_id, pair.body_id_2);
+    if ((shapeType0 != 1 && shapeType0 != 6)
+        || (shapeType1 != 1 && shapeType1 != 6))
         return;
 
     const int begin0 = getBodyLayoutBase(view, view.body2TriOffsets, pair.env_id, pair.body_id_1);

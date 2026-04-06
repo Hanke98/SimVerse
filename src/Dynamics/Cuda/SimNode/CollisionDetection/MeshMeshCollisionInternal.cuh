@@ -166,22 +166,22 @@ DYN_FUNC inline Coord buildRobustFaceNormal(const Coord& p0, const Coord& p1, co
         return normal;
     }
 
-    Coord longestEdge = p1 - p0;
-    Real longestEdgeLen = longestEdge.normSquared();
+    // Coord longestEdge = p1 - p0;
+    // Real longestEdgeLen = longestEdge.normSquared();
 
-    Coord edge1 = p2 - p1;
-    Real edge1Len = edge1.normSquared();
-    if (edge1Len > longestEdgeLen)
-    {
-        longestEdge = edge1;
-        longestEdgeLen = edge1Len;
-    }
+    // Coord edge1 = p2 - p1;
+    // Real edge1Len = edge1.normSquared();
+    // if (edge1Len > longestEdgeLen)
+    // {
+    //     longestEdge = edge1;
+    //     longestEdgeLen = edge1Len;
+    // }
 
-    Coord edge2 = p0 - p2;
-    if (edge2.normSquared() > longestEdgeLen)
-        longestEdge = edge2;
+    // Coord edge2 = p0 - p2;
+    // if (edge2.normSquared() > longestEdgeLen)
+    //     longestEdge = edge2;
 
-    return stablePerpendicular(longestEdge);
+    // return stablePerpendicular(longestEdge);
 }
 
 template<typename Real>
@@ -1096,8 +1096,9 @@ DYN_FUNC inline bool tryVertexTriangleContact(
     Coord faceNormal = targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size()
         ? view.faceNormalsWorld[targetTriId]
         : buildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
-    nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
-
+    // nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
+    nTarget = faceNormal;
+    
     Real signedDistance = (p - targetTriangle.v[0]).dot(nTarget);
     if (signedDistance > view.dHat || signedDistance < Real(-0.5))
         return false;

@@ -872,49 +872,6 @@ DYN_FUNC inline int localVertexIdFromBarycentric(Real b0, Real b1, Real b2)
     return 2;
 }
 
-template<typename View>
-DYN_FUNC inline bool isCoplanarInternalTriangleEdge(
-    const View& view,
-    const typename View::TemplateView& targetTemplate,
-    int targetTriBase,
-    int targetTriId,
-    int localEdgeId)
-{
-    using Real = typename View::Real;
-
-    if (localEdgeId < 0 || targetTriBase < 0)
-        return false;
-
-    const int localTriId = targetTriId - targetTriBase;
-    if (localTriId < 0 || localTriId >= targetTemplate.numTriangles)
-        return false;
-
-    const int localTemplateEdgeId = targetTemplate.triangleEdges[localTriId][localEdgeId];
-    if (localTemplateEdgeId < 0 || localTemplateEdgeId >= targetTemplate.numEdges)
-        return false;
-
-    const auto adjacentFaces = targetTemplate.edgeAdjacentFaces[localTemplateEdgeId];
-    if (adjacentFaces[0] < 0 || adjacentFaces[1] < 0)
-        return false;
-
-    const int globalFace0 = targetTriBase + adjacentFaces[0];
-    const int globalFace1 = targetTriBase + adjacentFaces[1];
-    if (globalFace0 < 0 || globalFace0 >= view.faceNormalsWorld.size()
-        || globalFace1 < 0 || globalFace1 >= view.faceNormalsWorld.size())
-        return false;
-
-    auto n0 = view.faceNormalsWorld[globalFace0];
-    auto n1 = view.faceNormalsWorld[globalFace1];
-    const Real n0Norm2 = n0.normSquared();
-    const Real n1Norm2 = n1.normSquared();
-    if (n0Norm2 <= Real(1e-12) || n1Norm2 <= Real(1e-12))
-        return false;
-
-    n0 /= sqrt(n0Norm2);
-    n1 /= sqrt(n1Norm2);
-    return n0.dot(n1) >= Real(1) - Real(1e-4);
-}
-
 template<typename Real>
 DYN_FUNC inline bool classifyTriangleRegion(
     const TTriangle3D<Real>& triangle,
@@ -1079,25 +1036,13 @@ DYN_FUNC inline bool tryVertexTriangleContact(
     if (!classifyTriangleRegion(targetTriangle, r, epsBary, regionType, localEdgeId, localVertexId, bary))
         return false;
 
-    const auto* targetTemplate = getBodyTemplateView(view, targetBody.env_id, targetBody.body_id);
-    const int targetTriBase = getBodyLayoutBase(view, view.body2TriOffsets, targetBody.env_id, targetBody.body_id);
-    if (targetTemplate == nullptr || targetTriBase < 0)
-        return false;
-
-    if (regionType == MESH_REGION_EDGE
-        && isCoplanarInternalTriangleEdge(view, *targetTemplate, targetTriBase, targetTriId, localEdgeId))
-    {
-        regionType = MESH_REGION_FACE;
-    }
-
     if (regionType != MESH_REGION_FACE)
         return false;
 
     Coord faceNormal = targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size()
         ? view.faceNormalsWorld[targetTriId]
         : buildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
-    // nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
-    nTarget = faceNormal;
+    nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
     
     Real signedDistance = (p - targetTriangle.v[0]).dot(nTarget);
     if (signedDistance > view.dHat || signedDistance < Real(-0.5))
@@ -1131,7 +1076,6 @@ DYN_FUNC inline bool tryEdgeTriangleContact(
         return false;
 
     auto pq = sourceSegment.proximity(targetTriangle);
-    Coord cSource = pq.startPoint();
     Coord cTarget = pq.endPoint();
     int regionType = MESH_REGION_INVALID;
     int localEdgeId = -1;
@@ -1150,55 +1094,32 @@ DYN_FUNC inline bool tryEdgeTriangleContact(
     if (targetLocalTriId < 0 || targetLocalTriId >= targetTemplate->numTriangles)
         return false;
 
-    if (regionType == MESH_REGION_EDGE
-        && isCoplanarInternalTriangleEdge(view, *targetTemplate, targetTriBase, targetTriId, localEdgeId))
+    if (regionType == MESH_REGION_FACE)
     {
-        regionType = MESH_REGION_FACE;
-    }
+        Coord faceNormal = targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size()
+            ? view.faceNormalsWorld[targetTriId]
+            : buildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
+        nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
 
-    Coord faceNormal = targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size()
-        ? view.faceNormalsWorld[targetTriId]
-        : buildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
-    nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
+        Coord p0 = sourceSegment.startPoint();
+        Coord p1 = sourceSegment.endPoint();
+        Real d0 = (p0 - targetTriangle.v[0]).dot(nTarget);
+        Real d1 = (p1 - targetTriangle.v[0]).dot(nTarget);
+        Real minSignedDistance = d0 < d1 ? d0 : d1;
+        Real edgeActivation = view.edgeEdgeActivationMargin + view.dHat;
+        if (edgeActivation < Real(0))
+            edgeActivation = Real(0);
 
-    Coord p0 = sourceSegment.startPoint();
-    Coord p1 = sourceSegment.endPoint();
-    Real d0 = (p0 - targetTriangle.v[0]).dot(nTarget);
-    Real d1 = (p1 - targetTriangle.v[0]).dot(nTarget);
-    Real minSignedDistance = d0 < d1 ? d0 : d1;
-    Real edgeActivation = view.edgeEdgeActivationMargin + view.dHat;
-    if (edgeActivation < Real(0))
-        edgeActivation = Real(0);
+        if (minSignedDistance > edgeActivation)
+            return false;
 
-    if (minSignedDistance <= edgeActivation)
-    {
-        bool useFaceContact = (regionType == MESH_REGION_FACE);
-        if (!useFaceContact)
-        {
-            Coord sourceDir = sourceSegment.direction();
-            const Real sourceDirNorm2 = sourceDir.normSquared();
-            if (sourceDirNorm2 > Real(1e-12))
-            {
-                sourceDir /= sqrt(sourceDirNorm2);
-                const Real absDirFaceDot = absValue(sourceDir.dot(nTarget));
-                // If the edge is nearly parallel to the face plane, keep the
-                // face normal even when the closest point lies on a triangle
-                // boundary. This preserves the expected supporting contact for
-                // offset box-on-box stacking.
-                useFaceContact = absDirFaceDot <= Real(0.25);
-            }
-        }
-
-        if (useFaceContact)
-        {
-            contactPoint = cTarget;
-            // Match NeighborMeshLevelQuery raw semantics: edge-face carries
-            // support normal/point, while penetration depth is provided by
-            // vertex-face contacts.
-            depth = Real(0);
-            contactType = CT_EDGE_FACE;
-            return true;
-        }
+        contactPoint = cTarget;
+        // Match NeighborMeshLevelQuery raw semantics: edge-face carries
+        // support normal/point, while penetration depth is provided by
+        // vertex-face contacts.
+        depth = Real(0);
+        contactType = CT_EDGE_FACE;
+        return true;
     }
 
     if (regionType == MESH_REGION_EDGE)

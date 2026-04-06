@@ -1565,8 +1565,8 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
     CArray<BodyContactId> hPairs;
     hPairs.assign(bodyPairs);
     std::unordered_set<uint64_t> uniqueBodyKeys;
-    std::vector<int> worklistTriIdsHost;
-    std::vector<int> worklistEdgeIdsHost;
+    std::vector<int> worklistTriIdsHost; // global triangle ids for all bodies in contact pairs
+    std::vector<int> worklistEdgeIdsHost; // global edge ids for all bodies in contact pairs
     worklistTriIdsHost.reserve(triCount);
     worklistEdgeIdsHost.reserve(edgeCount);
 
@@ -1578,18 +1578,17 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
         {
             const int envId = pair.env_id;
             const int bodyId = bodyIds[side];
-            if (envId < 0 || envId >= num_envs || bodyId < 0 || bodyId >= m_maxBodies)
-                continue;
 
+            // combine envId and bodyId into a single key for uniqueness check
             const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(envId)) << 32)
-                | static_cast<uint32_t>(bodyId);
+                | static_cast<uint32_t>(bodyId); 
             if (!uniqueBodyKeys.insert(key).second)
                 continue;
 
             const int templateId = hostBodyTemplateId(envId, bodyId);
             if (templateId < 0 || templateId >= static_cast<int>(m_meshTemplates.size()))
                 continue;
-
+            // for the current body, add all its triangles' and edges' ids to the worklist for narrow phase processing
             const int triBase = hostBodyTriOffset(envId, bodyId);
             const int edgeBase = hostBodyEdgeOffset(envId, bodyId);
             if (triBase < 0)
@@ -1616,6 +1615,13 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
     cudaDeviceSynchronize();
 
     m_patchPairs.clear();
+
+    m_triAabbsWorld.resize(triCount);
+    m_faceNormalsWorld.resize(triCount);
+    if (edgeCount > 0)
+        m_edgeNormalsWorld.resize(edgeCount);
+    else
+        m_edgeNormalsWorld.clear();
 
     cd_internal::MeshShapeView<TDataType> view{
         m_meshTemplateViews,
@@ -1644,17 +1650,6 @@ void MeshCollisionDetector<TDataType>::runMeshMeshNarrowPhase(
         m_dHat,
         m_edgeEdgeActivationMargin
     };
-
-    m_triAabbsWorld.resize(triCount);
-    m_faceNormalsWorld.resize(triCount);
-    if (edgeCount > 0)
-        m_edgeNormalsWorld.resize(edgeCount);
-    else
-        m_edgeNormalsWorld.clear();
-
-    view.triangleAabbsWorld = m_triAabbsWorld;
-    view.faceNormalsWorld = m_faceNormalsWorld;
-    view.edgeNormalsWorld = m_edgeNormalsWorld;
 
     {
         const int threads = 128;

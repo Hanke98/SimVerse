@@ -4,7 +4,9 @@
 
 #include <Array/ArrayList.h>
 
+#include "CollisionDetection/CollisionDetector.h"
 #include "MeshCollisionTypes.h"
+#include "Utils/SimBlockVector.h"
 
 namespace dyno {
 namespace cd_internal {
@@ -386,10 +388,11 @@ DYN_FUNC inline bool getWorldTriangle(
     typename View::Coord& p1,
     typename View::Coord& p2)
 {
+    // get the triangle template
     const auto* tpl = getBodyTemplateView(view, envId, bodyId);
     if (tpl == nullptr)
         return false;
-
+    // get the triangle begin offset for the body
     const int begin = getBodyLayoutBase(view, view.body2TriOffsets, envId, bodyId);
     if (begin < 0)
         return false;
@@ -401,7 +404,7 @@ DYN_FUNC inline bool getWorldTriangle(
     const int localTriId = globalTriId - begin;
     if (localTriId < 0 || localTriId >= tpl->numTriangles)
         return false;
-
+    // get the vertex indices for the triangle
     const auto tri = tpl->triangles[localTriId];
     const int vertexBase = getBodyLayoutBase(view, view.body2VertexOffsets, envId, bodyId);
     if (vertexBase < 0)

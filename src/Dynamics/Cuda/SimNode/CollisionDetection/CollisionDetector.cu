@@ -829,7 +829,7 @@ __global__ void CD_NarrowPrimitivePairsKernel(
 template<typename TDataType>
 __global__ void CD_AppendMeshContactsKernel(
     BatchCollisionConstraints out,
-    DArray<TContactPair<typename TDataType::Real>> contacts,
+    DArray<MeshContact<typename TDataType::Real>> contacts,
     DArray<int> batch_bodies,
     DevArr2D<typename TDataType::Real> friction_mu,
     int maxBodies,
@@ -843,31 +843,26 @@ __global__ void CD_AppendMeshContactsKernel(
         return;
 
     const auto cp = contacts[cid];
-    if (cp.bodyId1 < 0 || cp.bodyId2 < 0)
+    if (cp.env_id < 0 || cp.env_id >= num_envs)
+        return;
+    if (cp.body_id_0 < 0 || cp.body_id_1 < 0)
         return;
 
     // Keep zero-depth activation contacts from mesh narrow phase.
-    if ((cp.contactType != CT_VERTEX_FACE && cp.contactType != CT_EDGE_FACE && cp.contactType != CT_EDGE_EDGE)
-        || cp.interpenetration < Real(0))
+    if ((cp.contact_type != CT_VERTEX_FACE && cp.contact_type != CT_EDGE_FACE && cp.contact_type != CT_EDGE_EDGE)
+        || cp.depth < Real(0))
         return;
 
-    int envA = cp.bodyId1 / maxBodies;
-    int envB = cp.bodyId2 / maxBodies;
-    if (envA != envB || envA < 0 || envA >= num_envs)
-        return;
-
-    int localA = cp.bodyId1 - envA * maxBodies;
-    int localB = cp.bodyId2 - envA * maxBodies;
-    if (localA < 0 || localA >= maxBodies || localB < 0 || localB >= maxBodies)
+    const int envA = cp.env_id;
+    const int localA = cp.body_id_0;
+    const int localB = cp.body_id_1;
+    if (localA >= maxBodies || localB >= maxBodies)
         return;
     if (localA >= batch_bodies[envA] || localB >= batch_bodies[envA])
         return;
 
-    // Mesh narrow phase convention: normal1 points from bodyId2 toward bodyId1.
-    Coord normal = cp.normal1;
-    if (normal.normSquared() < Real(1e-12))
-        normal = -cp.normal2;
-    Coord point = (cp.pos1 + cp.pos2) * Real(0.5);
+    const Coord normal = cp.normal;
+    const Coord point = cp.pos;
 
     Real mu = sqrtf(friction_mu(envA, localA) * friction_mu(envA, localB));
 
@@ -876,7 +871,7 @@ __global__ void CD_AppendMeshContactsKernel(
         envA,
         localA,
         localB,
-        cp.interpenetration,
+        cp.depth,
         normal,
         point,
         mu);

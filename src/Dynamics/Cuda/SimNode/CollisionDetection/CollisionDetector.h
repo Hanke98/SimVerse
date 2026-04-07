@@ -31,6 +31,18 @@ namespace dyno {
 		int body_id_2 = INVLIDA_ID; // env-local rigid body id
 	};
 
+    template<typename Real>
+    struct MeshContact
+    {
+        Vector<Real, 3> pos;      // world-space contact point
+        Vector<Real, 3> normal;   // points from body_id_1 toward body_id_0
+        Real depth = Real(0);     // penetration depth (always >= 0)
+        int env_id = INVLIDA_ID;
+        int body_id_0 = INVLIDA_ID;
+        int body_id_1 = INVLIDA_ID;
+        ContactType contact_type = CT_UNKNOWN;
+    };
+
     template<typename TDataType>
     class MeshCollisionDetector
     {
@@ -40,7 +52,7 @@ namespace dyno {
         using Matrix = typename TDataType::Matrix;
         using AABB = TAlignedBox3D<Real>;
         using Triangle = TopologyModule::Triangle;
-        using ContactPair = TContactPair<Real>;
+        using ContactPair = MeshContact<Real>;
 
         MeshCollisionDetector() {};
         ~MeshCollisionDetector() {};

@@ -42,7 +42,7 @@ struct MeshShapeView
     using Edge = TopologyModule::Edge;
     using Tri2Edg = TopologyModule::Tri2Edg;
     using Edg2Tri = TopologyModule::Edg2Tri;
-    using ContactPair = TContactPair<Real>;
+    using ContactPair = MeshContact<Real>;
     using TemplateView = MeshTemplateKernelView<TDataType>;
 
     DArray<TemplateView> meshTemplates;
@@ -83,10 +83,9 @@ struct TriPairContext
 
     int tri0 = -1;
     int tri1 = -1;
-    int bodyId1 = -1;
-    int bodyId2 = -1;
-    MeshBodyId tri0Body;
-    MeshBodyId tri1Body;
+    int env_id = INVLIDA_ID;
+    int body_id_0 = INVLIDA_ID;
+    int body_id_1 = INVLIDA_ID;
     TTriangle3D<Real> triangle0;
     TTriangle3D<Real> triangle1;
 };
@@ -1256,81 +1255,60 @@ DYN_FUNC inline bool tryEdgeTriangleContact(
     return false;
 }
 
-template<typename ContactPair, typename Coord, typename Real>
+template<typename ContactT, typename Coord, typename Real>
 DYN_FUNC inline void writeContact(
-    ContactPair& contact,
-    int bodyId1,
-    int bodyId2,
-    int tri0,
-    int tri1,
+    ContactT& contact,
+    int env_id,
+    int body_id_0,
+    int body_id_1,
     const Coord& contactPoint,
     const Coord& nTarget,
     bool targetIsTri1,
     Real depth,
     ContactType type)
 {
-    contact.bodyId1 = bodyId1;
-    contact.bodyId2 = bodyId2;
-    contact.localId1 = tri0;
-    contact.localId2 = tri1;
-    contact.pos1 = contactPoint;
-    contact.pos2 = contactPoint;
+    contact.env_id = env_id;
+    contact.body_id_0 = body_id_0;
+    contact.body_id_1 = body_id_1;
+    contact.pos = contactPoint;
     // Keep a single convention for solver assembly:
-    // normal1 points from bodyId2 toward bodyId1, and normal2 is its opposite.
-    if (targetIsTri1)
-    {
-        contact.normal1 = nTarget;
-        contact.normal2 = -nTarget;
-    }
-    else
-    {
-        contact.normal1 = -nTarget;
-        contact.normal2 = nTarget;
-    }
-    contact.contactType = type;
-    contact.interpenetration = depth < Real(0) ? Real(0) : depth;
+    // normal points from body_id_1 toward body_id_0.
+    contact.normal = targetIsTri1 ? nTarget : -nTarget;
+    contact.depth = depth < Real(0) ? Real(0) : depth;
+    contact.contact_type = type;
 }
 
 template<typename View>
 DYN_FUNC inline bool getPairBodiesForContext(
     const View& view,
     int pairId,
-    int& bodyId1,
-    int& bodyId2,
-    MeshBodyId& body0,
-    MeshBodyId& body1)
+    int& env_id,
+    int& body_id_0,
+    int& body_id_1)
 {
     if (pairId >= 0 && pairId < view.patchPairs.size())
     {
         const PatchPair pair = view.patchPairs[pairId];
-        body0.env_id = pair.env_id;
-        body0.body_id = pair.body_a;
-        body1.env_id = pair.env_id;
-        body1.body_id = pair.body_b;
-        if (!isValidBodyId(view, body0.env_id, body0.body_id)
-            || !isValidBodyId(view, body1.env_id, body1.body_id)
+        env_id = pair.env_id;
+        body_id_0 = pair.body_a;
+        body_id_1 = pair.body_b;
+        if (!isValidBodyId(view, env_id, body_id_0)
+            || !isValidBodyId(view, env_id, body_id_1)
             || view.maxBodies <= 0)
             return false;
-
-        bodyId1 = body0.env_id * view.maxBodies + body0.body_id;
-        bodyId2 = body1.env_id * view.maxBodies + body1.body_id;
         return true;
     }
 
     if (pairId >= 0 && pairId < view.bodyPairs.size())
     {
         const BodyContactId pair = view.bodyPairs[pairId];
-        body0.env_id = pair.env_id;
-        body0.body_id = pair.body_id_1;
-        body1.env_id = pair.env_id;
-        body1.body_id = pair.body_id_2;
-        if (!isValidBodyId(view, body0.env_id, body0.body_id)
-            || !isValidBodyId(view, body1.env_id, body1.body_id)
+        env_id = pair.env_id;
+        body_id_0 = pair.body_id_1;
+        body_id_1 = pair.body_id_2;
+        if (!isValidBodyId(view, env_id, body_id_0)
+            || !isValidBodyId(view, env_id, body_id_1)
             || view.maxBodies <= 0)
             return false;
-
-        bodyId1 = body0.env_id * view.maxBodies + body0.body_id;
-        bodyId2 = body1.env_id * view.maxBodies + body1.body_id;
         return true;
     }
 
@@ -1345,13 +1323,13 @@ DYN_FUNC inline bool buildTriPairContext(
     int pairId,
     TriPairContext<View>& ctx)
 {
-    if (!getPairBodiesForContext(view, pairId, ctx.bodyId1, ctx.bodyId2, ctx.tri0Body, ctx.tri1Body))
+    if (!getPairBodiesForContext(view, pairId, ctx.env_id, ctx.body_id_0, ctx.body_id_1))
         return false;
 
     typename View::Coord p00, p01, p02;
     typename View::Coord p10, p11, p12;
-    if (!getWorldTriangle(view, tri0, ctx.tri0Body.env_id, ctx.tri0Body.body_id, p00, p01, p02)
-        || !getWorldTriangle(view, tri1, ctx.tri1Body.env_id, ctx.tri1Body.body_id, p10, p11, p12))
+    if (!getWorldTriangle(view, tri0, ctx.env_id, ctx.body_id_0, p00, p01, p02)
+        || !getWorldTriangle(view, tri1, ctx.env_id, ctx.body_id_1, p10, p11, p12))
         return false;
 
     ctx.tri0 = tri0;
@@ -1460,40 +1438,48 @@ DYN_FUNC inline bool getPrimitivePassContext(
     {
     case MESH_PASS_TRI0_VERTEX:
         sourceTriId = ctx.tri0;
-        sourceBody = ctx.tri0Body;
+        sourceBody.env_id = ctx.env_id;
+        sourceBody.body_id = ctx.body_id_0;
         sourceTriangle = &ctx.triangle0;
         targetTriId = ctx.tri1;
-        targetBody = ctx.tri1Body;
+        targetBody.env_id = ctx.env_id;
+        targetBody.body_id = ctx.body_id_1;
         targetTriangle = &ctx.triangle1;
         targetIsTri1 = true;
         vertexPass = true;
         return true;
     case MESH_PASS_TRI0_EDGE:
         sourceTriId = ctx.tri0;
-        sourceBody = ctx.tri0Body;
+        sourceBody.env_id = ctx.env_id;
+        sourceBody.body_id = ctx.body_id_0;
         sourceTriangle = &ctx.triangle0;
         targetTriId = ctx.tri1;
-        targetBody = ctx.tri1Body;
+        targetBody.env_id = ctx.env_id;
+        targetBody.body_id = ctx.body_id_1;
         targetTriangle = &ctx.triangle1;
         targetIsTri1 = true;
         vertexPass = false;
         return true;
     case MESH_PASS_TRI1_VERTEX:
         sourceTriId = ctx.tri1;
-        sourceBody = ctx.tri1Body;
+        sourceBody.env_id = ctx.env_id;
+        sourceBody.body_id = ctx.body_id_1;
         sourceTriangle = &ctx.triangle1;
         targetTriId = ctx.tri0;
-        targetBody = ctx.tri0Body;
+        targetBody.env_id = ctx.env_id;
+        targetBody.body_id = ctx.body_id_0;
         targetTriangle = &ctx.triangle0;
         targetIsTri1 = false;
         vertexPass = true;
         return true;
     case MESH_PASS_TRI1_EDGE:
         sourceTriId = ctx.tri1;
-        sourceBody = ctx.tri1Body;
+        sourceBody.env_id = ctx.env_id;
+        sourceBody.body_id = ctx.body_id_1;
         sourceTriangle = &ctx.triangle1;
         targetTriId = ctx.tri0;
-        targetBody = ctx.tri0Body;
+        targetBody.env_id = ctx.env_id;
+        targetBody.body_id = ctx.body_id_0;
         targetTriangle = &ctx.triangle0;
         targetIsTri1 = false;
         vertexPass = false;
@@ -1583,7 +1569,7 @@ DYN_FUNC inline int processPrimitivePass(
                 if (outIdx >= 0 && outIdx < contactsSize)
                 {
                     typename View::ContactPair cp;
-                    writeContact(cp, ctx.bodyId1, ctx.bodyId2, ctx.tri0, ctx.tri1, targetPoint, nTarget, targetIsTri1, depth, type);
+                    writeContact(cp, ctx.env_id, ctx.body_id_0, ctx.body_id_1, targetPoint, nTarget, targetIsTri1, depth, type);
                     contacts[outIdx] = cp;
                     primitiveKeys[outIdx] = encodeVertexPrimitiveKey(globalVertexId);
                 }
@@ -1628,7 +1614,7 @@ DYN_FUNC inline int processPrimitivePass(
             if (outIdx >= 0 && outIdx < contactsSize)
             {
                 typename View::ContactPair cp;
-                writeContact(cp, ctx.bodyId1, ctx.bodyId2, ctx.tri0, ctx.tri1, contactPoint, nTarget, targetIsTri1, depth, type);
+                writeContact(cp, ctx.env_id, ctx.body_id_0, ctx.body_id_1, contactPoint, nTarget, targetIsTri1, depth, type);
                 contacts[outIdx] = cp;
                 primitiveKeys[outIdx] = encodeEdgePrimitiveKey(globalEdgeId);
             }
@@ -1883,7 +1869,7 @@ __global__ void MarkMinDepthCandidatesPerPrimitiveKeyKernel(
         {
             const int rawIdx = primitiveCandidateSortedIndices[i];
             if (rawIdx >= 0 && rawIdx < primitiveCandidateContacts.size()
-                && primitiveCandidateContacts[rawIdx].contactType == CT_EDGE_FACE)
+                && primitiveCandidateContacts[rawIdx].contact_type == CT_EDGE_FACE)
             {
                 preferEdgeFace = true;
                 break;
@@ -1900,10 +1886,10 @@ __global__ void MarkMinDepthCandidatesPerPrimitiveKeyKernel(
         const int rawIdx = primitiveCandidateSortedIndices[groupEnd];
         if (rawIdx >= 0 && rawIdx < primitiveCandidateContacts.size())
         {
-            const ContactType type = primitiveCandidateContacts[rawIdx].contactType;
+            const ContactType type = primitiveCandidateContacts[rawIdx].contact_type;
             if (isPreferredEdgeContactType(edgePrimitive, preferEdgeFace, type))
             {
-                const Real depth = primitiveCandidateContacts[rawIdx].interpenetration;
+                const Real depth = primitiveCandidateContacts[rawIdx].depth;
                 if (depth < minDepth)
                     minDepth = depth;
             }
@@ -1920,15 +1906,15 @@ __global__ void MarkMinDepthCandidatesPerPrimitiveKeyKernel(
         if (rawIdx < 0 || rawIdx >= primitiveCandidateKeepFlags.size() || rawIdx >= primitiveCandidateContacts.size())
             continue;
 
-        const ContactType type = primitiveCandidateContacts[rawIdx].contactType;
+        const ContactType type = primitiveCandidateContacts[rawIdx].contact_type;
         if (!isPreferredEdgeContactType(edgePrimitive, preferEdgeFace, type))
             continue;
 
-        const Real depth = primitiveCandidateContacts[rawIdx].interpenetration;
+        const Real depth = primitiveCandidateContacts[rawIdx].depth;
         if (depth > minDepth + depthTieEps)
             continue;
 
-        auto direction = primitiveCandidateContacts[rawIdx].normal1;
+        auto direction = primitiveCandidateContacts[rawIdx].normal;
         const Real dirNorm2 = direction.normSquared();
         if (dirNorm2 > Real(1e-12))
         {
@@ -1942,15 +1928,15 @@ __global__ void MarkMinDepthCandidatesPerPrimitiveKeyKernel(
                     || primitiveCandidateKeepFlags[prevRawIdx] <= 0)
                     continue;
 
-                const ContactType prevType = primitiveCandidateContacts[prevRawIdx].contactType;
+                const ContactType prevType = primitiveCandidateContacts[prevRawIdx].contact_type;
                 if (!isPreferredEdgeContactType(edgePrimitive, preferEdgeFace, prevType))
                     continue;
 
-                const Real prevDepth = primitiveCandidateContacts[prevRawIdx].interpenetration;
+                const Real prevDepth = primitiveCandidateContacts[prevRawIdx].depth;
                 if (prevDepth > minDepth + depthTieEps)
                     continue;
 
-                auto prevDirection = primitiveCandidateContacts[prevRawIdx].normal1;
+                auto prevDirection = primitiveCandidateContacts[prevRawIdx].normal;
                 const Real prevNorm2 = prevDirection.normSquared();
                 if (prevNorm2 <= Real(1e-12))
                     continue;
@@ -2005,10 +1991,10 @@ __global__ void SuppressRedundantEdgeFaceAgainstVertexFaceKernel(
             continue;
 
         const ContactPair edgeFace = primitiveCandidateContacts[rawIdx];
-        if (edgeFace.contactType != CT_EDGE_FACE)
+        if (edgeFace.contact_type != CT_EDGE_FACE)
             continue;
 
-        auto edgeNormal = edgeFace.normal1;
+        auto edgeNormal = edgeFace.normal;
         const Real edgeNormalNorm2 = edgeNormal.normSquared();
         if (edgeNormalNorm2 <= minNormalNorm2)
             continue;
@@ -2024,14 +2010,14 @@ __global__ void SuppressRedundantEdgeFaceAgainstVertexFaceKernel(
                 continue;
 
             const ContactPair vertexFace = primitiveCandidateContacts[otherIdx];
-            if (vertexFace.contactType != CT_VERTEX_FACE)
+            if (vertexFace.contact_type != CT_VERTEX_FACE)
                 continue;
 
-            auto delta = vertexFace.pos1 - edgeFace.pos1;
+            auto delta = vertexFace.pos - edgeFace.pos;
             if (delta.normSquared() > positionNearEps2)
                 continue;
 
-            auto vertexNormal = vertexFace.normal1;
+            auto vertexNormal = vertexFace.normal;
             const Real vertexNormalNorm2 = vertexNormal.normSquared();
             if (vertexNormalNorm2 <= minNormalNorm2)
                 continue;

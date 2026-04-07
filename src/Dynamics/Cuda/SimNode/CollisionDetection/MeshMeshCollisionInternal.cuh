@@ -1794,6 +1794,7 @@ __global__ void CountPrimitiveCandidatesPerPassKernel(
     TriPairContext<View> ctx;
     if (!buildTriPairContext(view, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId], ctx))
     {
+        printf("Invalid tri pair context for pairId %d, tri0 %d, tri1 %d, patchPairId %d\n", pairId, filteredTri0[pairId], filteredTri1[pairId], filteredPatchPairId[pairId]);
         primitivePassCounts[slotId] = 0;
         return;
     }

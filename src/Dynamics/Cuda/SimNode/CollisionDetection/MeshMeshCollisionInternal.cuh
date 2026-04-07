@@ -386,7 +386,7 @@ DYN_FUNC inline bool getWorldVertex(
         const auto scaled = scalePoint<typename View::Real, typename View::Coord>(local, halfLength);
         p = bodyPos + bodyRot * scaled;
     }
-    else
+    if (shapeType == 6 || shapeType == 7)
     {
         // Generic path for non-box rigid bodies and arbitrary mesh templates.
         p = bodyPos + bodyRot * local;
@@ -1061,10 +1061,8 @@ DYN_FUNC inline bool buildEdgeEdgeContact(
 template<typename View>
 DYN_FUNC inline bool tryVertexTriangleContact(
     const View& view,
-    const MeshBodyId& sourceBody,
-    int sourceVertexId,
+    const typename View::Coord& sourcePoint,
     int targetTriId,
-    const MeshBodyId& targetBody,
     const TTriangle3D<typename View::Real>& targetTriangle,
     typename View::Coord& contactPoint,
     typename View::Coord& nTarget,
@@ -1075,11 +1073,7 @@ DYN_FUNC inline bool tryVertexTriangleContact(
     using Coord = typename View::Coord;
 
     const Real epsBary = Real(1e-5);
-    Coord p;
-    if (!getWorldVertex(view, sourceVertexId, sourceBody.env_id, sourceBody.body_id, p))
-        return false;
-
-    Coord r = TPoint3D<Real>(p).project(targetTriangle).origin;
+    Coord r = TPoint3D<Real>(sourcePoint).project(targetTriangle).origin;
     int regionType = MESH_REGION_INVALID;
     int localEdgeId = -1;
     int localVertexId = -1;
@@ -1095,7 +1089,7 @@ DYN_FUNC inline bool tryVertexTriangleContact(
         : buildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
     nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
     
-    Real signedDistance = (p - targetTriangle.v[0]).dot(nTarget);
+    Real signedDistance = (sourcePoint - targetTriangle.v[0]).dot(nTarget);
     if (signedDistance > view.dHat || signedDistance < Real(-0.5))
         return false;
 
@@ -1542,9 +1536,7 @@ DYN_FUNC inline int processPrimitivePass(
         for (int localVertexId = 0; localVertexId < 3; ++localVertexId)
         {
             const int globalVertexId = vertexBase + sourceTriIndices[localVertexId];
-            typename View::Coord sourcePoint;
-            if (!getWorldVertex(view, globalVertexId, sourceBody.env_id, sourceBody.body_id, sourcePoint))
-                continue;
+            const typename View::Coord sourcePoint = sourceTriangle->v[localVertexId];
 
             typename View::Coord targetPoint;
             typename View::Coord nTarget;
@@ -1552,10 +1544,8 @@ DYN_FUNC inline int processPrimitivePass(
             ContactType type = CT_UNKNOWN;
             if (!tryVertexTriangleContact(
                     view,
-                    sourceBody,
-                    globalVertexId,
+                    sourcePoint,
                     targetTriId,
-                    targetBody,
                     *targetTriangle,
                     targetPoint,
                     nTarget,

@@ -1051,8 +1051,9 @@ DYN_FUNC inline bool buildEdgeEdgeContact(
     if (nTarget.dot(nTargetEdge) <= Real(0))
         nTarget = -nTarget;
 
-    contactPoint = Real(0.5) * (cSource + cTarget);
-    depth = view.dHat - gap;
+    contactPoint = cTarget;
+    const Real gapAlongNormal = absValue(pqVec.dot(nTarget));
+    depth = view.dHat - gapAlongNormal;
     if (depth < Real(0))
         depth = Real(0);
     return true;

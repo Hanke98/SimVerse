@@ -1073,6 +1073,7 @@ DYN_FUNC inline bool tryVertexTriangleContact(
     using Coord = typename View::Coord;
 
     const Real epsBary = Real(1e-5);
+    // Project the vertex onto the triangle plane and classify the region.
     Coord r = TPoint3D<Real>(sourcePoint).project(targetTriangle).origin;
     int regionType = MESH_REGION_INVALID;
     int localEdgeId = -1;
@@ -1081,13 +1082,11 @@ DYN_FUNC inline bool tryVertexTriangleContact(
     if (!classifyTriangleRegion(targetTriangle, r, epsBary, regionType, localEdgeId, localVertexId, bary))
         return false;
 
-    if (regionType != MESH_REGION_FACE)
+    if (regionType != MESH_REGION_FACE && regionType != MESH_REGION_VERTEX && regionType != MESH_REGION_EDGE)
         return false;
 
-    Coord faceNormal = targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size()
-        ? view.faceNormalsWorld[targetTriId]
-        : buildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
-    nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
+    assert(targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size());
+    nTarget = view.faceNormalsWorld[targetTriId];
     
     Real signedDistance = (sourcePoint - targetTriangle.v[0]).dot(nTarget);
     if (signedDistance > view.dHat || signedDistance < Real(-0.5))
@@ -1141,10 +1140,8 @@ DYN_FUNC inline bool tryEdgeTriangleContact(
 
     if (regionType == MESH_REGION_FACE)
     {
-        Coord faceNormal = targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size()
-            ? view.faceNormalsWorld[targetTriId]
-            : buildRobustFaceNormal(targetTriangle.v[0], targetTriangle.v[1], targetTriangle.v[2]);
-        nTarget = normalizeOrFallback(faceNormal, stablePerpendicular(targetTriangle.v[1] - targetTriangle.v[0]));
+        assert(targetTriId >= 0 && targetTriId < view.faceNormalsWorld.size());
+        nTarget = view.faceNormalsWorld[targetTriId];
 
         Coord p0 = sourceSegment.startPoint();
         Coord p1 = sourceSegment.endPoint();
